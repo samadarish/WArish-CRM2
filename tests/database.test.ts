@@ -36,13 +36,51 @@ describe('WarishDatabase', () => {
     database.close()
 
     const legacy = new DatabaseSync(path)
-    legacy.exec('DROP TABLE contact_identity_aliases; DROP TABLE contact_identities; DELETE FROM schema_migrations WHERE version=7;')
+    legacy.exec(`
+      DROP TABLE contact_identity_aliases;
+      DROP TABLE contact_identities;
+      ALTER TABLE attachments DROP COLUMN thumbnail_checked_at;
+      ALTER TABLE attachments DROP COLUMN thumbnail_missing_until;
+      ALTER TABLE attachments DROP COLUMN thumbnail_failures;
+      DELETE FROM schema_migrations WHERE version>=7;
+    `)
     legacy.close()
 
     const migrated = new WarishDatabase(path, Buffer.alloc(32, 7), pino({ enabled: false }))
     expect(migrated.getChat(lid)).toMatchObject({ title: 'Migrated name', savedName: 'Migrated name',
       whatsappName: 'Migrated profile', phoneNumber: '+33612345678' })
-    expect((migrated.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as { version: number }).version).toBe(7)
+    expect((migrated.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as { version: number }).version).toBe(8)
+    migrated.close()
+  })
+
+  it('migrates avatar suppression and media thumbnail retry state to v8', () => {
+    const { database, directory } = createDatabase()
+    const path = join(directory, 'warish.sqlite')
+    const jid = '15550003333@s.whatsapp.net'
+    database.upsertContact({ id: jid, phoneNumber: '15550003333' })
+    database.storeMessage({ id: 'thumbnail-migration', chatId: jid, fromMe: false, kind: 'image', timestamp: 1_000,
+      status: 'read', incrementUnread: false, attachment: {
+        id: 'attachment:thumbnail-migration', kind: 'image', width: 1200, height: 800, downloadState: 'remote'
+      } })
+    database.markContactAvatarMissing(jid)
+    database.close()
+
+    const legacy = new DatabaseSync(path)
+    legacy.exec(`
+      ALTER TABLE attachments DROP COLUMN thumbnail_checked_at;
+      ALTER TABLE attachments DROP COLUMN thumbnail_missing_until;
+      ALTER TABLE attachments DROP COLUMN thumbnail_failures;
+      DELETE FROM schema_migrations WHERE version=8;
+    `)
+    legacy.close()
+
+    const migrated = new WarishDatabase(path, Buffer.alloc(32, 7), pino({ enabled: false }))
+    expect(migrated.shouldRefreshContactAvatar(jid)).toBe(true)
+    expect(migrated.shouldFetchMediaThumbnail('thumbnail-migration')).toBe(true)
+    const columns = migrated.db.prepare("SELECT name FROM pragma_table_info('attachments')").all() as Array<{ name: string }>
+    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
+      'thumbnail_checked_at', 'thumbnail_missing_until', 'thumbnail_failures'
+    ]))
     migrated.close()
   })
 
@@ -53,6 +91,25 @@ describe('WarishDatabase', () => {
     expect(database.getAuth('creds', 'primary')?.toString()).toBe('registered session')
     const raw = database.db.prepare('SELECT value FROM auth_store').get() as { value: Uint8Array }
     expect(Buffer.from(raw.value).toString()).not.toContain('registered session')
+    database.close()
+  })
+
+  it('resets only the contact app-state checkpoint for a safe full refresh', () => {
+    const { database } = createDatabase()
+    const auth = createPersistentAuthState(database)
+    auth.state.creds.registered = true
+    auth.saveCreds()
+    const storedCredentials = database.getAuth('creds', 'primary')
+    database.setAuth('app-state-sync-key', 'contact-key', Buffer.from('key material'))
+    database.setAuth('app-state-sync-version', 'critical_unblock_low', Buffer.from('contact checkpoint'))
+    database.setAuth('app-state-sync-version', 'regular', Buffer.from('regular checkpoint'))
+
+    auth.resetAppStateSyncVersion('critical_unblock_low')
+
+    expect(database.getAuth('app-state-sync-version', 'critical_unblock_low')).toBeUndefined()
+    expect(database.getAuth('app-state-sync-version', 'regular')?.toString()).toBe('regular checkpoint')
+    expect(database.getAuth('app-state-sync-key', 'contact-key')?.toString()).toBe('key material')
+    expect(database.getAuth('creds', 'primary')).toEqual(storedCredentials)
     database.close()
   })
 
@@ -91,7 +148,7 @@ describe('WarishDatabase', () => {
     database.upsertChat({ id: chatId, title: 'Example', kind: 'direct', archived: true, pinned: true })
     database.upsertMessage({ id: 'message-2', chatId, fromMe: true, kind: 'text', text: 'sent', timestamp: Date.now(), status: 'sent' })
 
-    expect(database.getChat(chatId)).toMatchObject({ title: 'Example', archived: true, pinned: true })
+    expect(database.getChat(chatId)).toMatchObject({ title: '+15550002222', archived: true, pinned: true })
     database.close()
   })
 
@@ -240,7 +297,9 @@ describe('WarishDatabase', () => {
 
     database.upsertContact({ id: '15550008888@s.whatsapp.net', phoneNumber: '15550008888', pushName: 'WhatsApp Name' })
     database.upsertChat({ id: '15550008888@s.whatsapp.net', title: '+15550008888', kind: 'direct' })
-    expect(database.getChat('15550008888@s.whatsapp.net').title).toBe('WhatsApp Name')
+    expect(database.getChat('15550008888@s.whatsapp.net')).toMatchObject({
+      title: '+15550008888', whatsappName: 'WhatsApp Name', phoneNumber: '+15550008888'
+    })
     database.close()
   })
 
@@ -260,7 +319,7 @@ describe('WarishDatabase', () => {
     database.upsertChat({ id: lid, title: '+90………12', kind: 'direct', lastMessage: 'Hi',
       lastMessageAt: 2_000, lastMessageId: 'unsaved-message' })
     expect(database.getChat(lid)).toMatchObject({
-      title: 'Unsaved profile', whatsappName: 'Unsaved profile', phoneNumber: '+919876543210'
+      title: '+919876543210', whatsappName: 'Unsaved profile', phoneNumber: '+919876543210'
     })
     database.close()
   })
@@ -286,6 +345,27 @@ describe('WarishDatabase', () => {
     ).get(lid, phoneJid) as { count: number }
     expect(identities.count).toBe(1)
     expect(database.identityCoverage()).toMatchObject({ directChats: 1, resolvedNames: 1, resolvedPhones: 1 })
+    database.close()
+  })
+
+  it('rebuilds stale legacy contacts into direct-chat identities without touching messages', () => {
+    const { database } = createDatabase()
+    const lid = '65012349876543@lid'
+    const phoneJid = '15550123456@s.whatsapp.net'
+    database.upsertChat({ id: lid, title: 'WhatsApp contact', kind: 'direct' })
+    database.storeMessage({ id: 'preserved-message', chatId: lid, fromMe: false, kind: 'text', text: 'Keep me',
+      timestamp: 5_000, status: 'read', incrementUnread: false })
+    database.db.prepare(
+      `INSERT INTO contacts(id, account_id, jid, lid, phone_number, name, push_name, updated_at)
+       VALUES (?, 'primary', ?, ?, ?, ?, ?, ?)`
+    ).run(phoneJid, phoneJid, lid, '15550123456', 'Saved after sync', 'Profile after sync', Date.now())
+
+    expect(database.getChat(lid)).toMatchObject({ savedName: undefined, whatsappName: undefined })
+    expect(database.rebuildCanonicalContacts()).toMatchObject({ contacts: 1, directChats: 1 })
+    expect(database.getChat(lid)).toMatchObject({ title: 'Saved after sync', savedName: 'Saved after sync',
+      whatsappName: 'Profile after sync', phoneNumber: '+15550123456' })
+    expect(database.getMessage('preserved-message').text).toBe('Keep me')
+    expect(database.identityCoverage()).toMatchObject({ savedNames: 1, profileNames: 1 })
     database.close()
   })
 
@@ -329,11 +409,39 @@ describe('WarishDatabase', () => {
     expect(database.shouldRefreshContactAvatar(jid)).toBe(false)
     database.db.prepare('UPDATE contact_identities SET avatar_checked_at=?').run(Date.now() - 8 * 24 * 60 * 60 * 1000)
     expect(database.shouldRefreshContactAvatar(jid)).toBe(true)
+    const retryStartedAt = Date.now()
+    database.markContactAvatarFailure(jid)
+    expect(database.getChat(jid).avatarUrl).toBe('warish-media://avatars/avatar-local.jpg')
+    expect(database.shouldRefreshContactAvatar(jid, false, retryStartedAt)).toBe(false)
+    expect(database.shouldRefreshContactAvatar(jid, false, retryStartedAt + 6 * 60 * 1000)).toBe(true)
     database.markContactAvatarMissing(jid)
     expect(database.shouldRefreshContactAvatar(jid)).toBe(false)
     expect(database.identityCoverage().cachedAvatars).toBe(0)
     database.clearContactAvatarTokens()
     expect(database.getChat(jid).avatarUrl).toBeUndefined()
+    database.close()
+  })
+
+  it('caches media thumbnails and backs off missing previews without changing media dimensions', () => {
+    const { database } = createDatabase()
+    const jid = '15550004444@s.whatsapp.net'
+    database.storeMessage({ id: 'thumbnail-message', chatId: jid, fromMe: false, kind: 'image', timestamp: 2_000,
+      status: 'read', incrementUnread: false, attachment: {
+        id: 'attachment:thumbnail-message', kind: 'image', width: 900, height: 1600, downloadState: 'remote'
+      } })
+    expect(database.shouldFetchMediaThumbnail('thumbnail-message')).toBe(true)
+
+    const checkedAt = Date.now()
+    database.markMediaThumbnailUnavailable('thumbnail-message', 5 * 60 * 1000)
+    expect(database.shouldFetchMediaThumbnail('thumbnail-message', checkedAt)).toBe(false)
+    expect(database.shouldFetchMediaThumbnail('thumbnail-message', checkedAt + 6 * 60 * 1000)).toBe(true)
+
+    const thumbnail = 'data:image/jpeg;base64,/9j/2Q=='
+    database.saveMediaThumbnail('thumbnail-message', thumbnail)
+    expect(database.shouldFetchMediaThumbnail('thumbnail-message', checkedAt + 24 * 60 * 60 * 1000)).toBe(false)
+    expect(database.getMessage('thumbnail-message').attachment).toMatchObject({
+      thumbnailDataUrl: thumbnail, width: 900, height: 1600, downloadState: 'remote'
+    })
     database.close()
   })
 

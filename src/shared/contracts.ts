@@ -25,6 +25,7 @@ export const RPC_METHODS = [
   'message.edit',
   'message.delete',
   'message.forward',
+  'media.thumbnail',
   'media.download',
   'media.cancel',
   'media.clearCache',
@@ -142,6 +143,8 @@ export interface ContactSyncState {
   total: number
   resolvedNames: number
   resolvedPhones: number
+  savedNames: number
+  profileNames: number
   message?: string
 }
 
@@ -322,6 +325,8 @@ export interface DiagnosticsDto {
     directChats: number
     resolvedNames: number
     resolvedPhones: number
+    savedNames: number
+    profileNames: number
     cachedAvatars: number
     failedAvatarRequests: number
   }
@@ -379,6 +384,7 @@ export interface WarishApi {
   media: {
     pick(): Promise<PickedAttachment | null>
     saveRecording(data: Uint8Array, mimeType: string): Promise<PickedAttachment>
+    thumbnail(messageId: string): Promise<{ thumbnailDataUrl?: string }>
     download(messageId: string): Promise<{ cacheToken: string; url: string }>
     cancel(messageId: string): Promise<void>
     open(cacheToken: string): Promise<void>

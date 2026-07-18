@@ -43,8 +43,10 @@ export async function flushCoreLogger(logger: Logger): Promise<void> {
   }
   await runtime.ready
   await new Promise<void>((resolve, reject) => {
-    runtime.destination.flush((error) => error ? reject(error) : resolve())
+    logger.flush((error) => error ? reject(error) : resolve())
   })
+  // SonicBoom's async callback can run before Windows exposes the write to a separate reader.
+  runtime.destination.flushSync()
 }
 
 export async function closeCoreLogger(logger: Logger): Promise<void> {

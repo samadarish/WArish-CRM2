@@ -1,11 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { format } from 'date-fns'
 import { Check, CheckCheck, Clock3, Copy, Download, File, Forward, Heart, Images, List, MessageSquareText, Package, Pencil, RefreshCw, Reply, Trash2, Vote, X } from 'lucide-react'
 import type { MessageDto } from '../../../shared/contracts'
+import type { MessageGroupPosition } from '../message-grouping'
 
-export function MessageBubble({ message, readOnly = false, showSender, onReply, onForward, onOpenQuote, onResize, onRetry, onError }: {
+export function MessageBubble({ message, groupPosition = 'single', readOnly = false, showSender, onReply, onForward, onOpenQuote, onResize, onRetry, onError }: {
   message: MessageDto
+  groupPosition?: MessageGroupPosition
   readOnly?: boolean
   showSender: boolean
   onReply(message: MessageDto): void
@@ -59,12 +61,12 @@ export function MessageBubble({ message, readOnly = false, showSender, onReply, 
   }
 
   return (
-    <article className={`message-row ${message.fromMe ? 'mine' : ''} ${message.reactions.length ? 'has-reactions' : ''}`}>
+    <article className={`message-row group-${groupPosition} ${message.fromMe ? 'mine' : ''} ${message.reactions.length ? 'has-reactions' : ''}`}>
       <div className={`message-bubble kind-${message.kind}`} tabIndex={0} aria-label={`${message.fromMe ? 'Sent' : 'Received'} ${message.kind} message`}>
         {showSender && message.senderName && <div className="sender-name">{message.senderName}</div>}
         {message.quotedMessageId && <button className="quoted-message" onClick={() => onOpenQuote(message.quotedMessageId!)}>
-          <strong>{message.quoted?.fromMe ? 'You' : message.quoted?.senderName ?? 'Referenced message'}</strong>
-          <span>{message.quoted?.text ?? messageKindLabel(message.quoted?.kind)}</span>
+          <strong>{message.quoted?.fromMe ? 'You' : message.quoted?.senderName ?? 'Reply'}</strong>
+          <span title={message.quoted?.text ?? messageKindLabel(message.quoted?.kind)}>{message.quoted?.text ?? messageKindLabel(message.quoted?.kind)}</span>
         </button>}
         {message.deleted ? <em className="deleted-message">This message was deleted</em> : <>
           {message.rich && <RichMessageCard message={message} />}
@@ -112,20 +114,60 @@ function Media({ message, url, cacheToken, downloading, onDownload, onCancel, on
   message: MessageDto; url?: string; cacheToken?: string; downloading: boolean; onDownload(): void; onCancel(): void; onResize(): void; onError(error: unknown): void; onBroken(): void
 }): React.JSX.Element | null {
   const attachment = message.attachment
+  const [thumbnail, setThumbnail] = useState(attachment?.thumbnailDataUrl)
+  const frameRef = useRef<HTMLDivElement>(null)
+  useEffect(() => setThumbnail(attachment?.thumbnailDataUrl), [attachment?.messageId, attachment?.thumbnailDataUrl])
+  useEffect(() => {
+    if (url || thumbnail || (message.kind !== 'image' && message.kind !== 'video')) return
+    const frame = frameRef.current
+    if (!frame || typeof IntersectionObserver === 'undefined') return
+    let disposed = false
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return
+      observer.disconnect()
+      void window.warish.media.thumbnail(message.id).then((result) => {
+        if (!disposed && result.thumbnailDataUrl) {
+          setThumbnail(result.thumbnailDataUrl)
+          onResize()
+        }
+      }).catch(() => { /* A missing preview must not interrupt the conversation. */ })
+    }, { rootMargin: '120px 0px', threshold: 0.01 })
+    observer.observe(frame)
+    return () => { disposed = true; observer.disconnect() }
+  }, [message.id, message.kind, onResize, thumbnail, url])
   if (!attachment) return null
-  const dimensions = attachment.width && attachment.height
-    ? { aspectRatio: `${attachment.width} / ${attachment.height}`, width: Math.min(attachment.width, message.kind === 'sticker' ? 180 : 360) }
-    : undefined
-  if (url && (message.kind === 'image' || message.kind === 'sticker')) return <img className={`message-image ${message.kind}`} style={dimensions} src={url} alt={message.text ?? message.kind} loading="lazy" decoding="async" onLoad={onResize} onError={onBroken} />
-  if (url && message.kind === 'video') return <video className="message-video" style={dimensions} src={url} controls preload="metadata" onLoadedMetadata={onResize} onError={onBroken} />
   if (url && (message.kind === 'audio' || message.kind === 'voice')) return <audio className="message-audio" src={url} controls preload="metadata" onLoadedMetadata={onResize} onError={onBroken} />
   if (url && cacheToken && message.kind === 'document') return attachment.draftToken
     ? <div className="document-card"><File /><span>{attachment.fileName ?? 'Document'}</span></div>
     : <button className="document-card" onClick={() => void window.warish.media.open(cacheToken).catch(onError)}><File /><span>{attachment.fileName ?? 'Document'}</span></button>
-  return <button className="media-download" onClick={downloading ? onCancel : onDownload}>
-    {attachment.thumbnailDataUrl && <img src={attachment.thumbnailDataUrl} alt="Media preview" />}
-    <span className="download-circle">{downloading ? <X /> : <Download />}</span><span>{downloading ? 'Cancel download' : attachment.fileName ?? message.kind}</span>
+  if (message.kind === 'image' || message.kind === 'video' || message.kind === 'sticker') {
+    const label = attachment.fileName ?? messageKindLabel(message.kind)
+    return <div ref={frameRef} className={`media-frame ${message.kind}`} style={mediaFrameStyle(attachment, message.kind)}>
+      {thumbnail && <img className="media-thumbnail" src={thumbnail} alt="" aria-hidden="true" />}
+      {url && (message.kind === 'image' || message.kind === 'sticker')
+        ? <img className={`message-image ${message.kind}`} src={url} alt={message.text ?? message.kind} loading="lazy" decoding="async" onLoad={onResize} onError={onBroken} />
+        : url && message.kind === 'video'
+          ? <video className="message-video" src={url} controls preload="metadata" onLoadedMetadata={onResize} onError={onBroken} />
+          : <button className="media-download" aria-label={downloading ? `Cancel ${label} download` : `Download ${label}`} onClick={downloading ? onCancel : onDownload}>
+            <span className="download-circle">{downloading ? <X /> : <Download />}</span>
+          </button>}
+    </div>
+  }
+  return <button className="document-card" onClick={downloading ? onCancel : onDownload}>
+    <File /><span>{downloading ? 'Cancel download' : attachment.fileName ?? messageKindLabel(message.kind)}</span>
   </button>
+}
+
+function mediaFrameStyle(attachment: NonNullable<MessageDto['attachment']>, kind: MessageDto['kind']): CSSProperties {
+  const maxWidth = kind === 'sticker' ? 180 : 360
+  const maxHeight = kind === 'sticker' ? 180 : 380
+  const width = attachment.width
+  const height = attachment.height
+  if (!width || !height || width <= 0 || height <= 0) {
+    return { width: kind === 'sticker' ? 180 : 260, aspectRatio: kind === 'sticker' ? '1 / 1' : '13 / 8' }
+  }
+  const scale = Math.min(1, maxWidth / width, maxHeight / height)
+  return { width: Math.max(1, Math.round(width * scale)), aspectRatio: `${width} / ${height}` }
 }
 
 function messageKindLabel(kind?: MessageDto['kind']): string {

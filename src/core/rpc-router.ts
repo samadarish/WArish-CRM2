@@ -86,10 +86,18 @@ export class RpcRouter {
       case 'message.edit': return this.#whatsapp.edit(requiredString(params, 'chatId'), requiredString(params, 'messageId'), requiredString(params, 'text'))
       case 'message.delete': return this.#whatsapp.delete(requiredString(params, 'chatId'), requiredString(params, 'messageId'), deleteMode(params.mode))
       case 'message.forward': return this.#whatsapp.forward(requiredString(params, 'messageId'), stringArray(params.chatIds))
+      case 'media.thumbnail': {
+        const messageId = requiredString(params, 'messageId')
+        const thumbnailDataUrl = await this.#media.thumbnail(messageId)
+        if (thumbnailDataUrl) this.#emit({ type: 'message.changed', payload: { message: this.#database.getMessage(messageId) } })
+        return { thumbnailDataUrl }
+      }
       case 'media.download': {
         const socket = this.#whatsapp.socket
         if (!socket) throw new Error('WhatsApp is offline')
-        const token = await this.#media.download(requiredString(params, 'messageId'), socket)
+        const messageId = requiredString(params, 'messageId')
+        const token = await this.#media.download(messageId, socket)
+        this.#emit({ type: 'message.changed', payload: { message: this.#database.getMessage(messageId) } })
         return { cacheToken: token, url: `warish-media://cache/${encodeURIComponent(token)}` }
       }
       case 'media.cancel': this.#media.cancel(requiredString(params, 'messageId')); return undefined

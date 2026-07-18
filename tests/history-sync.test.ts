@@ -1,6 +1,10 @@
 import { proto, type WAMessage } from '@whiskeysockets/baileys'
 import { describe, expect, it } from 'vitest'
-import { filterInitialHistoryMessages, shouldDownloadInitialHistoryChunk } from '../src/core/whatsapp-client'
+import {
+  filterInitialHistoryMessages,
+  normalizeContactIdentityInput,
+  shouldDownloadInitialHistoryChunk
+} from '../src/core/whatsapp-client'
 import { isVisibleChatJid, normalizeWhatsAppMessage } from '../src/core/normalizer'
 
 function textMessage(id: string, chatId: string, timestamp: number): WAMessage {
@@ -35,6 +39,8 @@ describe('history synchronization filters', () => {
     expect(shouldDownloadInitialHistoryChunk({ syncType: recent, oldestMsgInChunkTimestampSec: cutoff / 1000 - 20_000, progress: 100 }, cutoff, boundaries)).toBe(true)
     expect(shouldDownloadInitialHistoryChunk({ syncType: proto.Message.HistorySyncType.ON_DEMAND,
       oldestMsgInChunkTimestampSec: cutoff / 1000 - 30_000 }, cutoff, boundaries)).toBe(true)
+    expect(shouldDownloadInitialHistoryChunk({ syncType: proto.Message.HistorySyncType.PUSH_NAME,
+      oldestMsgInChunkTimestampSec: cutoff / 1000 - 30_000 }, cutoff, boundaries)).toBe(true)
   })
 
   it('suppresses protocol controls and status broadcasts while admitting channel posts', () => {
@@ -51,5 +57,21 @@ describe('history synchronization filters', () => {
     expect(isVisibleChatJid('15550003333@s.whatsapp.net')).toBe(true)
     expect(isVisibleChatJid('status@broadcast')).toBe(false)
     expect(isVisibleChatJid('12345@newsletter')).toBe(true)
+  })
+
+  it('keeps saved names and WhatsApp profile names in their authoritative fields', () => {
+    expect(normalizeContactIdentityInput({
+      id: '100200300400@lid', lid: '100200300400@lid', phoneNumber: '15550001111@s.whatsapp.net',
+      name: 'Saved contact', notify: 'WhatsApp profile', username: 'public-handle', verifiedName: 'Verified business'
+    })).toMatchObject({
+      id: '100200300400@lid', lid: '100200300400@lid', phoneNumber: '15550001111',
+      name: 'Saved contact', pushName: 'WhatsApp profile'
+    })
+
+    expect(normalizeContactIdentityInput({ phoneNumber: '+1 (555) 000-2222', username: 'handle-only',
+      verifiedName: 'Business only' })).toEqual({
+      id: '15550002222@s.whatsapp.net', lid: undefined, phoneNumber: '15550002222', name: undefined,
+      pushName: undefined, avatarUrl: undefined
+    })
   })
 })

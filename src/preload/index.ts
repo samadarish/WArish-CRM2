@@ -45,6 +45,7 @@ const api: WarishApi = {
   media: {
     pick: () => ipcRenderer.invoke('warish:pick-attachment') as Promise<PickedAttachment | null>,
     saveRecording: (data, mimeType) => ipcRenderer.invoke('warish:save-recording', data, mimeType) as Promise<PickedAttachment>,
+    thumbnail: (messageId) => invoke<{ thumbnailDataUrl?: string }>('media.thumbnail', { messageId }),
     download: (messageId) => invoke<{ cacheToken: string; url: string }>('media.download', { messageId }),
     cancel: (messageId) => invoke<void>('media.cancel', { messageId }),
     open: (cacheToken) => ipcRenderer.invoke('warish:open-media', cacheToken) as Promise<void>,

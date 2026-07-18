@@ -541,7 +541,8 @@ export class WarishDatabase {
     const resolved = this.resolveChatId(chatId)
     this.#upsertCanonicalContact({ id: resolved })
     this.db.prepare(
-      `UPDATE contact_identities SET avatar_token=?, avatar_checked_at=?, avatar_missing_until=NULL, updated_at=?
+      `UPDATE contact_identities SET avatar_token=?, avatar_checked_at=?, avatar_missing_until=NULL,
+       avatar_failures=0, updated_at=?
        WHERE identity_id=(SELECT identity_id FROM contact_identity_aliases WHERE alias_id=?)`
     ).run(token, Date.now(), Date.now(), resolved)
   }
@@ -557,8 +558,21 @@ export class WarishDatabase {
     ).run(now, now + 24 * 60 * 60 * 1000, now, resolved)
   }
 
+  markContactAvatarFailure(chatId: string, retryAfterMs = 5 * 60 * 1000): void {
+    const resolved = this.resolveChatId(chatId)
+    this.#upsertCanonicalContact({ id: resolved })
+    const now = Date.now()
+    this.db.prepare(
+      `UPDATE contact_identities SET avatar_missing_until=?,
+       avatar_failures=avatar_failures+1, updated_at=?
+       WHERE identity_id=(SELECT identity_id FROM contact_identity_aliases WHERE alias_id=?)`
+    ).run(now + Math.max(1_000, Math.min(retryAfterMs, 60 * 60 * 1000)), now, resolved)
+  }
+
   clearContactAvatarTokens(): void {
-    this.db.prepare('UPDATE contact_identities SET avatar_token=NULL, avatar_checked_at=NULL, avatar_missing_until=NULL, updated_at=?')
+    this.db.prepare(
+      'UPDATE contact_identities SET avatar_token=NULL, avatar_checked_at=NULL, avatar_missing_until=NULL, avatar_failures=0, updated_at=?'
+    )
       .run(Date.now())
   }
 
@@ -566,6 +580,8 @@ export class WarishDatabase {
     directChats: number
     resolvedNames: number
     resolvedPhones: number
+    savedNames: number
+    profileNames: number
     cachedAvatars: number
     failedAvatarRequests: number
   } {
@@ -573,6 +589,8 @@ export class WarishDatabase {
       `SELECT COUNT(*) AS direct_chats,
        SUM(CASE WHEN identity.saved_name IS NOT NULL OR identity.whatsapp_name IS NOT NULL THEN 1 ELSE 0 END) AS resolved_names,
        SUM(CASE WHEN identity.phone_number IS NOT NULL THEN 1 ELSE 0 END) AS resolved_phones,
+       SUM(CASE WHEN identity.saved_name IS NOT NULL THEN 1 ELSE 0 END) AS saved_names,
+       SUM(CASE WHEN identity.whatsapp_name IS NOT NULL THEN 1 ELSE 0 END) AS profile_names,
        SUM(CASE WHEN identity.avatar_token IS NOT NULL THEN 1 ELSE 0 END) AS cached_avatars
        FROM chats
        LEFT JOIN contact_identity_aliases identity_alias ON identity_alias.alias_id=chats.id
@@ -585,6 +603,8 @@ export class WarishDatabase {
       directChats: Number(row.direct_chats ?? 0),
       resolvedNames: Number(row.resolved_names ?? 0),
       resolvedPhones: Number(row.resolved_phones ?? 0),
+      savedNames: Number(row.saved_names ?? 0),
+      profileNames: Number(row.profile_names ?? 0),
       cachedAvatars: Number(row.cached_avatars ?? 0),
       failedAvatarRequests: Number(failures.failures ?? 0)
     }
@@ -892,12 +912,49 @@ export class WarishDatabase {
     this.db.prepare('UPDATE attachments SET download_state=? WHERE message_id=?').run(state, messageId)
   }
 
+  shouldFetchMediaThumbnail(messageId: string, now = Date.now()): boolean {
+    const row = this.db.prepare(
+      `SELECT kind, thumbnail_data_url, cache_token, thumbnail_missing_until
+       FROM attachments WHERE message_id=?`
+    ).get(messageId) as {
+      kind?: string
+      thumbnail_data_url?: string
+      cache_token?: string
+      thumbnail_missing_until?: number
+    } | undefined
+    if (!row || (row.kind !== 'image' && row.kind !== 'video')) return false
+    if (row.thumbnail_data_url || row.cache_token) return false
+    return Number(row.thumbnail_missing_until ?? 0) <= now
+  }
+
+  saveMediaThumbnail(messageId: string, thumbnailDataUrl: string): void {
+    const now = Date.now()
+    this.db.prepare(
+      `UPDATE attachments SET thumbnail_data_url=?, thumbnail_checked_at=?, thumbnail_missing_until=NULL,
+       thumbnail_failures=0 WHERE message_id=?`
+    ).run(thumbnailDataUrl, now, messageId)
+  }
+
+  markMediaThumbnailUnavailable(messageId: string, retryAfterMs: number): void {
+    const now = Date.now()
+    this.db.prepare(
+      `UPDATE attachments SET thumbnail_checked_at=?, thumbnail_missing_until=?,
+       thumbnail_failures=thumbnail_failures+1 WHERE message_id=?`
+    ).run(now, now + Math.max(1_000, retryAfterMs), messageId)
+  }
+
   #upsertAttachment(messageId: string, input: Omit<AttachmentDto, 'messageId'>): void {
     this.db.prepare(
       `INSERT INTO attachments(id, message_id, kind, file_name, mime_type, size, width, height, duration_seconds,
        thumbnail_data_url, cache_token, draft_token, download_state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET cache_token=COALESCE(excluded.cache_token, attachments.cache_token),
-       draft_token=COALESCE(excluded.draft_token, attachments.draft_token), download_state=excluded.download_state`
+       ON CONFLICT(id) DO UPDATE SET file_name=COALESCE(excluded.file_name, attachments.file_name),
+       mime_type=COALESCE(excluded.mime_type, attachments.mime_type), size=COALESCE(excluded.size, attachments.size),
+       width=COALESCE(excluded.width, attachments.width), height=COALESCE(excluded.height, attachments.height),
+       duration_seconds=COALESCE(excluded.duration_seconds, attachments.duration_seconds),
+       thumbnail_data_url=COALESCE(excluded.thumbnail_data_url, attachments.thumbnail_data_url),
+       cache_token=COALESCE(excluded.cache_token, attachments.cache_token),
+       draft_token=COALESCE(excluded.draft_token, attachments.draft_token),
+       download_state=CASE WHEN attachments.cache_token IS NOT NULL THEN 'ready' ELSE excluded.download_state END`
     ).run(input.id, messageId, input.kind, input.fileName ?? null, input.mimeType ?? null, input.size ?? null,
       input.width ?? null, input.height ?? null, input.durationSeconds ?? null, input.thumbnailDataUrl ?? null,
       input.cacheToken ?? null, input.draftToken ?? null, input.downloadState)
@@ -1106,7 +1163,7 @@ export class WarishDatabase {
     return identityId
   }
 
-  #backfillCanonicalContacts(): void {
+  rebuildCanonicalContacts(): { contacts: number; directChats: number } {
     const contacts = this.db.prepare(
       'SELECT id, lid, phone_number, name, push_name FROM contacts ORDER BY updated_at ASC, id ASC'
     ).all() as Record<string, unknown>[]
@@ -1122,7 +1179,9 @@ export class WarishDatabase {
       })
       for (const chat of directChats) this.#upsertCanonicalContact({ id: chat.id })
     })
-    this.#logger.info({ contacts: contacts.length, directChats: directChats.length }, 'canonical contact identity index built')
+    const result = { contacts: contacts.length, directChats: directChats.length }
+    this.#logger.info(result, 'canonical contact identity index built')
+    return result
   }
 
   #migrate(): void {
@@ -1289,8 +1348,22 @@ export class WarishDatabase {
         CREATE INDEX IF NOT EXISTS contact_identity_phone_v7_idx ON contact_identities(phone_number);
         CREATE INDEX IF NOT EXISTS contact_identity_names_v7_idx ON contact_identities(saved_name, whatsapp_name);
       `))
-      this.#backfillCanonicalContacts()
+      this.rebuildCanonicalContacts()
       this.db.prepare('INSERT INTO schema_migrations(version, applied_at) VALUES (7, ?)').run(Date.now())
+    }
+    if (version.version < 8) {
+      this.#logger.info({ version: 8 }, 'applying database migration')
+      this.transaction(() => this.db.exec(`
+        ALTER TABLE attachments ADD COLUMN thumbnail_checked_at INTEGER;
+        ALTER TABLE attachments ADD COLUMN thumbnail_missing_until INTEGER;
+        ALTER TABLE attachments ADD COLUMN thumbnail_failures INTEGER NOT NULL DEFAULT 0;
+        UPDATE contact_identities SET
+          avatar_checked_at=CASE WHEN avatar_token IS NULL THEN NULL ELSE avatar_checked_at END,
+          avatar_missing_until=NULL,
+          avatar_failures=0;
+        INSERT INTO schema_migrations(version, applied_at) VALUES
+          (8, CAST(strftime('%s','now') AS INTEGER) * 1000);
+      `))
     }
   }
 }
@@ -1310,8 +1383,9 @@ function mapChat(row: Record<string, unknown>): ChatSummary {
   const storedAvatar = nullableString(row.avatar_url)
   const avatarUrl = avatarToken ? `warish-media://avatars/${encodeURIComponent(avatarToken)}`
     : storedAvatar?.startsWith('warish-media://') ? storedAvatar : undefined
+  const distinctStoredTitle = storedTitle && storedTitle !== whatsappName ? storedTitle : undefined
   const title = kind === 'direct'
-    ? savedName ?? whatsappName ?? storedTitle ?? phoneNumber ?? 'Unknown contact'
+    ? savedName ?? phoneNumber ?? distinctStoredTitle ?? 'Unknown contact'
     : storedTitle ?? chatKindLabel(kind)
   return { id, title, kind, savedName, whatsappName, phoneNumber,
     communityId: nullableString(row.community_id), isAnnouncement: Boolean(row.is_community_announcement),

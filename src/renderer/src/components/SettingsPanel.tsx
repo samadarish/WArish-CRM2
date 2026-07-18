@@ -194,7 +194,7 @@ function StorageSettings({ settings, contactSync, contactRefreshAvailable, refre
       <button className="secondary-button" onClick={onClearCache}><Trash2 />Clear downloaded media</button>
     </SettingGroup>
     <SettingGroup title="Contact directory">
-      <div className="contact-sync-summary"><div><strong>{contactSync?.resolvedNames ?? 0} named chats</strong><span>{contactSync?.resolvedPhones ?? 0} phone numbers resolved</span></div>{contactSync?.message && <small>{contactSync.message}</small>}{running && <progress max={Math.max(1, contactSync.total)} value={contactSync.processed} />}</div>
+      <div className="contact-sync-summary"><div><strong>{contactSync?.savedNames ?? 0} saved contact names</strong><span>{contactSync?.profileNames ?? 0} WhatsApp profile names · {contactSync?.resolvedPhones ?? 0} phone numbers</span></div>{contactSync?.message && <small>{contactSync.message}</small>}{running && <progress max={Math.max(1, contactSync.total)} value={contactSync.processed} />}</div>
       <button className="secondary-button" disabled={!contactRefreshAvailable || refreshPending || running} onClick={onRefresh}><RefreshCw className={refreshPending || running ? 'spin' : ''} />{refreshPending || running ? 'Refreshing contact names…' : contactRefreshAvailable ? 'Refresh contact names' : 'Connect WhatsApp to refresh'}</button>
     </SettingGroup>
   </>
@@ -206,7 +206,8 @@ function DiagnosticsSettings({ diagnostics, onOpenLogs }: { diagnostics: Diagnos
     {!diagnostics ? <div className="loading-row"><LoaderCircle className="spin" />Loading diagnostics…</div> : <div className="diagnostic-grid">
       <span><Database />Database <b>{formatBytes(diagnostics.databaseBytes)}</b></span><span><HardDrive />Media <b>{formatBytes(diagnostics.mediaCacheBytes)}</b></span>
       <span>App version <b>v{diagnostics.appVersion}</b></span><span>Session <b>{diagnostics.sessionPhase}</b></span>
-      <span>Named chats <b>{diagnostics.identityCoverage.resolvedNames}/{diagnostics.identityCoverage.directChats}</b></span><span>Avatars <b>{diagnostics.identityCoverage.cachedAvatars}</b></span>
+      <span>Named chats <b>{diagnostics.identityCoverage.resolvedNames}/{diagnostics.identityCoverage.directChats}</b></span><span>WhatsApp profiles <b>{diagnostics.identityCoverage.profileNames}</b></span>
+      <span>Saved names <b>{diagnostics.identityCoverage.savedNames}</b></span><span>Avatars <b>{diagnostics.identityCoverage.cachedAvatars}</b></span>
       <span>Avatar errors <b>{diagnostics.identityCoverage.failedAvatarRequests}</b></span>
     </div>}
     <button className="secondary-button" onClick={onOpenLogs}><ScrollText />View error logs</button>

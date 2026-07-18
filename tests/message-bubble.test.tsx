@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { MessageDto } from '../src/shared/contracts'
 import { MessageBubble } from '../src/renderer/src/components/MessageBubble'
 
@@ -12,6 +12,11 @@ function createMessage(patch: Partial<MessageDto> = {}): MessageDto {
     reactions: [], ...patch
   }
 }
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  Reflect.deleteProperty(window, 'warish')
+})
 
 describe('MessageBubble', () => {
   it('shows a stable quote preview and reserves a reaction row', () => {
@@ -55,7 +60,67 @@ describe('MessageBubble', () => {
         width: 1200, height: 800, downloadState: 'ready' }
     })} showSender={false} onReply={vi.fn()} onForward={vi.fn()} onOpenQuote={vi.fn()} onResize={vi.fn()} onError={vi.fn()} />)
 
-    expect(container.querySelector('.message-image')).toHaveStyle({ aspectRatio: '1200 / 800', width: '360px' })
+    expect(container.querySelector('.media-frame')).toHaveStyle({ aspectRatio: '1200 / 800', width: '360px' })
+  })
+
+  it('keeps the same media frame before and after download', () => {
+    const remoteAttachment = { id: 'attachment-stable', messageId: 'message-1', kind: 'image' as const,
+      width: 800, height: 1200, downloadState: 'remote' as const }
+    const props = { showSender: false, onReply: vi.fn(), onForward: vi.fn(), onOpenQuote: vi.fn(), onResize: vi.fn(), onError: vi.fn() }
+    const { container, rerender } = render(<MessageBubble message={createMessage({ kind: 'image', text: undefined,
+      attachment: remoteAttachment })} {...props} />)
+    const remoteStyle = container.querySelector('.media-frame')?.getAttribute('style')
+
+    rerender(<MessageBubble message={createMessage({ kind: 'image', text: undefined, attachment: {
+      ...remoteAttachment, cacheToken: 'downloaded.jpg', downloadState: 'ready'
+    } })} {...props} />)
+    expect(container.querySelector('.media-frame')?.getAttribute('style')).toBe(remoteStyle)
+    expect(container.querySelector('.media-frame')).toHaveStyle({ aspectRatio: '800 / 1200', width: '253px' })
+  })
+
+  it('uses a blurred preview behind remote media controls', () => {
+    const { container } = render(<MessageBubble message={createMessage({ kind: 'video', text: undefined,
+      attachment: { id: 'attachment-preview', messageId: 'message-1', kind: 'video', width: 1280, height: 720,
+        thumbnailDataUrl: 'data:image/jpeg;base64,/9j/2Q==', downloadState: 'remote' }
+    })} showSender={false} onReply={vi.fn()} onForward={vi.fn()} onOpenQuote={vi.fn()} onResize={vi.fn()} onError={vi.fn()} />)
+
+    expect(container.querySelector('.media-thumbnail')).toHaveAttribute('src', 'data:image/jpeg;base64,/9j/2Q==')
+    expect(screen.getByRole('button', { name: 'Download Video' })).toBeInTheDocument()
+  })
+
+  it('requests a small thumbnail only after remote media becomes visible', async () => {
+    let intersectionCallback: IntersectionObserverCallback | undefined
+    class TestIntersectionObserver {
+      readonly root = null
+      readonly rootMargin = ''
+      readonly thresholds = [0.01]
+      constructor(callback: IntersectionObserverCallback) { intersectionCallback = callback }
+      observe(): void { /* Controlled by the test. */ }
+      disconnect(): void { /* Controlled by the component. */ }
+      unobserve(): void { /* Not used. */ }
+      takeRecords(): IntersectionObserverEntry[] { return [] }
+    }
+    vi.stubGlobal('IntersectionObserver', TestIntersectionObserver)
+    const thumbnail = vi.fn().mockResolvedValue({ thumbnailDataUrl: 'data:image/jpeg;base64,/9j/2Q==' })
+    Object.defineProperty(window, 'warish', { configurable: true, value: { media: { thumbnail } } })
+    const { container } = render(<MessageBubble message={createMessage({ kind: 'image', text: undefined,
+      attachment: { id: 'attachment-visible', messageId: 'message-1', kind: 'image', width: 640, height: 480, downloadState: 'remote' }
+    })} showSender={false} onReply={vi.fn()} onForward={vi.fn()} onOpenQuote={vi.fn()} onResize={vi.fn()} onError={vi.fn()} />)
+
+    expect(thumbnail).not.toHaveBeenCalled()
+    act(() => intersectionCallback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver))
+    await waitFor(() => expect(container.querySelector('.media-thumbnail')).toBeInTheDocument())
+    expect(thumbnail).toHaveBeenCalledOnce()
+    expect(thumbnail).toHaveBeenCalledWith('message-1')
+  })
+
+  it('applies grouped bubble classes and keeps quoted replies to one compact preview line', () => {
+    const { container } = render(<MessageBubble groupPosition="middle" message={createMessage({
+      quotedMessageId: 'quoted-media', quoted: { id: 'quoted-media', senderName: 'Akshitha', kind: 'image' }
+    })} showSender={false} onReply={vi.fn()} onForward={vi.fn()} onOpenQuote={vi.fn()} onResize={vi.fn()} onError={vi.fn()} />)
+
+    expect(container.querySelector('.message-row')).toHaveClass('group-middle')
+    expect(container.querySelector('.quoted-message span')).toHaveTextContent('Photo')
   })
 
   it('shows an explicit retry action for failed outgoing messages', () => {

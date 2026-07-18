@@ -11,6 +11,7 @@ import { WarishDatabase } from './database'
 export interface PersistentAuthState {
   state: AuthenticationState
   saveCreds(): void
+  resetAppStateSyncVersion(collection: 'critical_unblock_low'): void
 }
 
 export function createPersistentAuthState(database: WarishDatabase): PersistentAuthState {
@@ -60,6 +61,7 @@ export function createPersistentAuthState(database: WarishDatabase): PersistentA
     state,
     saveCreds: () => {
       database.setAuth('creds', 'primary', Buffer.from(JSON.stringify(state.creds, BufferJSON.replacer), 'utf8'))
-    }
+    },
+    resetAppStateSyncVersion: (collection) => database.setAuth('app-state-sync-version', collection)
   }
 }

@@ -3,7 +3,7 @@ import { createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSy
 import { pipeline } from 'node:stream/promises'
 import { Transform } from 'node:stream'
 import { basename, extname, join, resolve } from 'node:path'
-import { downloadMediaMessage, type WASocket } from '@whiskeysockets/baileys'
+import { downloadContentFromMessage, downloadMediaMessage, normalizeMessageContent, type WASocket } from '@whiskeysockets/baileys'
 import type { Logger } from 'pino'
 import { WarishDatabase } from './database'
 import { deserializeRawMessage } from './normalizer'
@@ -16,6 +16,9 @@ export class MediaManager {
   readonly #logger: Logger
   readonly #downloads = new Map<string, AbortController>()
   readonly #downloadPromises = new Map<string, Promise<string>>()
+  readonly #thumbnailPromises = new Map<string, Promise<string | undefined>>()
+  readonly #thumbnailQueue: Array<() => void> = []
+  #activeThumbnailRequests = 0
 
   constructor(userDataPath: string, database: WarishDatabase, logger: Logger) {
     this.mediaDirectory = join(userDataPath, 'media')
@@ -71,6 +74,65 @@ export class MediaManager {
     this.#downloadPromises.set(messageId, promise)
     try { return await promise }
     finally { this.#downloadPromises.delete(messageId) }
+  }
+
+  async thumbnail(messageId: string): Promise<string | undefined> {
+    const attachment = this.#database.getMessage(messageId).attachment
+    if (attachment?.thumbnailDataUrl) return attachment.thumbnailDataUrl
+    if (!this.#database.shouldFetchMediaThumbnail(messageId)) return undefined
+    const pending = this.#thumbnailPromises.get(messageId)
+    if (pending) return pending
+    const promise = this.#enqueueThumbnailTask(() => this.#downloadThumbnail(messageId))
+    this.#thumbnailPromises.set(messageId, promise)
+    try { return await promise }
+    finally { this.#thumbnailPromises.delete(messageId) }
+  }
+
+  async #downloadThumbnail(messageId: string): Promise<string | undefined> {
+    const raw = this.#database.getRawMessage(messageId)
+    if (!raw) {
+      this.#database.markMediaThumbnailUnavailable(messageId, 24 * 60 * 60 * 1000)
+      return undefined
+    }
+    const message = deserializeRawMessage(raw)
+    const content = normalizeMessageContent(message.message)
+    const attachment = content?.imageMessage ?? content?.videoMessage
+    const kind = content?.imageMessage ? 'thumbnail-image' : content?.videoMessage ? 'thumbnail-video' : undefined
+    if (!attachment?.thumbnailDirectPath || !attachment.mediaKey || !kind) {
+      this.#database.markMediaThumbnailUnavailable(messageId, 24 * 60 * 60 * 1000)
+      return undefined
+    }
+    try {
+      const stream = await downloadContentFromMessage(
+        { directPath: attachment.thumbnailDirectPath, mediaKey: attachment.mediaKey },
+        kind,
+        { options: { signal: AbortSignal.timeout(10_000) } }
+      )
+      const data = await readStreamWithLimit(stream, 256 * 1024)
+      const mimeType = imageMimeType(data)
+      if (!mimeType) throw new Error('Media thumbnail was not a supported image')
+      const dataUrl = `data:${mimeType};base64,${data.toString('base64')}`
+      this.#database.saveMediaThumbnail(messageId, dataUrl)
+      return dataUrl
+    } catch (error) {
+      this.#database.markMediaThumbnailUnavailable(messageId, 5 * 60 * 1000)
+      this.#logger.warn({ messageId, reason: errorDetails(error) }, 'media thumbnail request failed')
+      return undefined
+    }
+  }
+
+  #enqueueThumbnailTask(task: () => Promise<string | undefined>): Promise<string | undefined> {
+    return new Promise<string | undefined>((resolve, reject) => {
+      const run = (): void => {
+        this.#activeThumbnailRequests += 1
+        void task().then(resolve, reject).finally(() => {
+          this.#activeThumbnailRequests -= 1
+          this.#thumbnailQueue.shift()?.()
+        })
+      }
+      if (this.#activeThumbnailRequests < 4) run()
+      else this.#thumbnailQueue.push(run)
+    })
   }
 
   async #download(messageId: string, socket: WASocket): Promise<string> {
@@ -213,6 +275,32 @@ function avatarExtension(mime: string): string | undefined {
     'image/gif': '.gif'
   }
   return extensions[mime]
+}
+
+async function readStreamWithLimit(stream: AsyncIterable<Uint8Array | string>, limit: number): Promise<Buffer> {
+  const chunks: Buffer[] = []
+  let size = 0
+  for await (const chunk of stream) {
+    const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+    size += data.length
+    if (size > limit) throw new Error('Media thumbnail is too large')
+    chunks.push(data)
+  }
+  if (!size) throw new Error('Media thumbnail is empty')
+  return Buffer.concat(chunks, size)
+}
+
+function imageMimeType(data: Buffer): string | undefined {
+  if (data.length >= 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) return 'image/jpeg'
+  if (data.length >= 8 && data.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png'
+  if (data.length >= 12 && data.subarray(0, 4).toString('ascii') === 'RIFF' && data.subarray(8, 12).toString('ascii') === 'WEBP') return 'image/webp'
+  return undefined
+}
+
+function errorDetails(error: unknown): string {
+  if (!(error instanceof Error)) return String(error)
+  const code = (error as NodeJS.ErrnoException).code
+  return code ? `${error.message} (${code})` : error.message
 }
 
 function hasImageSignature(data: Buffer, mime: string): boolean {

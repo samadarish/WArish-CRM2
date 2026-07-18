@@ -10,6 +10,8 @@ import {
 import type { AppSettings, ChatCategory, ChatSummary, CommunitySummary, DraftDto, MessageDto, Page, PickedAttachment, SessionState } from '../../../shared/contracts'
 import { useUiStore } from '../store'
 import { shouldSubmitComposer } from '../composer-keyboard'
+import { contactIdentityPresentation, type ContactIdentityPresentation } from '../contact-identity'
+import { messageGroupPositions } from '../message-grouping'
 import { Avatar } from './Avatar'
 import { MessageBubble } from './MessageBubble'
 import { NavigationRail, type SidebarDestination } from './NavigationRail'
@@ -102,13 +104,14 @@ export function ChatShell({ session }: { session: SessionState }): React.JSX.Ele
     estimateSize: (index) => {
       const item = sidebarItems[index]
       if (document.documentElement.dataset.density === 'compact') {
-        const hasIdentity = item?.type === 'chat' ? Boolean(directIdentityLabel(item.chat)) : false
-        if (item?.type === 'community') return 64
-        return showChatPreviews ? (hasIdentity ? 72 : 60) : (hasIdentity ? 60 : 52)
+        const hasIdentity = item?.type === 'chat' ? contactIdentityPresentation(item.chat).hasSecondary : false
+        if (item?.type === 'community') return 68
+        return showChatPreviews ? (hasIdentity ? 76 : 64) : (hasIdentity ? 64 : 58)
       }
-      const hasIdentity = item?.type === 'chat' ? Boolean(directIdentityLabel(item.chat)) : false
-      if (item?.type === 'community') return 72
-      return showChatPreviews ? (hasIdentity ? 86 : 72) : (hasIdentity ? 70 : 62)
+      const hasIdentity = item?.type === 'chat' ? contactIdentityPresentation(item.chat).hasSecondary : false
+      if (item?.type === 'community') return 78
+      if (item?.type === 'chat' && item.nested && !hasIdentity) return showChatPreviews ? 70 : 64
+      return showChatPreviews ? (hasIdentity ? 88 : 76) : (hasIdentity ? 72 : 64)
     },
     getItemKey: (index) => {
       const item = sidebarItems[index]
@@ -302,12 +305,18 @@ function CommunityParentRow({ community, expanded, onToggle }: {
 }
 
 function ChatRow({ chat, active, showPreview, nested = false, onClick }: { chat: ChatSummary; active: boolean; showPreview: boolean; nested?: boolean; onClick(): void }): React.JSX.Element {
-  const identity = directIdentityLabel(chat)
-  return <button className={`chat-row ${chat.kind === 'direct' ? 'direct' : ''} ${identity ? 'has-identity' : ''} ${nested ? 'nested' : ''} ${active ? 'active' : ''}`} onClick={onClick}>
-    <Avatar title={chat.title} src={chat.avatarUrl} /><span className="chat-row-copy"><span className="chat-row-top"><strong title={chat.title}>{chat.title}</strong>{chat.lastMessageAt && <time>{chatTime(chat.lastMessageAt)}</time>}{!showPreview && chat.unreadCount > 0 && <b>{chat.unreadCount > 99 ? '99+' : chat.unreadCount}</b>}</span>
-      {identity && <span className="chat-row-identity" title={identity}>{identity}</span>}
+  const identity = contactIdentityPresentation(chat)
+  return <button className={`chat-row ${chat.kind === 'direct' ? 'direct' : ''} ${identity.hasSecondary ? 'has-identity' : ''} ${nested ? 'nested' : ''} ${active ? 'active' : ''}`} onClick={onClick}>
+    <Avatar title={identity.primary} src={chat.avatarUrl} /><span className="chat-row-copy"><span className="chat-row-top"><strong title={identity.primary}>{identity.primary}</strong>{chat.lastMessageAt && <time>{chatTime(chat.lastMessageAt)}</time>}{!showPreview && chat.unreadCount > 0 && <b>{chat.unreadCount > 99 ? '99+' : chat.unreadCount}</b>}</span>
+      {identity.hasSecondary && <ContactIdentityDetails identity={identity} />}
       {showPreview && <span className="chat-row-bottom"><span>{chat.typing ? 'typing…' : chat.lastMessage ?? 'No messages yet'}</span>{chat.unreadCount > 0 && <b>{chat.unreadCount > 99 ? '99+' : chat.unreadCount}</b>}</span>}</span>
   </button>
+}
+
+function ContactIdentityDetails({ identity, header = false }: { identity: ContactIdentityPresentation; header?: boolean }): React.JSX.Element {
+  return <span className={`${header ? 'conversation-contact-identity' : 'chat-row-identity'} contact-identity-details`}>
+    {identity.profileName && <span className="whatsapp-profile-pill" title={identity.profileName}>{identity.profileName}</span>}
+  </span>
 }
 
 function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
@@ -394,16 +403,16 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
     return [...unique.values()].sort((left, right) => left.timestamp - right.timestamp || left.id.localeCompare(right.id))
   }, [messageQuery.data, remoteHistory])
   const timeline = useMemo(() => buildTimeline(messages), [messages])
+  const groupPositionById = useMemo(() => messageGroupPositions(messages), [messages])
   const showSenderById = useMemo(() => {
     const result = new Map<string, boolean>()
     for (let index = 0; index < messages.length; index += 1) {
       const message = messages[index]!
-      const previous = messages[index - 1]
-      result.set(message.id, chat.kind === 'group' && !message.fromMe && (!previous || previous.fromMe ||
-        previous.senderId !== message.senderId || !isSameDay(previous.timestamp, message.timestamp) || message.timestamp - previous.timestamp > 5 * 60_000))
+      const position = groupPositionById.get(message.id)
+      result.set(message.id, chat.kind === 'group' && !message.fromMe && (position === 'first' || position === 'single'))
     }
     return result
-  }, [chat.kind, messages])
+  }, [chat.kind, groupPositionById, messages])
   const virtualizer = useVirtualizer({
     count: timeline.length + 1,
     getScrollElement: () => parentRef.current,
@@ -748,8 +757,11 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
     return () => window.removeEventListener('keydown', handleShortcut)
   }, [])
 
+  const conversationIdentity = contactIdentityPresentation(chat)
   return <>
-    <header className="conversation-header"><button className="conversation-identity" title="Open conversation info" onClick={() => { setSearchOpen(false); setConversationMenuOpen(false); setContactDrawerOpen(true) }}><Avatar title={chat.title} src={chat.avatarUrl} /><span title={chat.description}><strong>{chat.title}</strong><span>{chatSubtitle(chat)}</span></span></button>
+    <header className="conversation-header"><button className="conversation-identity" title="Open conversation info" onClick={() => { setSearchOpen(false); setConversationMenuOpen(false); setContactDrawerOpen(true) }}><Avatar title={conversationIdentity.primary} src={chat.avatarUrl} /><span title={chat.description}><strong>{conversationIdentity.primary}</strong>{chat.kind === 'direct'
+      ? conversationIdentity.hasSecondary && <ContactIdentityDetails identity={conversationIdentity} header />
+      : <span>{chatSubtitle(chat)}</span>}</span></button>
       <button className={`icon-button ${searchOpen ? 'active' : ''}`} title="Search this conversation" aria-label="Search this conversation" aria-expanded={searchOpen} onClick={() => { setConversationMenuOpen(false); setContactDrawerOpen(false); setSearchOpen((open) => !open) }}><Search /></button>
       <button className="icon-button" title="Conversation menu" aria-label="Conversation menu" aria-haspopup="menu" aria-expanded={conversationMenuOpen} onClick={() => { setSearchOpen(false); setContactDrawerOpen(false); setConversationMenuOpen((open) => !open) }}><Menu /></button>
       {conversationMenuOpen && <><button className="menu-dismiss" aria-label="Close menu" onClick={() => setConversationMenuOpen(false)} /><div className="header-menu conversation-header-menu" role="menu">
@@ -773,9 +785,10 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
           if (timelineItem.type === 'date') return <div key={String(item.key)} ref={virtualizer.measureElement} data-index={item.index}
             className="virtual-message date-separator-row" style={{ transform: `translateY(${item.start + virtualMessageOffset}px)` }}><div className="date-separator">{timelineItem.label}</div></div>
           const message = timelineItem.message
+          const groupPosition = groupPositionById.get(message.id) ?? 'single'
           return <div key={String(item.key)} ref={virtualizer.measureElement} data-index={item.index} data-message-id={message.id}
-            className={`virtual-message ${message.id === focusedMessageId ? 'search-target' : ''}`} style={{ transform: `translateY(${item.start + virtualMessageOffset}px)` }}>
-            <MessageBubble message={message} readOnly={chat.readOnly} showSender={showSenderById.get(message.id) ?? false} onReply={setReplyTo} onForward={onForward}
+            className={`virtual-message message-item group-${groupPosition} ${message.id === focusedMessageId ? 'search-target' : ''}`} style={{ transform: `translateY(${item.start + virtualMessageOffset}px)` }}>
+            <MessageBubble message={message} groupPosition={groupPosition} readOnly={chat.readOnly} showSender={showSenderById.get(message.id) ?? false} onReply={setReplyTo} onForward={onForward}
               onOpenQuote={(messageId) => void revealMessage(messageId)} onResize={handleRowResize}
               onRetry={(messageId) => void window.warish.messages.retry(messageId).catch((error) => pushNotice(errorMessage(error)))}
               onError={(error) => pushNotice(errorMessage(error))} />
@@ -879,14 +892,8 @@ function chatSubtitle(chat: ChatSummary): string {
   if (chat.communityId) return chat.isAnnouncement ? 'Community announcements' : 'Community group'
   if (chat.kind === 'group') return 'Group conversation'
   if (chat.kind === 'community') return 'Community'
-  if (chat.kind === 'direct') return directIdentityLabel(chat) || (chat.whatsappName ? 'WhatsApp profile' : 'WhatsApp contact')
+  if (chat.kind === 'direct') return 'WhatsApp contact'
   return 'WhatsApp conversation'
-}
-function directIdentityLabel(chat: ChatSummary): string {
-  if (chat.kind !== 'direct') return ''
-  const values = [chat.whatsappName, chat.phoneNumber]
-    .filter((value): value is string => Boolean(value) && value !== chat.title)
-  return [...new Set(values)].join(' · ')
 }
 function chatTime(timestamp: number): string { const date = new Date(timestamp); return isToday(date) ? format(date, 'HH:mm') : isYesterday(date) ? 'Yesterday' : format(date, 'dd/MM/yy') }
 function compareMessages(left: MessageDto, right: MessageDto): number {

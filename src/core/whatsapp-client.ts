@@ -62,7 +62,7 @@ export class WhatsAppClient {
   readonly #historyRequests = new Map<string, PendingHistoryRequest>()
   readonly #channelMetadataRequests = new Map<string, Promise<void>>()
   #contactSyncState: ContactSyncState = {
-    state: 'idle', processed: 0, total: 0, resolvedNames: 0, resolvedPhones: 0
+    state: 'idle', processed: 0, total: 0, resolvedNames: 0, resolvedPhones: 0, savedNames: 0, profileNames: 0
   }
   #contactSyncPromise?: Promise<ContactSyncState>
   readonly #avatarRequests = new Map<string, Promise<void>>()
@@ -456,8 +456,10 @@ export class WhatsAppClient {
         chatIds: [...affectedChatIds], messageCount: messages.length, onDemand: isOnDemand
       }
       this.#emit({ type: 'history.batch', payload: batch })
-      this.#logger.info({ received: received.length, stored: messages.length, skipped: received.length - messages.length,
-        historyDays, isOnDemand, durationMs: Date.now() - startedAt }, 'history sync chunk stored')
+      this.#logger.info({ syncType: history.syncType, contacts: history.contacts?.length ?? 0,
+        mappings: history.lidPnMappings?.length ?? 0, received: received.length, stored: messages.length,
+        skipped: received.length - messages.length, historyDays, isOnDemand,
+        durationMs: Date.now() - startedAt }, 'history sync chunk stored')
       if (isOnDemand) this.#resolveHistoryRequest(history.peerDataRequestSessionId, messages)
       else if (history.syncType === proto.HistorySync.HistorySyncType.RECENT && Number(history.progress) >= 100) {
         this.#setHistorySync('complete', 100)
@@ -540,23 +542,14 @@ export class WhatsAppClient {
 
   #ingestContacts(contacts: Array<Partial<Contact>>): void {
     this.#database.transaction(() => contacts.forEach((contact) => this.#ingestContact(contact)))
-    const chatIds = contacts.map((contact) => contact.id).filter((id): id is string => Boolean(id))
+    const chatIds = contacts.map(contactEventId).filter((id): id is string => Boolean(id))
       .map((id) => this.#database.resolveChatId(id))
     this.#emit({ type: 'contact.changed', payload: { chatIds, bulk: chatIds.length > 50 } })
   }
 
   #ingestContact(contact: Partial<Contact>): void {
-    const id = contact.id
-    if (!id) return
-    const phoneJid = contact.phoneNumber ?? (isPhoneJid(id) ? id : undefined)
-    this.#database.upsertContact({
-      id,
-      lid: contact.lid ?? (isLidJid(id) ? id : undefined),
-      phoneNumber: phoneJid?.split('@')[0],
-      name: contact.name?.trim() || undefined,
-      pushName: contact.notify?.trim() || contact.username?.trim() || contact.verifiedName?.trim() || undefined,
-      avatarUrl: typeof contact.imgUrl === 'string' && contact.imgUrl !== 'changed' ? contact.imgUrl : undefined
-    })
+    const input = normalizeContactIdentityInput(contact)
+    if (input) this.#database.upsertContact(input)
   }
 
   #ingestChat(chat: any, emitChange = true): void {
@@ -581,7 +574,7 @@ export class WhatsAppClient {
       : typeof chat.displayName === 'string' && chat.displayName.trim() ? chat.displayName.trim() : undefined
     if (kind === 'direct' && metadataTitle) {
       const phoneJid = isPhoneJid(rawId) ? rawId : mapping?.pn
-      this.#database.upsertContact({ id, phoneNumber: phoneJid?.split('@')[0], pushName: metadataTitle })
+      this.#database.upsertContact({ id, phoneNumber: phoneJid?.split('@')[0], name: metadataTitle })
     }
     this.#database.upsertChat({ id, title: kind === 'direct' ? labelForJid(id) : metadataTitle ?? labelForJid(id), kind,
       communityId, isAnnouncement: Boolean(chat.isDefaultSubgroup), classificationKnown,
@@ -665,6 +658,24 @@ export class WhatsAppClient {
       let lids = this.#database.listDirectLidChatIds()
       this.#setContactSyncState({ state: 'running', processed: 0, total: lids.length,
         ...this.#resolvedContactCounts() })
+      if (manual) {
+        try {
+          this.#auth.resetAppStateSyncVersion('critical_unblock_low')
+          await socket.resyncAppState(['critical_unblock_low'], false)
+        } catch (error) {
+          hadFailure = true
+          this.#logger.warn({ reason: error instanceof Error ? error.name : 'unknown' }, 'contact app-state refresh failed')
+        }
+      }
+      try {
+        this.#database.rebuildCanonicalContacts()
+      } catch (error) {
+        hadFailure = true
+        this.#logger.warn({ reason: error instanceof Error ? error.name : 'unknown' }, 'canonical contact rebuild failed')
+      }
+      lids = this.#database.listDirectLidChatIds()
+      this.#setContactSyncState({ state: 'running', processed: 0, total: lids.length,
+        ...this.#resolvedContactCounts() })
       try {
         let offset = 0
         while (this.#socket === socket && this.#socketGeneration === generation) {
@@ -682,14 +693,6 @@ export class WhatsAppClient {
       lids = this.#database.listDirectLidChatIds()
       this.#setContactSyncState({ state: 'running', processed: 0, total: lids.length,
         ...this.#resolvedContactCounts() })
-      if (manual) {
-        try {
-          await socket.resyncAppState(['critical_unblock_low'], false)
-        } catch (error) {
-          hadFailure = true
-          this.#logger.warn({ reason: error instanceof Error ? error.name : 'unknown' }, 'contact app-state refresh failed')
-        }
-      }
       let processed = 0
       for (let index = 0; index < lids.length; index += 50) {
         if (this.#socket !== socket || this.#socketGeneration !== generation) {
@@ -712,8 +715,7 @@ export class WhatsAppClient {
         state: hadFailure ? 'partial' : 'complete',
         processed,
         total: lids.length,
-        resolvedNames: coverage.resolvedNames,
-        resolvedPhones: coverage.resolvedPhones,
+        ...this.#resolvedContactCounts(),
         ...(unresolved ? { message: `${unresolved} contacts are not shared by WhatsApp or are not saved on the linked phone.` } : {})
       }
       this.#setContactSyncState(state)
@@ -771,6 +773,7 @@ export class WhatsAppClient {
         const url = await socket.profilePictureUrl(lookupJid, 'preview', 8_000)
         if (!url) {
           this.#database.markContactAvatarMissing(resolved)
+          this.#emit({ type: 'contact.changed', payload: { chatIds: [resolved] } })
           return
         }
         const token = await this.media.downloadAvatar(url)
@@ -778,8 +781,13 @@ export class WhatsAppClient {
         this.#database.saveContactAvatar(resolved, token)
         this.#emit({ type: 'contact.changed', payload: { chatIds: [resolved] } })
       } catch (error) {
-        this.#database.markContactAvatarMissing(resolved)
-        this.#logger.warn({ reason: error instanceof Error ? error.name : 'unknown' }, 'contact avatar refresh failed')
+        const confirmedMissing = isConfirmedAvatarMissing(error)
+        if (confirmedMissing) {
+          this.#database.markContactAvatarMissing(resolved)
+          this.#emit({ type: 'contact.changed', payload: { chatIds: [resolved] } })
+        }
+        else this.#database.markContactAvatarFailure(resolved)
+        this.#logger.warn({ chatId: resolved, confirmedMissing, reason: errorDetails(error) }, 'contact avatar refresh failed')
       }
     })
     this.#avatarRequests.set(resolved, operation)
@@ -801,9 +809,10 @@ export class WhatsAppClient {
     })
   }
 
-  #resolvedContactCounts(): Pick<ContactSyncState, 'resolvedNames' | 'resolvedPhones'> {
+  #resolvedContactCounts(): Pick<ContactSyncState, 'resolvedNames' | 'resolvedPhones' | 'savedNames' | 'profileNames'> {
     const coverage = this.#database.identityCoverage()
-    return { resolvedNames: coverage.resolvedNames, resolvedPhones: coverage.resolvedPhones }
+    return { resolvedNames: coverage.resolvedNames, resolvedPhones: coverage.resolvedPhones,
+      savedNames: coverage.savedNames, profileNames: coverage.profileNames }
   }
 
   #setContactSyncState(state: ContactSyncState): void {
@@ -950,6 +959,27 @@ export class WhatsAppClient {
   }
 }
 
+export function isConfirmedAvatarMissing(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const value = error as {
+    message?: unknown
+    statusCode?: unknown
+    output?: { statusCode?: unknown }
+    data?: { statusCode?: unknown } | number
+  }
+  const statusCode = Number(value.statusCode ?? value.output?.statusCode ??
+    (typeof value.data === 'object' ? value.data?.statusCode : value.data))
+  if (statusCode === 404) return true
+  return typeof value.message === 'string' && /(?:\b404\b|not found|item-not-found)/i.test(value.message)
+}
+
+function errorDetails(error: unknown): string {
+  if (!(error instanceof Error)) return String(error)
+  const value = error as Error & { code?: string | number; output?: { statusCode?: number } }
+  const suffix = value.code ?? value.output?.statusCode
+  return suffix === undefined ? error.message : `${error.message} (${suffix})`
+}
+
 function mediaContent(path: string, kind: string, caption?: string): Record<string, unknown> {
   const url = { url: path }
   switch (kind) {
@@ -971,6 +1001,40 @@ function mimeForPath(path: string): string {
 
 function stableWhatsAppMessageId(clientId: string): string {
   return clientId.replaceAll('-', '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 32).toUpperCase()
+}
+
+function contactEventId(contact: Partial<Contact>): string | undefined {
+  const explicit = contact.id?.trim() || contact.lid?.trim()
+  return explicit || normalizeContactPhoneJid(contact.phoneNumber)
+}
+
+function normalizeContactPhoneJid(value?: string | null): string | undefined {
+  const candidate = value?.trim()
+  if (!candidate) return undefined
+  if (candidate.endsWith('@s.whatsapp.net') || candidate.endsWith('@hosted')) return candidate
+  const number = candidate.split('@')[0]?.split(':')[0]?.replace(/\D/g, '')
+  return number ? `${number}@s.whatsapp.net` : undefined
+}
+
+export function normalizeContactIdentityInput(contact: Partial<Contact>): {
+  id: string
+  lid?: string
+  phoneNumber?: string
+  name?: string
+  pushName?: string
+  avatarUrl?: string
+} | undefined {
+  const id = contactEventId(contact)
+  if (!id) return undefined
+  const phoneJid = normalizeContactPhoneJid(contact.phoneNumber) ?? (isPhoneJid(id) ? id : undefined)
+  return {
+    id,
+    lid: contact.lid?.trim() || (isLidJid(id) ? id : undefined),
+    phoneNumber: phoneJid?.split('@')[0],
+    name: contact.name?.trim() || undefined,
+    pushName: contact.notify?.trim() || undefined,
+    avatarUrl: typeof contact.imgUrl === 'string' && contact.imgUrl !== 'changed' ? contact.imgUrl : undefined
+  }
 }
 
 function labelForJid(jid: string): string {
