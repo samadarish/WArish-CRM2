@@ -42,7 +42,9 @@ const api: WarishApi = {
     react: (chatId, messageId, emoji) => invoke<void>('message.react', { chatId, messageId, emoji }),
     edit: (chatId, messageId, text) => invoke<void>('message.edit', { chatId, messageId, text }),
     delete: (chatId, messageId, mode) => invoke<void>('message.delete', { chatId, messageId, mode }),
-    forward: (messageId, chatIds) => invoke<void>('message.forward', { messageId, chatIds })
+    forward: (messageId, chatIds, restrictedContactAcknowledgements) => invoke<void>('message.forward', {
+      messageId, chatIds, restrictedContactAcknowledgements
+    })
   },
   media: {
     pick: () => ipcRenderer.invoke('warish:pick-attachment') as Promise<PickedAttachment | null>,
@@ -67,7 +69,8 @@ const api: WarishApi = {
     },
     notes: {
       list: (contactId) => invoke<CrmNoteDto[]>('crm.notes.list', { contactId }),
-      add: (contactId, body) => invoke<CrmNoteDto>('crm.notes.add', { contactId, body }),
+      add: (contactId, body, sourceMessageId) => invoke<CrmNoteDto>('crm.notes.add', { contactId, body, sourceMessageId }),
+      save: (input) => invoke<CrmNoteDto>('crm.notes.save', { input }),
       delete: (noteId) => invoke<void>('crm.notes.delete', { noteId })
     },
     tasks: {

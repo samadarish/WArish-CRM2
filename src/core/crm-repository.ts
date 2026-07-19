@@ -8,7 +8,9 @@ import type {
   CrmContactSummaryDto,
   CrmDashboardDto,
   CrmLifecycle,
+  CrmMessageReferenceDto,
   CrmNoteDto,
+  CrmNoteInput,
   CrmOrderDto,
   CrmOrderInput,
   CrmOrderItemDto,
@@ -17,6 +19,7 @@ import type {
   CrmStageKey,
   CrmTagDto,
   CrmTaskDto,
+  CrmTaskInput,
   GoogleContactDraft
 } from '../shared/contracts'
 import { WarishDatabase } from './database'
@@ -44,6 +47,13 @@ export interface GoogleContactLink {
   etag?: string
   accountEmail?: string
   lastSyncedAt: number
+}
+
+export class ContactRestrictedError extends Error {
+  constructor(name: string, reasons: string[]) {
+    super(`Confirmation required before contacting ${name}: ${reasons.join(' and ')}.`)
+    this.name = 'ContactRestrictedError'
+  }
 }
 
 /** Local-first CRM operations. All business data stays in the same encrypted-at-rest app boundary as WhatsApp. */
@@ -136,6 +146,26 @@ export class CrmRepository {
     return this.#mapContactDetails(row)
   }
 
+  assertCanContact(chatIdInput: string, acknowledged: boolean): void {
+    const chatId = this.#database.resolveChatId(chatIdInput)
+    const row = this.#database.db.prepare(`SELECT crm.name, crm.do_not_contact, crm.consent_status,
+      identity.saved_name, identity.whatsapp_name, identity.phone_number, chats.title AS chat_title
+      FROM crm_contacts crm
+      LEFT JOIN contact_identities identity ON identity.identity_id=crm.identity_id
+      LEFT JOIN chats ON chats.id=crm.chat_id
+      WHERE crm.chat_id=? OR crm.identity_id=(SELECT identity_id FROM contact_identity_aliases WHERE alias_id=?)
+      ORDER BY crm.updated_at DESC LIMIT 1`).get(chatId, chatId) as Row | undefined
+    if (!row) return
+    const reasons = [row.do_not_contact ? 'the contact is marked do not contact' : undefined,
+      row.consent_status === 'denied' ? 'consent is denied' : undefined].filter((reason): reason is string => Boolean(reason))
+    if (reasons.length && !acknowledged) {
+      const phone = formatPhone(textValue(row.phone_number))
+      const name = textValue(row.name) ?? textValue(row.saved_name) ?? textValue(row.whatsapp_name) ??
+        usableName(textValue(row.chat_title), phone) ?? phone ?? 'this contact'
+      throw new ContactRestrictedError(name, reasons)
+    }
+  }
+
   ensureContact(chatIdInput: string, source = 'manual'): CrmContactDetailsDto {
     const chatId = this.#database.resolveChatId(chatIdInput)
     const existing = this.#findByChat(chatId)
@@ -211,8 +241,9 @@ export class CrmRepository {
         .run(...values, Date.now(), contactId)
       if (patch.tags !== undefined) this.#replaceTags(contactId, patch.tags)
     })
-    this.#changed({ contactId, scope: 'contact' })
-    return this.getContact({ contactId })
+    const contact = this.getContact({ contactId })
+    this.#changed({ contactId, chatId: contact.chatId, scope: 'contact' })
+    return contact
   }
 
   setStage(contactId: string, stageId: string): CrmContactDetailsDto {
@@ -250,27 +281,45 @@ export class CrmRepository {
       .map(mapNote)
   }
 
-  addNote(contactId: string, bodyInput: string): CrmNoteDto {
-    this.getContact({ contactId })
-    const body = cleanText(bodyInput, 20_000)
+  addNote(contactId: string, bodyInput: string, sourceMessageId?: string): CrmNoteDto {
+    return this.saveNote({ contactId, body: bodyInput, sourceMessageId })
+  }
+
+  saveNote(input: CrmNoteInput): CrmNoteDto {
+    const contact = this.getContact({ contactId: input.contactId })
+    const body = cleanText(input.body, 20_000)
     if (!body) throw new Error('Note cannot be empty')
-    const id = randomUUID()
+    const existing = input.id
+      ? this.#database.db.prepare('SELECT * FROM crm_notes WHERE id=?').get(input.id) as Row | undefined
+      : undefined
+    if (input.id && !existing) throw new Error('Note not found')
+    if (existing && String(existing.contact_id) !== input.contactId) throw new Error('Note contact cannot be changed')
+    const id = input.id ?? randomUUID()
     const now = Date.now()
+    const sourceMessage = textValue(existing?.source_message_snapshot)
+      ? parseMessageReference(existing?.source_message_snapshot)
+      : this.#messageReference(contact, input.sourceMessageId)
+    const sourceMessageId = textValue(existing?.source_message_id) ?? sourceMessage?.messageId
+    const sourceSnapshot = textValue(existing?.source_message_snapshot) ?? (sourceMessage ? JSON.stringify(sourceMessage) : null)
     this.#database.transaction(() => {
-      this.#database.db.prepare('INSERT INTO crm_notes(id, contact_id, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
-        .run(id, contactId, body, now, now)
-      this.#database.db.prepare('UPDATE crm_contacts SET last_activity_at=?, updated_at=? WHERE id=?').run(now, now, contactId)
-      this.#addActivity(contactId, 'note-added', 'Note added')
+      this.#database.db.prepare(`INSERT INTO crm_notes(
+        id, contact_id, body, source_message_id, source_message_snapshot, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET body=excluded.body, updated_at=excluded.updated_at`)
+        .run(id, input.contactId, body, sourceMessageId ?? null, sourceSnapshot, numberValue(existing?.created_at) || now, now)
+      this.#database.db.prepare('UPDATE crm_contacts SET last_activity_at=?, updated_at=? WHERE id=?').run(now, now, input.contactId)
+      this.#addActivity(input.contactId, existing ? 'note-updated' : 'note-added', existing ? 'Note updated' : 'Note added')
     })
-    this.#changed({ contactId, scope: 'contact' })
+    this.#changed({ contactId: input.contactId, chatId: contact.chatId, scope: 'contact' })
     return mapNote(this.#database.db.prepare('SELECT * FROM crm_notes WHERE id=?').get(id) as Row)
   }
 
   deleteNote(noteId: string): void {
-    const note = this.#database.db.prepare('SELECT contact_id FROM crm_notes WHERE id=?').get(noteId) as Row | undefined
+    const note = this.#database.db.prepare(`SELECT notes.contact_id, contacts.chat_id FROM crm_notes notes
+      JOIN crm_contacts contacts ON contacts.id=notes.contact_id WHERE notes.id=?`).get(noteId) as Row | undefined
     if (!note) return
     this.#database.db.prepare('DELETE FROM crm_notes WHERE id=?').run(noteId)
-    this.#changed({ contactId: String(note.contact_id), scope: 'contact' })
+    this.#changed({ contactId: String(note.contact_id), chatId: String(note.chat_id), scope: 'contact' })
   }
 
   listTasks(input: { contactId?: string; status?: CrmTaskDto['status']; due?: 'overdue' | 'today' | 'upcoming' } = {}): CrmTaskDto[] {
@@ -289,23 +338,29 @@ export class CrmRepository {
       ORDER BY CASE status WHEN 'open' THEN 0 ELSE 1 END, due_at IS NULL, due_at, created_at DESC`).all(...values) as Row[]).map(mapTask)
   }
 
-  saveTask(input: Partial<CrmTaskDto> & Pick<CrmTaskDto, 'contactId' | 'title'>): CrmTaskDto {
-    this.getContact({ contactId: input.contactId })
+  saveTask(input: CrmTaskInput): CrmTaskDto {
+    const contact = this.getContact({ contactId: input.contactId })
     const title = cleanText(input.title, 240)
     if (!title) throw new Error('Task title cannot be empty')
     const existing = input.id
       ? this.#database.db.prepare('SELECT * FROM crm_tasks WHERE id=?').get(input.id) as Row | undefined
       : undefined
     if (input.id && !existing) throw new Error('Task not found')
+    if (existing && String(existing.contact_id) !== input.contactId) throw new Error('Task contact cannot be changed')
     const id = input.id ?? randomUUID()
     const now = Date.now()
     const status = input.status ?? (existing?.status as CrmTaskDto['status'] | undefined) ?? 'open'
     const completedAt = status === 'completed' ? numberValue(existing?.completed_at) || now : null
+    const sourceMessage = textValue(existing?.source_message_snapshot)
+      ? parseMessageReference(existing?.source_message_snapshot)
+      : this.#messageReference(contact, input.sourceMessageId)
+    const sourceMessageId = textValue(existing?.source_message_id) ?? sourceMessage?.messageId
+    const sourceSnapshot = textValue(existing?.source_message_snapshot) ?? (sourceMessage ? JSON.stringify(sourceMessage) : null)
     this.#database.transaction(() => {
       this.#database.db.prepare(`
         INSERT INTO crm_tasks(id, contact_id, order_id, title, description, due_at, priority, status, reminder_at,
-          notified_at, created_at, completed_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          notified_at, source_message_id, source_message_snapshot, created_at, completed_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET contact_id=excluded.contact_id, order_id=excluded.order_id, title=excluded.title,
           description=excluded.description, due_at=excluded.due_at, priority=excluded.priority, status=excluded.status,
           reminder_at=excluded.reminder_at,
@@ -316,20 +371,22 @@ export class CrmRepository {
         finiteOptional(input.dueAt ?? numberOptional(existing?.due_at)) ?? null,
         input.priority ?? (existing?.priority as CrmTaskDto['priority'] | undefined) ?? 'normal', status,
         finiteOptional(input.reminderAt ?? numberOptional(existing?.reminder_at)) ?? null,
-        numberOptional(existing?.notified_at) ?? null, numberValue(existing?.created_at) || now, completedAt, now)
+        numberOptional(existing?.notified_at) ?? null, sourceMessageId ?? null, sourceSnapshot,
+        numberValue(existing?.created_at) || now, completedAt, now)
       this.#addActivity(input.contactId, !existing ? 'task-created' : status === 'completed' && existing.status !== 'completed'
         ? 'task-completed' : 'task-updated', !existing ? `Task created: ${title}` : status === 'completed' && existing.status !== 'completed'
           ? `Task completed: ${title}` : `Task updated: ${title}`)
     })
-    this.#changed({ contactId: input.contactId, scope: 'task' })
+    this.#changed({ contactId: input.contactId, chatId: contact.chatId, scope: 'task' })
     return mapTask(this.#database.db.prepare('SELECT * FROM crm_tasks WHERE id=?').get(id) as Row)
   }
 
   deleteTask(taskId: string): void {
-    const row = this.#database.db.prepare('SELECT contact_id FROM crm_tasks WHERE id=?').get(taskId) as Row | undefined
+    const row = this.#database.db.prepare(`SELECT tasks.contact_id, contacts.chat_id FROM crm_tasks tasks
+      JOIN crm_contacts contacts ON contacts.id=tasks.contact_id WHERE tasks.id=?`).get(taskId) as Row | undefined
     if (!row) return
     this.#database.db.prepare('DELETE FROM crm_tasks WHERE id=?').run(taskId)
-    this.#changed({ contactId: String(row.contact_id), scope: 'task' })
+    this.#changed({ contactId: String(row.contact_id), chatId: String(row.chat_id), scope: 'task' })
   }
 
   takeDueTaskNotifications(now = Date.now()): CrmTaskDto[] {
@@ -510,6 +567,26 @@ export class CrmRepository {
     return this.getContact({ contactId })
   }
 
+  #messageReference(contact: CrmContactDetailsDto, sourceMessageId?: string): CrmMessageReferenceDto | undefined {
+    const messageId = cleanText(sourceMessageId, 300)
+    if (!messageId) return undefined
+    const message = this.#database.getMessage(messageId)
+    if (this.#database.resolveChatId(message.chatId) !== this.#database.resolveChatId(contact.chatId)) {
+      throw new Error('The source message does not belong to this CRM contact')
+    }
+    const preview = message.text ?? message.rich?.body ?? message.rich?.title ?? message.attachment?.fileName ?? message.kind
+    return {
+      messageId: message.id,
+      chatId: message.chatId,
+      senderId: cleanText(message.senderId, 300) || undefined,
+      senderName: cleanText(message.senderName, 160) || undefined,
+      fromMe: message.fromMe,
+      kind: message.kind,
+      text: cleanText(preview, 500) || undefined,
+      timestamp: message.timestamp
+    }
+  }
+
   #findByChat(chatId: string): Row | undefined {
     return this.#database.db.prepare(`${CONTACT_SELECT} WHERE crm.chat_id=? OR crm.identity_id=(
       SELECT identity_id FROM contact_identity_aliases WHERE alias_id=?
@@ -606,12 +683,14 @@ function mapContactSummary(row: Row, tags: CrmTagDto[]): CrmContactSummaryDto {
 function mapTag(row: Row): CrmTagDto { return { id: String(row.id), name: String(row.name), color: String(row.color) } }
 function mapNote(row: Row): CrmNoteDto {
   return { id: String(row.id), contactId: String(row.contact_id), body: String(row.body),
+    sourceMessageId: textValue(row.source_message_id), sourceMessage: parseMessageReference(row.source_message_snapshot),
     createdAt: numberValue(row.created_at), updatedAt: numberValue(row.updated_at) }
 }
 function mapTask(row: Row): CrmTaskDto {
   return { id: String(row.id), contactId: String(row.contact_id), orderId: textValue(row.order_id), title: String(row.title),
     description: textValue(row.description), dueAt: numberOptional(row.due_at), priority: row.priority as CrmTaskDto['priority'],
     status: row.status as CrmTaskDto['status'], reminderAt: numberOptional(row.reminder_at), notifiedAt: numberOptional(row.notified_at),
+    sourceMessageId: textValue(row.source_message_id), sourceMessage: parseMessageReference(row.source_message_snapshot),
     createdAt: numberValue(row.created_at), completedAt: numberOptional(row.completed_at) }
 }
 function mapCatalogItem(row: Row): CrmCatalogItemDto {
@@ -699,4 +778,21 @@ function parseObject(value: unknown): Record<string, unknown> | undefined {
     const parsed = JSON.parse(value) as unknown
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : undefined
   } catch { return undefined }
+}
+
+function parseMessageReference(value: unknown): CrmMessageReferenceDto | undefined {
+  const parsed = parseObject(value)
+  if (!parsed || typeof parsed.messageId !== 'string' || typeof parsed.chatId !== 'string' ||
+    typeof parsed.fromMe !== 'boolean' || typeof parsed.kind !== 'string' || typeof parsed.timestamp !== 'number') return undefined
+  const kinds = new Set(['text', 'image', 'video', 'document', 'audio', 'voice', 'sticker', 'location', 'contact',
+    'poll', 'rich', 'system', 'unsupported'])
+  if (!kinds.has(parsed.kind)) return undefined
+  return {
+    messageId: parsed.messageId.slice(0, 300), chatId: parsed.chatId.slice(0, 300),
+    senderId: typeof parsed.senderId === 'string' ? parsed.senderId.slice(0, 300) : undefined,
+    senderName: typeof parsed.senderName === 'string' ? parsed.senderName.slice(0, 160) : undefined,
+    fromMe: parsed.fromMe, kind: parsed.kind as CrmMessageReferenceDto['kind'],
+    text: typeof parsed.text === 'string' ? parsed.text.slice(0, 500) : undefined,
+    timestamp: parsed.timestamp
+  }
 }

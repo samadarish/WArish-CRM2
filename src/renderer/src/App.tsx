@@ -129,7 +129,11 @@ function handleEvent(event: CoreEventEnvelope, queryClient: ReturnType<typeof us
     const payload = event.payload
     void queryClient.invalidateQueries({ queryKey: ['crm'] })
     if (payload.contactId) void queryClient.invalidateQueries({ queryKey: ['crm', 'contact', payload.contactId] })
-    if (payload.chatId) void queryClient.invalidateQueries({ queryKey: ['crm', 'contact', 'chat', payload.chatId] })
+    if (payload.chatId) {
+      void queryClient.invalidateQueries({ queryKey: ['chat', payload.chatId] })
+      void queryClient.invalidateQueries({ queryKey: ['crm', 'contact', 'chat', payload.chatId] })
+    }
+    scheduleChatRefresh(queryClient)
   }
   if (event.type === 'crm.taskDue') {
     void queryClient.invalidateQueries({ queryKey: ['crm', 'tasks'] })

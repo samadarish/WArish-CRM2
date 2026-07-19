@@ -40,6 +40,7 @@ export const RPC_METHODS = [
   'crm.contacts.setLifecycle',
   'crm.notes.list',
   'crm.notes.add',
+  'crm.notes.save',
   'crm.notes.delete',
   'crm.tasks.list',
   'crm.tasks.save',
@@ -203,6 +204,7 @@ export interface ChatSummary {
   pinned: boolean
   mutedUntil?: number
   typing?: boolean
+  crm?: CrmChatIndicatorDto
 }
 
 export interface CommunitySummary {
@@ -318,6 +320,24 @@ export interface DraftDto {
 export type CrmLifecycle = 'lead' | 'customer' | 'ignored' | 'spam'
 export type CrmStageKey = 'new' | 'qualified' | 'quoted' | 'won' | 'lost'
 
+export interface CrmChatIndicatorDto {
+  contactId: string
+  name?: string
+  lifecycle: CrmLifecycle
+  stageId: string
+  stageKey: CrmStageKey
+  stageName: string
+  stageColor: string
+  openTaskCount: number
+  nextTask?: {
+    id: string
+    title: string
+    dueAt?: number
+    priority: CrmTaskDto['priority']
+  }
+  restricted: boolean
+}
+
 export interface CrmStageDto {
   id: string
   key: CrmStageKey
@@ -380,12 +400,32 @@ export interface CrmDashboardDto {
   pipeline: Array<CrmStageDto & { count: number; value: number }>
 }
 
+export interface CrmMessageReferenceDto {
+  messageId: string
+  chatId: string
+  senderId?: string
+  senderName?: string
+  fromMe: boolean
+  kind: MessageKind
+  text?: string
+  timestamp: number
+}
+
 export interface CrmNoteDto {
   id: string
   contactId: string
   body: string
+  sourceMessageId?: string
+  sourceMessage?: CrmMessageReferenceDto
   createdAt: number
   updatedAt: number
+}
+
+export interface CrmNoteInput {
+  id?: string
+  contactId: string
+  body: string
+  sourceMessageId?: string
 }
 
 export interface CrmTaskDto {
@@ -399,8 +439,23 @@ export interface CrmTaskDto {
   status: 'open' | 'completed' | 'cancelled'
   reminderAt?: number
   notifiedAt?: number
+  sourceMessageId?: string
+  sourceMessage?: CrmMessageReferenceDto
   createdAt: number
   completedAt?: number
+}
+
+export interface CrmTaskInput {
+  id?: string
+  contactId: string
+  orderId?: string
+  title: string
+  description?: string
+  dueAt?: number
+  priority?: CrmTaskDto['priority']
+  status?: CrmTaskDto['status']
+  reminderAt?: number
+  sourceMessageId?: string
 }
 
 export interface CrmCatalogItemDto {
@@ -469,7 +524,7 @@ export interface CrmOrderDto {
 export interface CrmActivityDto {
   id: string
   contactId: string
-  type: 'lead-created' | 'stage-changed' | 'lifecycle-changed' | 'note-added' | 'task-created' | 'task-updated' | 'task-completed' | 'order-created' | 'order-updated' | 'google-saved'
+  type: 'lead-created' | 'stage-changed' | 'lifecycle-changed' | 'note-added' | 'note-updated' | 'task-created' | 'task-updated' | 'task-completed' | 'order-created' | 'order-updated' | 'google-saved'
   summary: string
   metadata?: Record<string, unknown>
   createdAt: number
@@ -549,6 +604,7 @@ export type AppErrorCode =
   | 'MEDIA_EXPIRED'
   | 'AUTH_LOST'
   | 'SECURE_STORAGE_UNAVAILABLE'
+  | 'CONTACT_RESTRICTED'
   | 'INTERNAL'
 
 export interface AppError {
@@ -618,12 +674,13 @@ export interface WarishApi {
       attachmentToken?: string
       attachmentKind?: 'image' | 'video' | 'document' | 'audio' | 'voice' | 'sticker'
       quotedMessageId?: string
+      restrictedContactAcknowledged?: boolean
     }): Promise<MessageDto>
     retry(messageId: string): Promise<MessageDto>
     react(chatId: string, messageId: string, emoji?: string): Promise<void>
     edit(chatId: string, messageId: string, text: string): Promise<void>
     delete(chatId: string, messageId: string, mode: 'for-me' | 'for-everyone'): Promise<void>
-    forward(messageId: string, chatIds: string[]): Promise<void>
+    forward(messageId: string, chatIds: string[], restrictedContactAcknowledgements?: string[]): Promise<void>
   }
   media: {
     pick(): Promise<PickedAttachment | null>
@@ -648,12 +705,13 @@ export interface WarishApi {
     }
     notes: {
       list(contactId: string): Promise<CrmNoteDto[]>
-      add(contactId: string, body: string): Promise<CrmNoteDto>
+      add(contactId: string, body: string, sourceMessageId?: string): Promise<CrmNoteDto>
+      save(input: CrmNoteInput): Promise<CrmNoteDto>
       delete(noteId: string): Promise<void>
     }
     tasks: {
       list(input?: { contactId?: string; status?: CrmTaskDto['status']; due?: 'overdue' | 'today' | 'upcoming' }): Promise<CrmTaskDto[]>
-      save(input: Partial<CrmTaskDto> & Pick<CrmTaskDto, 'contactId' | 'title'>): Promise<CrmTaskDto>
+      save(input: CrmTaskInput): Promise<CrmTaskDto>
       delete(taskId: string): Promise<void>
     }
     catalog: {

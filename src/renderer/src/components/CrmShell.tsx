@@ -7,13 +7,14 @@ import {
 } from 'lucide-react'
 import type {
   CrmCatalogItemDto, CrmContactDetailsDto, CrmContactSummaryDto, CrmDashboardDto,
-  CrmOrderDto, CrmOrderInput, CrmStageDto, CrmTaskDto, GoogleContactDraft, GoogleContactPreview
+  CrmMessageReferenceDto, CrmNoteDto, CrmOrderDto, CrmOrderInput, CrmStageDto, CrmTaskDto,
+  GoogleContactDraft, GoogleContactPreview
 } from '../../../shared/contracts'
 import { useUiStore } from '../store'
 import { Avatar } from './Avatar'
 
 type CrmView = 'overview' | 'leads' | 'customers' | 'orders' | 'tasks' | 'catalog'
-type ContactTab = 'profile' | 'notes' | 'orders' | 'tasks' | 'activity'
+type ContactTab = 'overview' | 'notes' | 'tasks' | 'orders' | 'activity'
 
 const CRM_VIEWS: Array<{ id: CrmView; label: string; icon: ReactNode }> = [
   { id: 'overview', label: 'Overview', icon: <LayoutDashboard /> },
@@ -84,9 +85,8 @@ export function CrmShell(): React.JSX.Element {
           onEdit={setCatalogDialogItem} onError={(message) => pushNotice(message)} />}
       </section>
     </div>
-    {selectedContactId && <ContactPanel contactId={selectedContactId} stages={stagesQuery.data ?? []}
-      onClose={() => openCrmContact()} onTask={() => setTaskDialogContactId(selectedContactId)}
-      onOrder={() => setOrderDialogContactId(selectedContactId)} />}
+    {selectedContactId && <CrmContactPanel contactId={selectedContactId} stages={stagesQuery.data ?? []}
+      onClose={() => openCrmContact()} />}
     {taskDialogContactId && <TaskDialog initialContactId={taskDialogContactId} contacts={allContactsQuery.data ?? []}
       onClose={() => setTaskDialogContactId(undefined)} />}
     {orderDialogContactId && <OrderDialog initialContactId={orderDialogContactId} contacts={allContactsQuery.data ?? []}
@@ -193,47 +193,71 @@ function CatalogView({ items, loading, onEdit, onError }: { items?: CrmCatalogIt
       onClick={() => archive.mutate(item.id)}><Trash2 />Archive</button> : <span>Archived</span>}</footer></article>)}</div>
 }
 
-function ContactPanel({ contactId, stages, onClose, onTask, onOrder }: { contactId: string; stages: CrmStageDto[]; onClose(): void; onTask(): void; onOrder(): void }): React.JSX.Element {
-  const [tab, setTab] = useState<ContactTab>('profile')
+export function CrmContactPanel({ contactId, stages, onClose, inConversation = false, overviewPrefix, onJumpToMessage }: {
+  contactId: string
+  stages: CrmStageDto[]
+  onClose(): void
+  inConversation?: boolean
+  overviewPrefix?: ReactNode
+  onJumpToMessage?(messageId: string): void
+}): React.JSX.Element {
+  const [tab, setTab] = useState<ContactTab>('overview')
   const [editing, setEditing] = useState(false)
   const [googleOpen, setGoogleOpen] = useState(false)
+  const [taskEditor, setTaskEditor] = useState<CrmTaskDto | null>()
+  const [orderEditor, setOrderEditor] = useState<CrmOrderDto | null>()
   const queryClient = useQueryClient()
   const pushNotice = useUiStore((state) => state.pushNotice)
   const openChat = useUiStore((state) => state.openChat)
   const contactQuery = useQuery({ queryKey: ['crm', 'contact', contactId], queryFn: () => window.warish.crm.contacts.get({ contactId }) })
+  const catalogQuery = useQuery({ queryKey: ['crm', 'catalog'], queryFn: () => window.warish.crm.catalog.list(undefined, false),
+    enabled: orderEditor !== undefined })
   const stage = useMutation({ mutationFn: (stageId: string) => window.warish.crm.contacts.setStage(contactId, stageId),
-    onSuccess: (contact) => { queryClient.setQueryData(['crm', 'contact', contactId], contact); void queryClient.invalidateQueries({ queryKey: ['crm'] }) },
+    onSuccess: (contact) => {
+      queryClient.setQueryData(['crm', 'contact', contactId], contact)
+      queryClient.setQueryData(['crm', 'contact', 'chat', contact.chatId], contact)
+      void queryClient.invalidateQueries({ queryKey: ['crm'] })
+    },
     onError: (error) => pushNotice(errorMessage(error)) })
-  useEffect(() => { setTab('profile'); setEditing(false); setGoogleOpen(false) }, [contactId])
+  useEffect(() => {
+    setTab('overview'); setEditing(false); setGoogleOpen(false); setTaskEditor(undefined); setOrderEditor(undefined)
+  }, [contactId])
   const contact = contactQuery.data
-  return <aside className="crm-contact-panel" aria-label="CRM contact record"><header><div><span>Contact record</span><strong>{contact?.name ?? 'Loading…'}</strong></div>
-    <button className="icon-button" aria-label="Close contact record" onClick={onClose}><X /></button></header>
-    {!contact ? <CrmLoading label="Loading contact…" /> : <>
+  return <><aside className={`crm-contact-panel ${inConversation ? 'in-conversation' : ''}`} aria-label="CRM contact record"><header><div><span>Customer details</span><strong>{contact?.name ?? 'Loading…'}</strong></div>
+    <button className="icon-button" aria-label="Close customer details" onClick={onClose}><X /></button></header>
+    {contactQuery.isError ? <CrmError label="Could not load this customer" onRetry={() => void contactQuery.refetch()} /> : !contact ? <CrmLoading label="Loading contact…" /> : <>
       <div className="crm-contact-hero"><Avatar title={contact.name} src={contact.avatarUrl} large /><div><h2>{contact.name}</h2>
         {contact.whatsappName && contact.whatsappName !== contact.name && <span className="whatsapp-profile-pill">{contact.whatsappName}</span>}
         {contact.phoneNumber && <p>{contact.phoneNumber}</p>}<div><StagePill contact={contact} />{contact.googleLinked && <span className="google-linked">Google linked</span>}</div></div></div>
-      <div className="crm-contact-actions"><button onClick={() => openChat(contact.chatId, 'direct')}><MessageCircle />Message</button>
-        <button onClick={onTask}><CalendarClock />Task</button><button onClick={onOrder}><ShoppingBag />Order</button>
+      <div className="crm-contact-actions"><button onClick={() => inConversation ? onClose() : openChat(contact.chatId, 'direct')}><MessageCircle />Message</button>
+        <button onClick={() => setTaskEditor(null)}><CalendarClock />Task</button><button onClick={() => setOrderEditor(null)}><ShoppingBag />Order</button>
         <button onClick={() => setGoogleOpen(true)}><BookOpen />Google</button></div>
       <label className="crm-stage-select"><span>Pipeline stage</span><select value={contact.stageId} disabled={stage.isPending}
         onChange={(event) => stage.mutate(event.target.value)}>{stages.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-      <nav className="crm-contact-tabs">{(['profile', 'notes', 'orders', 'tasks', 'activity'] as const).map((item) => <button key={item}
+      <nav className="crm-contact-tabs">{(['overview', 'notes', 'tasks', 'orders', 'activity'] as const).map((item) => <button key={item}
         className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}</button>)}</nav>
       <div className="crm-contact-body">
-        {tab === 'profile' && (editing ? <ContactEditForm contact={contact} onDone={() => setEditing(false)} />
-          : <ContactProfile contact={contact} onEdit={() => setEditing(true)} />)}
-        {tab === 'notes' && <ContactNotes contactId={contactId} />}
-        {tab === 'orders' && <ContactOrders contactId={contactId} onNew={onOrder} />}
-        {tab === 'tasks' && <ContactTasks contactId={contactId} onNew={onTask} />}
+        {tab === 'overview' && (editing ? <ContactEditForm contact={contact} onDone={() => setEditing(false)} />
+          : <ContactProfile contact={contact} onEdit={() => setEditing(true)} prefix={overviewPrefix} />)}
+        {tab === 'notes' && <ContactNotes contactId={contactId} onJumpToMessage={onJumpToMessage} />}
+        {tab === 'tasks' && <ContactTasks contactId={contactId} onNew={() => setTaskEditor(null)}
+          onEdit={(task) => setTaskEditor(task)} onJumpToMessage={onJumpToMessage} />}
+        {tab === 'orders' && <ContactOrders contactId={contactId} onNew={() => setOrderEditor(null)}
+          onEdit={(order) => setOrderEditor(order)} />}
         {tab === 'activity' && <ContactActivity contactId={contactId} />}
       </div>
       {googleOpen && <GoogleContactDialog contact={contact} onClose={() => setGoogleOpen(false)} />}
     </>}
   </aside>
+    {contact && taskEditor !== undefined && <TaskDialog key={taskEditor?.id ?? 'new-task'} initialContactId={contact.id} contacts={[contact]}
+      task={taskEditor ?? undefined} onClose={() => setTaskEditor(undefined)} />}
+    {contact && orderEditor !== undefined && <OrderDialog key={orderEditor?.id ?? 'new-order'} initialContactId={contact.id} contacts={[contact]}
+      catalog={catalogQuery.data ?? []} order={orderEditor ?? undefined} onClose={() => setOrderEditor(undefined)} />}
+  </>
 }
 
-function ContactProfile({ contact, onEdit }: { contact: CrmContactDetailsDto; onEdit(): void }): React.JSX.Element {
-  return <div className="crm-profile-section"><header><strong>Business details</strong><button className="secondary-button" onClick={onEdit}><Pencil />Edit</button></header>
+function ContactProfile({ contact, onEdit, prefix }: { contact: CrmContactDetailsDto; onEdit(): void; prefix?: ReactNode }): React.JSX.Element {
+  return <div className="crm-profile-section">{prefix}<header><strong>Business details</strong><button className="secondary-button" onClick={onEdit}><Pencil />Edit</button></header>
     <dl><ProfileField label="Email" value={contact.email} /><ProfileField label="Company" value={contact.company} />
       <ProfileField label="Address" value={contact.address} /><ProfileField label="Tax ID / GST" value={contact.taxId} />
       <ProfileField label="Birthday" value={contact.birthday} /><ProfileField label="Lead source" value={contact.source} />
@@ -272,31 +296,55 @@ function ContactEditForm({ contact, onDone }: { contact: CrmContactDetailsDto; o
   </form>
 }
 
-function ContactNotes({ contactId }: { contactId: string }): React.JSX.Element {
+function ContactNotes({ contactId, onJumpToMessage }: { contactId: string; onJumpToMessage?(messageId: string): void }): React.JSX.Element {
   const [body, setBody] = useState('')
+  const [editing, setEditing] = useState<CrmNoteDto>()
   const queryClient = useQueryClient()
   const pushNotice = useUiStore((state) => state.pushNotice)
   const query = useQuery({ queryKey: ['crm', 'notes', contactId], queryFn: () => window.warish.crm.notes.list(contactId) })
-  const add = useMutation({ mutationFn: () => window.warish.crm.notes.add(contactId, body), onSuccess: () => {
-    setBody(''); void queryClient.invalidateQueries({ queryKey: ['crm', 'notes', contactId] }); void queryClient.invalidateQueries({ queryKey: ['crm'] })
+  const save = useMutation({ mutationFn: () => window.warish.crm.notes.save({ id: editing?.id, contactId, body,
+    sourceMessageId: editing?.sourceMessageId }), onSuccess: () => {
+    setBody(''); setEditing(undefined); void queryClient.invalidateQueries({ queryKey: ['crm', 'notes', contactId] }); void queryClient.invalidateQueries({ queryKey: ['crm'] })
   }, onError: (error) => pushNotice(errorMessage(error)) })
-  return <div className="crm-note-section"><form onSubmit={(event) => { event.preventDefault(); if (body.trim()) add.mutate() }}><textarea value={body}
-    onChange={(event) => setBody(event.target.value)} placeholder="Add context, requirements, or a call summary…" /><button className="primary-button" disabled={!body.trim() || add.isPending}><NotebookPen />Add note</button></form>
-    <div className="crm-note-list">{query.data?.map((note) => <article key={note.id}><p>{note.body}</p><time>{formatDateTime(note.createdAt)}</time></article>)}
+  const remove = useMutation({ mutationFn: (noteId: string) => window.warish.crm.notes.delete(noteId), onSuccess: () => {
+    void queryClient.invalidateQueries({ queryKey: ['crm', 'notes', contactId] }); void queryClient.invalidateQueries({ queryKey: ['crm'] })
+  }, onError: (error) => pushNotice(errorMessage(error)) })
+  const edit = (note: CrmNoteDto): void => { setEditing(note); setBody(note.body) }
+  return <div className="crm-note-section"><form onSubmit={(event) => { event.preventDefault(); if (body.trim()) save.mutate() }}><textarea value={body}
+    onChange={(event) => setBody(event.target.value)} placeholder="Add customer context" /><div className="crm-inline-form-actions">
+      {editing && <button type="button" className="secondary-button" onClick={() => { setEditing(undefined); setBody('') }}>Cancel</button>}
+      <button className="primary-button" disabled={!body.trim() || save.isPending}><NotebookPen />{editing ? 'Save note' : 'Add note'}</button></div></form>
+    <div className="crm-note-list">{query.data?.map((note) => <article key={note.id}><p>{note.body}</p>
+      {note.sourceMessage && <MessageReference reference={note.sourceMessage} onJump={onJumpToMessage} />}
+      <footer><time>{formatDateTime(note.createdAt)}</time><span><button className="icon-button" aria-label="Edit note" onClick={() => edit(note)}><Pencil /></button>
+        <button className="icon-button danger-text" aria-label="Delete note" disabled={remove.isPending} onClick={() => remove.mutate(note.id)}><Trash2 /></button></span></footer></article>)}
       {!query.isLoading && !query.data?.length && <CrmEmpty icon={<FileText />} title="No notes yet" description="Keep useful customer context here." />}</div></div>
 }
 
-function ContactOrders({ contactId, onNew }: { contactId: string; onNew(): void }): React.JSX.Element {
+function ContactOrders({ contactId, onNew, onEdit }: { contactId: string; onNew(): void; onEdit(order: CrmOrderDto): void }): React.JSX.Element {
   const query = useQuery({ queryKey: ['crm', 'orders', contactId], queryFn: () => window.warish.crm.orders.list(contactId) })
-  return <div><button className="primary-button contact-tab-action" onClick={onNew}><Plus />New order</button>{query.data?.map((order) => <article className="contact-order" key={order.id}>
-    <span><strong>{order.orderNumber}</strong><small>{formatDateTime(order.createdAt)}</small></span><StatusPill value={order.status} /><b>{money(order.total, order.currency)}</b></article>)}
+  return <div><button className="primary-button contact-tab-action" onClick={onNew}><Plus />New order</button>{query.data?.map((order) => <button className="contact-order" key={order.id} onClick={() => onEdit(order)}>
+    <span><strong>{order.orderNumber}</strong><small>{formatDateTime(order.createdAt)}</small></span><StatusPill value={order.status} /><b>{money(order.total, order.currency)}</b><Pencil /></button>)}
     {!query.isLoading && !query.data?.length && <CrmEmpty icon={<ShoppingBag />} title="No purchase history" description="Orders for this contact will appear here." />}</div>
 }
 
-function ContactTasks({ contactId, onNew }: { contactId: string; onNew(): void }): React.JSX.Element {
+function ContactTasks({ contactId, onNew, onEdit, onJumpToMessage }: { contactId: string; onNew(): void; onEdit(task: CrmTaskDto): void; onJumpToMessage?(messageId: string): void }): React.JSX.Element {
+  const queryClient = useQueryClient()
+  const pushNotice = useUiStore((state) => state.pushNotice)
   const query = useQuery({ queryKey: ['crm', 'tasks', contactId], queryFn: () => window.warish.crm.tasks.list({ contactId }) })
+  const complete = useMutation({ mutationFn: (task: CrmTaskDto) => window.warish.crm.tasks.save({ ...task,
+    status: task.status === 'completed' ? 'open' : 'completed' }), onSuccess: () => {
+    void queryClient.invalidateQueries({ queryKey: ['crm', 'tasks', contactId] }); void queryClient.invalidateQueries({ queryKey: ['crm'] })
+  }, onError: (error) => pushNotice(errorMessage(error)) })
+  const remove = useMutation({ mutationFn: (taskId: string) => window.warish.crm.tasks.delete(taskId), onSuccess: () => {
+    void queryClient.invalidateQueries({ queryKey: ['crm', 'tasks', contactId] }); void queryClient.invalidateQueries({ queryKey: ['crm'] })
+  }, onError: (error) => pushNotice(errorMessage(error)) })
   return <div><button className="primary-button contact-tab-action" onClick={onNew}><Plus />New task</button>{query.data?.map((task) => <article className="contact-task" key={task.id}>
-    <span className={task.status === 'completed' ? 'checked' : ''}>{task.status === 'completed' && <Check />}</span><div><strong>{task.title}</strong><small>{task.dueAt ? formatDateTime(task.dueAt) : 'No due date'}</small></div><PriorityPill value={task.priority} /></article>)}
+    <button className={task.status === 'completed' ? 'checked' : ''} aria-label={task.status === 'completed' ? 'Reopen task' : 'Complete task'}
+      disabled={complete.isPending} onClick={() => complete.mutate(task)}>{task.status === 'completed' && <Check />}</button>
+    <button className="contact-task-copy" onClick={() => onEdit(task)}><strong>{task.title}</strong><small>{task.dueAt ? formatDateTime(task.dueAt) : 'No due date'}</small></button>
+    <PriorityPill value={task.priority} /><button className="icon-button danger-text" aria-label="Delete task" disabled={remove.isPending} onClick={() => remove.mutate(task.id)}><Trash2 /></button>
+    {task.sourceMessage && <MessageReference reference={task.sourceMessage} onJump={onJumpToMessage} />}</article>)}
     {!query.isLoading && !query.data?.length && <CrmEmpty icon={<ListTodo />} title="No follow-ups" description="Create a task so this relationship does not go cold." />}</div>
 }
 
@@ -306,24 +354,36 @@ function ContactActivity({ contactId }: { contactId: string }): React.JSX.Elemen
     {!query.isLoading && !query.data?.length && <CrmEmpty icon={<RefreshCw />} title="No activity yet" description="CRM changes will be recorded here." />}</div>
 }
 
-function TaskDialog({ initialContactId, contacts, onClose }: { initialContactId: string; contacts: CrmContactSummaryDto[]; onClose(): void }): React.JSX.Element {
+function MessageReference({ reference, onJump }: { reference: CrmMessageReferenceDto; onJump?(messageId: string): void }): React.JSX.Element {
+  return <div className="crm-message-reference"><MessageCircle /><span><small>{reference.fromMe ? 'You' : reference.senderName ?? 'Customer'} · {formatDateTime(reference.timestamp)}</small>
+    <strong>{reference.text ?? reference.kind}</strong></span>{onJump && <button className="icon-button" title="Show source message" aria-label="Show source message"
+      onClick={() => onJump(reference.messageId)}><ExternalLink /></button>}</div>
+}
+
+function TaskDialog({ initialContactId, contacts, task, onClose }: { initialContactId: string; contacts: CrmContactSummaryDto[]; task?: CrmTaskDto; onClose(): void }): React.JSX.Element {
   const [contactId, setContactId] = useState(initialContactId)
-  const [title, setTitle] = useState('Follow up on WhatsApp')
-  const [description, setDescription] = useState('')
-  const [due, setDue] = useState(toLocalInput(Date.now() + 24 * 60 * 60 * 1000))
-  const [priority, setPriority] = useState<CrmTaskDto['priority']>('normal')
+  const [title, setTitle] = useState(task?.title ?? 'Follow up on WhatsApp')
+  const [description, setDescription] = useState(task?.description ?? '')
+  const [due, setDue] = useState(task?.dueAt ? toLocalInput(task.dueAt) : toLocalInput(Date.now() + 24 * 60 * 60 * 1000))
+  const [priority, setPriority] = useState<CrmTaskDto['priority']>(task?.priority ?? 'normal')
+  const [status, setStatus] = useState<CrmTaskDto['status']>(task?.status ?? 'open')
   const queryClient = useQueryClient()
   const pushNotice = useUiStore((state) => state.pushNotice)
-  const save = useMutation({ mutationFn: () => window.warish.crm.tasks.save({ contactId, title, description,
-    dueAt: due ? new Date(due).getTime() : undefined, priority }), onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ['crm'] }); onClose() },
+  const save = useMutation({ mutationFn: () => window.warish.crm.tasks.save({ id: task?.id, contactId, title, description,
+    dueAt: due ? new Date(due).getTime() : undefined, priority, status, sourceMessageId: task?.sourceMessageId }), onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ['crm'] }); onClose() },
     onError: (error) => pushNotice(errorMessage(error)) })
-  return <CrmDialog title="New follow-up" eyebrow="Task" onClose={onClose}><form className="crm-form" onSubmit={(event) => { event.preventDefault(); save.mutate() }}>
-    <FormField label="Contact"><select value={contactId} onChange={(event) => setContactId(event.target.value)} required>{contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.name}{contact.phoneNumber ? ` · ${contact.phoneNumber}` : ''}</option>)}</select></FormField>
+  const remove = useMutation({ mutationFn: () => window.warish.crm.tasks.delete(task!.id), onSuccess: () => {
+    void queryClient.invalidateQueries({ queryKey: ['crm'] }); onClose()
+  }, onError: (error) => pushNotice(errorMessage(error)) })
+  return <CrmDialog title={task ? 'Edit follow-up' : 'New follow-up'} eyebrow="Task" onClose={onClose}><form className="crm-form" onSubmit={(event) => { event.preventDefault(); save.mutate() }}>
+    <FormField label="Contact"><select value={contactId} disabled={Boolean(task)} onChange={(event) => setContactId(event.target.value)} required>{contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.name}{contact.phoneNumber ? ` · ${contact.phoneNumber}` : ''}</option>)}</select></FormField>
     <FormField label="Task"><input value={title} onChange={(event) => setTitle(event.target.value)} required autoFocus /></FormField>
     <FormField label="Notes"><textarea value={description} onChange={(event) => setDescription(event.target.value)} /></FormField>
     <div className="form-grid"><FormField label="Due"><input type="datetime-local" value={due} onChange={(event) => setDue(event.target.value)} /></FormField>
       <FormField label="Priority"><select value={priority} onChange={(event) => setPriority(event.target.value as CrmTaskDto['priority'])}><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option></select></FormField></div>
-    <footer><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={!contactId || save.isPending}>{save.isPending ? 'Saving…' : 'Create task'}</button></footer>
+    {task && <FormField label="Status"><select value={status} onChange={(event) => setStatus(event.target.value as CrmTaskDto['status'])}><option value="open">Open</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select></FormField>}
+    <footer>{task && <button type="button" className="danger-button crm-delete-button" disabled={remove.isPending} onClick={() => remove.mutate()}><Trash2 />Delete</button>}
+      <button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={!contactId || save.isPending}>{save.isPending ? 'Saving…' : task ? 'Save task' : 'Create task'}</button></footer>
   </form></CrmDialog>
 }
 
@@ -343,6 +403,9 @@ function OrderDialog({ initialContactId, contacts, catalog, order, onClose }: { 
     internalNote, items: lines, payments: order && paidAmount === order.paidAmount ? undefined
       : paidAmount > 0 ? [{ amount: paidAmount, paidAt: Date.now(), method: 'manual' }] : [] }),
     onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ['crm'] }); onClose() }, onError: (error) => pushNotice(errorMessage(error)) })
+  const remove = useMutation({ mutationFn: () => window.warish.crm.orders.delete(order!.id), onSuccess: () => {
+    void queryClient.invalidateQueries({ queryKey: ['crm'] }); onClose()
+  }, onError: (error) => pushNotice(errorMessage(error)) })
   const updateLine = (index: number, patch: Partial<OrderLine>): void => setLines((current) => current.map((line, position) => position === index ? { ...line, ...patch } : line))
   const chooseCatalog = (index: number, id: string): void => {
     const item = catalog.find((entry) => entry.id === id)
@@ -365,7 +428,8 @@ function OrderDialog({ initialContactId, contacts, catalog, order, onClose }: { 
     <div className="order-footer-grid"><FormField label="Internal note"><textarea value={internalNote} onChange={(event) => setInternalNote(event.target.value)} /></FormField>
       <div><FormField label="Payment received"><input type="number" min="0" step="0.01" value={paidAmount} onChange={(event) => setPaidAmount(Number(event.target.value))} /></FormField>
         <div className="order-total"><span>Order total</span><strong>{money(total)}</strong></div></div></div>
-    <footer><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={!contactId || lines.some((line) => !line.name.trim()) || save.isPending}>{save.isPending ? 'Saving…' : 'Save order'}</button></footer>
+    <footer>{order && <button type="button" className="danger-button crm-delete-button" disabled={remove.isPending} onClick={() => remove.mutate()}><Trash2 />Delete</button>}
+      <button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={!contactId || lines.some((line) => !line.name.trim()) || save.isPending}>{save.isPending ? 'Saving…' : 'Save order'}</button></footer>
   </form></CrmDialog>
 }
 

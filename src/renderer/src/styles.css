@@ -130,6 +130,12 @@ svg { width: 20px; height: 20px; stroke-width: 1.8; }
 .chat-row-top b, .chat-row-bottom b { min-width: 20px; padding: 3px 6px; border-radius: 10px; text-align: center; color: white; background: var(--accent); font-size: 10px; }
 .chat-row-bottom span:first-child { line-height: 1.3; }
 .chat-row-bottom span:first-child:not(:only-child) { padding-right: 2px; }
+.chat-crm-signal { display: flex; min-width: 0; align-items: center; gap: 8px; margin-top: 3px; overflow: hidden; color: var(--muted); font-size: 9px; line-height: 14px; white-space: nowrap; }
+.chat-crm-signal > span { display: inline-flex; min-width: 0; align-items: center; gap: 4px; overflow: hidden; text-overflow: ellipsis; }
+.chat-crm-signal > span:first-child { flex: 0 1 auto; color: color-mix(in srgb, var(--stage-color) 72%, var(--text)); font-weight: 650; }
+.chat-crm-signal i, .conversation-stage i { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: var(--stage-color); }
+.chat-crm-signal svg { width: 11px; height: 11px; flex: 0 0 auto; }
+.chat-crm-signal .overdue { color: var(--danger); }
 .community-list { width: 100%; }
 .community-row { border-bottom: 1px solid var(--border); }
 .community-parent { display: flex; width: 100%; min-height: 78px; align-items: center; gap: 8px; padding: 6px 10px 6px 7px; background: transparent; text-align: left; }
@@ -178,6 +184,13 @@ svg { width: 20px; height: 20px; stroke-width: 1.8; }
 .conversation-identity > span > span { margin-top: 3px; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .conversation-contact-identity { margin-top: 3px; font-size: 12px; }
 .conversation-contact-identity .whatsapp-profile-pill { max-width: min(240px, 62%); font-size: 11px; }
+.conversation-crm-line { display: flex !important; min-width: 0; align-items: center; gap: 7px; }
+.conversation-crm-line > span { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conversation-crm-line .whatsapp-profile-pill { max-width: 150px; }
+.conversation-crm-alias { max-width: 180px; color: var(--text); font-weight: 600; }
+.conversation-stage { display: inline-flex; align-items: center; gap: 4px; max-width: 120px; color: color-mix(in srgb, var(--stage-color) 72%, var(--text)); font-size: 10px; font-weight: 650; }
+.conversation-next-task { display: inline-flex; min-width: 0; align-items: center; gap: 4px; max-width: 220px; }
+.conversation-next-task svg { width: 12px; height: 12px; flex: 0 0 auto; }
 .conversation-header .icon-button.active { color: var(--accent); background: var(--active); }
 .menu-dismiss { position: fixed; inset: 0; z-index: 18; cursor: default; background: transparent; }
 .header-menu { position: absolute; top: 55px; z-index: 20; min-width: 190px; padding: 7px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); box-shadow: var(--shadow); }
@@ -407,6 +420,23 @@ svg { width: 20px; height: 20px; stroke-width: 1.8; }
 .forward-list .avatar { width: 42px; height: 42px; }
 .forward-list span { flex: 1; }
 .forward-list label > svg { color: var(--accent); }
+.crm-capture-dialog { width: min(540px, calc(100% - 32px)); }
+.crm-capture-dialog > header > div { min-width: 0; flex: 1; }
+.crm-capture-dialog > header span { display: block; color: var(--muted); font-size: 10px; }
+.crm-capture-dialog > header h2 { margin-top: 2px; }
+.crm-capture-dialog > form { display: grid; gap: 12px; padding: 18px 20px 0; }
+.crm-capture-dialog label { display: grid; min-width: 0; gap: 5px; }
+.crm-capture-dialog label > span { color: var(--muted); font-size: 10px; font-weight: 650; }
+.crm-capture-dialog input, .crm-capture-dialog textarea, .crm-capture-dialog select { width: 100%; min-height: 38px; border: 1px solid var(--border); border-radius: 7px; outline: 0; padding: 8px 9px; background: var(--panel); }
+.crm-capture-dialog textarea { min-height: 84px; resize: vertical; line-height: 1.45; }
+.crm-capture-dialog input:focus, .crm-capture-dialog textarea:focus, .crm-capture-dialog select:focus { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 9%, transparent); }
+.crm-capture-dialog form > footer { margin: 3px -20px 0; }
+.crm-capture-source { display: flex; min-width: 0; align-items: center; gap: 9px; padding: 9px 10px; border-left: 3px solid var(--accent); background: var(--panel-soft); }
+.crm-capture-source > svg { width: 16px; height: 16px; flex: 0 0 auto; color: var(--accent-strong); }
+.crm-capture-source > span { min-width: 0; }
+.crm-capture-source small, .crm-capture-source strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crm-capture-source small { color: var(--muted); font-size: 9px; }
+.crm-capture-source strong { margin-top: 3px; font-size: 11px; }
 
 .settings-backdrop { place-items: stretch start; padding: 12px 12px 12px calc(var(--rail-width) + 12px); backdrop-filter: blur(7px); }
 .settings-panel, .settings-loading { width: min(780px, calc(100vw - var(--rail-width) - 24px)); height: 100%; border: 1px solid var(--border); border-radius: 16px; background: var(--panel); box-shadow: 0 24px 70px rgb(4 17 23 / 28%); overflow: hidden; }
@@ -620,6 +650,7 @@ svg { width: 20px; height: 20px; stroke-width: 1.8; }
 :root[data-density='compact'] .new-messages-button { right: 18px; bottom: 62px; padding: 7px 10px; }
 :root[data-density='compact'] .conversation-search-panel { top: 56px; grid-template-rows: 54px 50px minmax(0, 1fr); }
 :root[data-density='compact'] .contact-drawer { top: 56px; }
+:root[data-density='compact'] .crm-contact-panel.in-conversation { top: 56px; }
 :root[data-density='compact'] .message-search-result { padding: 9px 13px; }
 :root[data-density='compact'] .composer-context { gap: 8px; padding: 5px 10px; }
 :root[data-density='compact'] .composer-context > div { padding: 4px 9px; }
@@ -790,6 +821,7 @@ svg { width: 20px; height: 20px; stroke-width: 1.8; }
 .crm-recent .crm-empty > svg { width: 30px; height: 30px; }
 
 .crm-contact-panel { position: absolute; top: 0; right: 0; bottom: 0; z-index: 24; display: grid; width: min(540px, 92%); min-height: 0; grid-template-rows: 62px auto auto auto 42px minmax(0, 1fr); border-left: 1px solid var(--border); background: var(--panel); box-shadow: -16px 0 48px rgb(11 20 26 / 18%); }
+.crm-contact-panel.in-conversation { top: 66px; z-index: 13; width: min(440px, 92%); box-shadow: -10px 0 32px rgb(11 20 26 / 18%); }
 .crm-contact-panel > header { display: flex; align-items: center; gap: 10px; padding: 8px 12px 8px 18px; border-bottom: 1px solid var(--border); }
 .crm-contact-panel > header > div { min-width: 0; flex: 1; }
 .crm-contact-panel > header strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
@@ -810,12 +842,26 @@ svg { width: 20px; height: 20px; stroke-width: 1.8; }
 .crm-contact-tabs { display: flex; min-width: 0; padding: 0 12px; overflow-x: auto; border-bottom: 1px solid var(--border); }
 .crm-contact-tabs button { position: relative; min-width: max-content; padding: 0 8px; color: var(--muted); background: transparent; font-size: 10px; font-weight: 650; text-transform: capitalize; }
 .crm-contact-tabs button.active { color: var(--accent-strong); }
+.crm-contact-tabs button:disabled, .crm-contact-actions button:disabled { cursor: default; opacity: .5; }
 .crm-contact-tabs button.active::after { position: absolute; right: 7px; bottom: 0; left: 7px; height: 2px; border-radius: 2px; background: var(--accent); content: ''; }
 .crm-contact-body { min-height: 0; padding: 15px 18px 28px; overflow-y: auto; scrollbar-color: var(--muted) transparent; scrollbar-width: thin; }
 .crm-profile-section > header { display: flex; align-items: center; margin-bottom: 12px; }
 .crm-profile-section > header strong { flex: 1; font-size: 13px; }
 .crm-profile-section > header .secondary-button { min-height: 30px; padding: 5px 9px; font-size: 10px; }
 .crm-profile-section > header svg { width: 13px; height: 13px; }
+.conversation-overview { margin: 0 0 15px !important; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+.conversation-overview > header { display: flex; align-items: center; margin-bottom: 8px; }
+.conversation-overview > header strong { font-size: 13px; }
+.conversation-overview .contact-actions { gap: 6px; padding: 0 0 10px; border: 0; }
+.conversation-overview .contact-actions button { min-height: 48px; padding: 7px 4px; }
+.conversation-overview .contact-detail-list { padding: 0; }
+.conversation-overview .contact-detail { padding: 8px 2px; }
+.conversation-overview .contact-detail > span { width: 28px; height: 28px; }
+.crm-start-tracking { display: flex; min-height: 58px; align-items: center; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+.crm-start-tracking > svg { width: 18px; height: 18px; color: var(--accent-strong); }
+.crm-start-tracking > strong { min-width: 0; flex: 1; font-size: 11px; }
+.crm-start-tracking button { min-height: 34px; padding: 6px 10px; font-size: 10px; }
+.crm-start-tracking button svg { width: 14px; height: 14px; }
 .crm-profile-section dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; margin: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 9px; background: var(--border); }
 .crm-profile-section dl > div { min-width: 0; min-height: 59px; padding: 10px 11px; background: var(--panel); }
 .crm-profile-section dt { color: var(--muted); font-size: 9px; font-weight: 650; }
@@ -829,28 +875,46 @@ svg { width: 20px; height: 20px; stroke-width: 1.8; }
 .crm-mini-stats strong { display: block; margin-bottom: 3px; color: var(--text); font-size: 12px; }
 .crm-note-section > form { display: grid; gap: 8px; margin-bottom: 15px; }
 .crm-note-section textarea { min-height: 82px; resize: vertical; border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; background: var(--panel); line-height: 1.45; }
-.crm-note-section form button { justify-self: end; min-height: 34px; padding: 6px 10px; font-size: 10px; }
+.crm-note-section form button { min-height: 34px; padding: 6px 10px; font-size: 10px; }
 .crm-note-section form button svg { width: 14px; height: 14px; }
+.crm-inline-form-actions { display: flex; justify-content: flex-end; gap: 7px; }
 .crm-note-list { display: grid; gap: 7px; }
 .crm-note-list article { padding: 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-soft); }
 .crm-note-list p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; line-height: 1.5; }
-.crm-note-list time { display: block; margin-top: 7px; color: var(--muted); font-size: 9px; }
+.crm-note-list article > footer { display: flex; align-items: center; margin-top: 7px; }
+.crm-note-list article > footer time { min-width: 0; flex: 1; color: var(--muted); font-size: 9px; }
+.crm-note-list article > footer > span { display: flex; gap: 2px; }
+.crm-note-list article > footer .icon-button { width: 26px; height: 26px; }
+.crm-note-list article > footer svg { width: 13px; height: 13px; }
 .crm-contact-body .crm-empty { min-height: 210px; }
 .contact-tab-action { min-height: 32px; margin: 0 0 10px auto; padding: 5px 9px; font-size: 10px; }
 .contact-tab-action svg { width: 14px; height: 14px; }
-.contact-order { display: grid; min-height: 54px; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--border); }
+.contact-order { display: grid; width: 100%; min-height: 54px; grid-template-columns: minmax(0, 1fr) auto auto 18px; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--border); background: transparent; text-align: left; }
+.contact-order:hover { background: var(--hover); }
 .contact-order span strong, .contact-order span small { display: block; }
 .contact-order span strong { font-size: 11px; }
 .contact-order span small { margin-top: 2px; color: var(--muted); font-size: 9px; }
 .contact-order b { font-size: 11px; }
-.contact-task { display: flex; min-height: 54px; align-items: center; gap: 9px; padding: 7px 8px; border-bottom: 1px solid var(--border); }
-.contact-task > span { display: grid; width: 20px; height: 20px; place-items: center; border: 1px solid var(--border); border-radius: 6px; }
-.contact-task > span.checked { color: white; border-color: var(--accent); background: var(--accent); }
-.contact-task > span svg { width: 13px; height: 13px; }
-.contact-task > div { min-width: 0; flex: 1; }
+.contact-order > svg { width: 13px; height: 13px; color: var(--muted); }
+.contact-task { display: grid; min-height: 54px; grid-template-columns: 22px minmax(0, 1fr) auto 28px; align-items: center; gap: 7px; padding: 7px 6px; border-bottom: 1px solid var(--border); }
+.contact-task > button:first-child { display: grid; width: 20px; height: 20px; place-items: center; border: 1px solid var(--border); border-radius: 6px; background: transparent; }
+.contact-task > button:first-child.checked { color: white; border-color: var(--accent); background: var(--accent); }
+.contact-task > button:first-child svg { width: 13px; height: 13px; }
+.contact-task-copy { min-width: 0; background: transparent; text-align: left; }
 .contact-task strong, .contact-task small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .contact-task strong { font-size: 11px; }
 .contact-task small { margin-top: 2px; color: var(--muted); font-size: 9px; }
+.contact-task > .icon-button { width: 28px; height: 28px; }
+.contact-task > .icon-button svg { width: 13px; height: 13px; }
+.crm-message-reference { display: flex; min-width: 0; align-items: center; gap: 7px; margin-top: 8px; padding: 7px 8px; border-left: 2px solid var(--accent); border-radius: 4px; background: color-mix(in srgb, var(--accent) 5%, var(--panel)); }
+.contact-task > .crm-message-reference { grid-column: 2 / -1; margin: 1px 0 3px; }
+.crm-message-reference > svg { width: 14px; height: 14px; flex: 0 0 auto; color: var(--accent-strong); }
+.crm-message-reference > span { min-width: 0; flex: 1; }
+.crm-message-reference small, .crm-message-reference strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crm-message-reference small { color: var(--muted); font-size: 8px; font-weight: 500; }
+.crm-message-reference strong { margin-top: 2px; font-size: 9px; }
+.crm-message-reference .icon-button { width: 26px; height: 26px; flex: 0 0 auto; }
+.crm-message-reference .icon-button svg { width: 13px; height: 13px; }
 .crm-timeline { position: relative; display: grid; padding-left: 10px; }
 .crm-timeline::before { position: absolute; top: 6px; bottom: 8px; left: 14px; width: 1px; background: var(--border); content: ''; }
 .crm-timeline article { position: relative; display: flex; min-height: 54px; gap: 12px; }
@@ -888,6 +952,7 @@ svg { width: 20px; height: 20px; stroke-width: 1.8; }
 .checkbox-field input { accent-color: var(--accent); }
 .crm-form > footer { display: flex; justify-content: flex-end; gap: 8px; margin: 3px -18px -18px; padding: 13px 18px; border-top: 1px solid var(--border); background: var(--panel-soft); }
 .crm-form > footer button { min-height: 36px; padding: 7px 13px; font-size: 11px; }
+.crm-delete-button { margin-right: auto; color: var(--danger); }
 .contact-edit-form > footer { margin-inline: 0; margin-bottom: 0; border: 0; border-radius: 8px; }
 .order-lines { display: grid; gap: 6px; padding: 11px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel-soft); }
 .order-lines > header { display: flex; align-items: center; margin-bottom: 3px; }

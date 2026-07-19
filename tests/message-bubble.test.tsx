@@ -143,4 +143,17 @@ describe('MessageBubble', () => {
     expect(container.querySelector('[aria-label="Copy message text"]')).toBeInTheDocument()
     expect(container.querySelector('[aria-label="Forward"]')).toBeInTheDocument()
   })
+
+  it('offers direct CRM note and task actions with the selected message', () => {
+    const message = createMessage({ chatId: 'person@s.whatsapp.net' })
+    const onAddNote = vi.fn()
+    const onAddTask = vi.fn()
+    render(<MessageBubble message={message} showSender={false} onReply={vi.fn()} onForward={vi.fn()}
+      onAddNote={onAddNote} onAddTask={onAddTask} onOpenQuote={vi.fn()} onResize={vi.fn()} onError={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add message to CRM notes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create task from message' }))
+    expect(onAddNote).toHaveBeenCalledWith(message)
+    expect(onAddTask).toHaveBeenCalledWith(message)
+  })
 })

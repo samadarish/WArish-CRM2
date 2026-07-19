@@ -1,10 +1,10 @@
 import type { Logger } from 'pino'
 import type {
-  AppError, AppSettings, CoreEventEnvelope, CrmCatalogItemDto, CrmContactPatch, CrmLifecycle, CrmOrderInput,
-  CrmOrderItemDto, CrmPaymentDto, CrmTaskDto, DraftDto, PickedAttachment, RpcMethod
+  AppError, AppSettings, CoreEventEnvelope, CrmCatalogItemDto, CrmContactPatch, CrmLifecycle, CrmNoteInput, CrmOrderInput,
+  CrmOrderItemDto, CrmPaymentDto, CrmTaskDto, CrmTaskInput, DraftDto, PickedAttachment, RpcMethod
 } from '../shared/contracts'
 import { WarishDatabase } from './database'
-import { CrmRepository } from './crm-repository'
+import { ContactRestrictedError, CrmRepository } from './crm-repository'
 import { GoogleContactsService } from './google-contacts'
 import { flushCoreLogger, readErrorLogs } from './logger'
 import { MediaManager } from './media-manager'
@@ -86,8 +86,10 @@ export class RpcRouter {
       case 'message.loadEarlier': return this.#whatsapp.loadEarlier(requiredString(params, 'chatId'))
       case 'message.send': {
         const input = objectValue(params.input)
+        const chatId = requiredString(input, 'chatId')
+        this.#crm.assertCanContact(chatId, optionalBoolean(input.restrictedContactAcknowledged) ?? false)
         return this.#whatsapp.send({
-          chatId: requiredString(input, 'chatId'), clientId: requiredString(input, 'clientId'), text: optionalString(input.text),
+          chatId, clientId: requiredString(input, 'clientId'), text: optionalString(input.text),
           attachmentToken: optionalString(input.attachmentToken), attachmentKind: attachmentKind(input.attachmentKind),
           quotedMessageId: optionalString(input.quotedMessageId)
         })
@@ -96,7 +98,15 @@ export class RpcRouter {
       case 'message.react': return this.#whatsapp.react(requiredString(params, 'chatId'), requiredString(params, 'messageId'), optionalString(params.emoji))
       case 'message.edit': return this.#whatsapp.edit(requiredString(params, 'chatId'), requiredString(params, 'messageId'), requiredString(params, 'text'))
       case 'message.delete': return this.#whatsapp.delete(requiredString(params, 'chatId'), requiredString(params, 'messageId'), deleteMode(params.mode))
-      case 'message.forward': return this.#whatsapp.forward(requiredString(params, 'messageId'), stringArray(params.chatIds))
+      case 'message.forward': {
+        const chatIds = stringArray(params.chatIds)
+        const acknowledgements = new Set(optionalStringArray(params.restrictedContactAcknowledgements))
+        for (const chatId of chatIds) {
+          const resolvedChatId = this.#database.resolveChatId(chatId)
+          this.#crm.assertCanContact(chatId, acknowledgements.has(chatId) || acknowledgements.has(resolvedChatId))
+        }
+        return this.#whatsapp.forward(requiredString(params, 'messageId'), chatIds)
+      }
       case 'media.thumbnail': {
         const messageId = requiredString(params, 'messageId')
         const thumbnailDataUrl = await this.#media.thumbnail(messageId)
@@ -130,7 +140,9 @@ export class RpcRouter {
       case 'crm.contacts.setStage': return this.#crm.setStage(requiredString(params, 'contactId'), requiredString(params, 'stageId'))
       case 'crm.contacts.setLifecycle': return this.#crm.setLifecycle(requiredString(params, 'contactId'), crmLifecycle(params.lifecycle))
       case 'crm.notes.list': return this.#crm.listNotes(requiredString(params, 'contactId'))
-      case 'crm.notes.add': return this.#crm.addNote(requiredString(params, 'contactId'), requiredString(params, 'body'))
+      case 'crm.notes.add': return this.#crm.addNote(requiredString(params, 'contactId'), requiredString(params, 'body'),
+        optionalString(params.sourceMessageId))
+      case 'crm.notes.save': return this.#crm.saveNote(crmNoteInput(objectValue(params.input)))
       case 'crm.notes.delete': this.#crm.deleteNote(requiredString(params, 'noteId')); return undefined
       case 'crm.tasks.list': {
         const input = params.input === undefined ? params : objectValue(params.input)
@@ -208,6 +220,7 @@ export class RpcRouter {
 
 export function toAppError(error: unknown): AppError {
   const message = error instanceof Error ? error.message : 'Unexpected application error'
+  if (error instanceof ContactRestrictedError) return { code: 'CONTACT_RESTRICTED', message, retryable: false }
   if (/offline|connection/i.test(message)) return { code: 'OFFLINE', message, retryable: true }
   if (/not found|unavailable/i.test(message)) return { code: 'NOT_FOUND', message, retryable: false }
   if (/invalid|valid international|cannot be empty/i.test(message)) return { code: 'INVALID_INPUT', message, retryable: false }
@@ -236,6 +249,9 @@ function objectValue(value: unknown): Record<string, unknown> {
 function stringArray(value: unknown): string[] {
   if (!Array.isArray(value) || !value.every((entry) => typeof entry === 'string')) throw new Error('Invalid chatIds')
   return value
+}
+function optionalStringArray(value: unknown): string[] {
+  return value === undefined ? [] : stringArray(value)
 }
 function attachmentKind(value: unknown): 'image' | 'video' | 'document' | 'audio' | 'voice' | 'sticker' | undefined {
   return value === 'image' || value === 'video' || value === 'document' || value === 'audio' || value === 'voice' || value === 'sticker'
@@ -303,11 +319,16 @@ function crmContactPatch(input: Record<string, unknown>): CrmContactPatch {
   if ('tags' in input) patch.tags = optionalTags(input.tags) ?? []
   return patch
 }
-function crmTaskInput(input: Record<string, unknown>): Partial<CrmTaskDto> & Pick<CrmTaskDto, 'contactId' | 'title'> {
+function crmNoteInput(input: Record<string, unknown>): CrmNoteInput {
+  return { id: optionalString(input.id), contactId: requiredString(input, 'contactId'), body: requiredString(input, 'body'),
+    sourceMessageId: optionalString(input.sourceMessageId) }
+}
+function crmTaskInput(input: Record<string, unknown>): CrmTaskInput {
   return {
     id: optionalString(input.id), contactId: requiredString(input, 'contactId'), orderId: optionalString(input.orderId),
     title: requiredString(input, 'title'), description: optionalString(input.description), dueAt: optionalNumber(input.dueAt),
-    priority: taskPriority(input.priority), status: taskStatus(input.status), reminderAt: optionalNumber(input.reminderAt)
+    priority: taskPriority(input.priority), status: taskStatus(input.status), reminderAt: optionalNumber(input.reminderAt),
+    sourceMessageId: optionalString(input.sourceMessageId)
   }
 }
 function crmCatalogInput(input: Record<string, unknown>): Partial<CrmCatalogItemDto> & Pick<CrmCatalogItemDto, 'type' | 'name' | 'unitPrice'> {

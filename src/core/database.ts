@@ -46,10 +46,35 @@ const SQL_RESOLVED_CHAT_COLUMNS = `chats.*,
   identity.saved_name AS contact_saved_name,
   identity.whatsapp_name AS contact_whatsapp_name,
   identity.phone_number AS contact_phone_number,
-  identity.avatar_token AS contact_avatar_token`
+  identity.avatar_token AS contact_avatar_token,
+  crm.id AS crm_contact_id,
+  crm.name AS crm_name,
+  crm.lifecycle AS crm_lifecycle,
+  crm.stage_id AS crm_stage_id,
+  crm_stage.key AS crm_stage_key,
+  crm_stage.name AS crm_stage_name,
+  crm_stage.color AS crm_stage_color,
+  COALESCE(crm_task_count.open_task_count, 0) AS crm_open_task_count,
+  crm_next_task.id AS crm_next_task_id,
+  crm_next_task.title AS crm_next_task_title,
+  crm_next_task.due_at AS crm_next_task_due_at,
+  crm_next_task.priority AS crm_next_task_priority,
+  CASE WHEN crm.do_not_contact=1 OR crm.consent_status='denied' THEN 1 ELSE 0 END AS crm_restricted`
 const SQL_RESOLVED_CHAT_FROM = `FROM chats
   LEFT JOIN contact_identity_aliases identity_alias ON identity_alias.alias_id=chats.id
-  LEFT JOIN contact_identities identity ON identity.identity_id=identity_alias.identity_id`
+  LEFT JOIN contact_identities identity ON identity.identity_id=identity_alias.identity_id
+  LEFT JOIN crm_contacts crm ON crm.identity_id=identity.identity_id
+  LEFT JOIN crm_pipeline_stages crm_stage ON crm_stage.id=crm.stage_id
+  LEFT JOIN (
+    SELECT contact_id, COUNT(*) AS open_task_count FROM crm_tasks WHERE status='open' GROUP BY contact_id
+  ) crm_task_count ON crm_task_count.contact_id=crm.id
+  LEFT JOIN (
+    SELECT id, contact_id, title, due_at, priority FROM (
+      SELECT id, contact_id, title, due_at, priority,
+        ROW_NUMBER() OVER (PARTITION BY contact_id ORDER BY due_at IS NULL, due_at, created_at, id) AS task_rank
+      FROM crm_tasks WHERE status='open'
+    ) WHERE task_rank=1
+  ) crm_next_task ON crm_next_task.contact_id=crm.id`
 
 export interface StoredMessage {
   id: string
@@ -430,13 +455,13 @@ export class WarishDatabase {
          OR (?='community' AND (kind='community' OR community_id IS NOT NULL)) OR (?='channel' AND kind='channel'))
        AND (pinned < ? OR (pinned = ? AND
          (COALESCE(last_message_at, 0) < ? OR (COALESCE(last_message_at, 0) = ? AND id < ?))))
-       AND (? = '%%' OR title LIKE ? COLLATE NOCASE OR contact_saved_name LIKE ? COLLATE NOCASE OR
+       AND (? = '%%' OR title LIKE ? COLLATE NOCASE OR crm_name LIKE ? COLLATE NOCASE OR contact_saved_name LIKE ? COLLATE NOCASE OR
          contact_whatsapp_name LIKE ? COLLATE NOCASE OR
          contact_phone_number LIKE ? COLLATE NOCASE)
        ORDER BY pinned DESC, COALESCE(last_message_at, 0) DESC, id DESC LIMIT ?`
     ).all(Number(input.archived ?? false), category, category, category, category, category,
       cursor.pinned, cursor.pinned, cursor.timestamp, cursor.timestamp, cursor.id,
-      query, query, query, query, query, limit + 1) as Record<string, unknown>[]
+      query, query, query, query, query, query, limit + 1) as Record<string, unknown>[]
     const hasMore = rows.length > limit
     const items = rows.slice(0, limit).map(mapChat)
     const last = items.at(-1)
@@ -1649,6 +1674,19 @@ export class WarishDatabase {
         this.db.prepare('INSERT INTO schema_migrations(version, applied_at) VALUES (9, ?)').run(now)
       })
     }
+    if (version.version < 10) {
+      this.#logger.info({ version: 10 }, 'applying CRM message-reference migration')
+      this.transaction(() => this.db.exec(`
+        ALTER TABLE crm_notes ADD COLUMN source_message_id TEXT;
+        ALTER TABLE crm_notes ADD COLUMN source_message_snapshot TEXT;
+        ALTER TABLE crm_tasks ADD COLUMN source_message_id TEXT;
+        ALTER TABLE crm_tasks ADD COLUMN source_message_snapshot TEXT;
+        CREATE INDEX IF NOT EXISTS crm_tasks_contact_status_due_v10_idx
+          ON crm_tasks(contact_id, status, due_at, created_at);
+        INSERT INTO schema_migrations(version, applied_at) VALUES
+          (10, CAST(strftime('%s','now') AS INTEGER) * 1000);
+      `))
+    }
   }
 }
 
@@ -1671,12 +1709,29 @@ function mapChat(row: Record<string, unknown>): ChatSummary {
   const title = kind === 'direct'
     ? savedName ?? phoneNumber ?? distinctStoredTitle ?? 'Unknown contact'
     : storedTitle ?? chatKindLabel(kind)
+  const crmContactId = nullableString(row.crm_contact_id)
+  const crm = crmContactId ? {
+    contactId: crmContactId,
+    name: nullableString(row.crm_name),
+    lifecycle: row.crm_lifecycle as NonNullable<ChatSummary['crm']>['lifecycle'],
+    stageId: String(row.crm_stage_id),
+    stageKey: row.crm_stage_key as NonNullable<ChatSummary['crm']>['stageKey'],
+    stageName: String(row.crm_stage_name),
+    stageColor: String(row.crm_stage_color),
+    openTaskCount: Number(row.crm_open_task_count ?? 0),
+    nextTask: nullableString(row.crm_next_task_id) ? {
+      id: String(row.crm_next_task_id), title: String(row.crm_next_task_title),
+      dueAt: nullableNumber(row.crm_next_task_due_at),
+      priority: row.crm_next_task_priority as NonNullable<NonNullable<ChatSummary['crm']>['nextTask']>['priority']
+    } : undefined,
+    restricted: Boolean(row.crm_restricted)
+  } satisfies NonNullable<ChatSummary['crm']> : undefined
   return { id, title, kind, savedName, whatsappName, phoneNumber,
     communityId: nullableString(row.community_id), isAnnouncement: Boolean(row.is_community_announcement),
     readOnly: kind === 'channel' || kind === 'community', description: nullableString(row.description),
     avatarUrl, lastMessage: nullableString(row.last_message),
     lastMessageAt: nullableNumber(row.last_message_at), unreadCount: Number(row.unread_count ?? 0),
-    archived: Boolean(row.archived), pinned: Boolean(row.pinned), mutedUntil: nullableNumber(row.muted_until) }
+    archived: Boolean(row.archived), pinned: Boolean(row.pinned), mutedUntil: nullableNumber(row.muted_until), crm }
 }
 
 function mapAttachment(row: Record<string, unknown>): AttachmentDto {

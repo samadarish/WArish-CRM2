@@ -1,19 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Archive, ArchiveRestore, BellOff, BellRing, BriefcaseBusiness, ChevronRight, Info, LoaderCircle, MessageCircle, Network, Pin, PinOff,
+  Archive, ArchiveRestore, BellOff, BellRing, BriefcaseBusiness, Info, LoaderCircle, MessageCircle, Network, Pin, PinOff,
   Radio, UserRound, UsersRound, X
 } from 'lucide-react'
 import type { ChatSummary, ContactDetails } from '../../../shared/contracts'
 import { useUiStore } from '../store'
 import { Avatar } from './Avatar'
+import { CrmContactPanel } from './CrmShell'
 
-export function ContactDrawer({ chat, onClose, onArchived }: {
+export function ContactDrawer({ chat, onClose, onArchived, onJumpToMessage }: {
   chat: ChatSummary
   onClose(): void
   onArchived(): void
+  onJumpToMessage?(messageId: string): void
 }): React.JSX.Element {
   const pushNotice = useUiStore((state) => state.pushNotice)
-  const openCrmContact = useUiStore((state) => state.openCrmContact)
   const queryClient = useQueryClient()
   const detailsQuery = useQuery({
     queryKey: ['contact', chat.id],
@@ -23,10 +24,12 @@ export function ContactDrawer({ chat, onClose, onArchived }: {
   const details = detailsQuery.data
   const crmQuery = useQuery({ queryKey: ['crm', 'contact', 'chat', chat.id],
     queryFn: () => window.warish.crm.contacts.get({ chatId: chat.id }), enabled: details.kind === 'direct', retry: false })
+  const stagesQuery = useQuery({ queryKey: ['crm', 'pipeline'], queryFn: () => window.warish.crm.pipeline(),
+    enabled: details.kind === 'direct' })
   const ensureCrm = useMutation({ mutationFn: () => window.warish.crm.contacts.ensure(chat.id), onSuccess: (contact) => {
     queryClient.setQueryData(['crm', 'contact', contact.id], contact)
     queryClient.setQueryData(['crm', 'contact', 'chat', chat.id], contact)
-    openCrmContact(contact.id)
+    void queryClient.invalidateQueries({ queryKey: ['crm'] })
   }, onError: (error) => pushNotice(error instanceof Error ? error.message : 'Could not add this contact to CRM') })
   const action = useMutation({
     mutationFn: (patch: Partial<Pick<ChatSummary, 'archived' | 'pinned' | 'mutedUntil'>>) =>
@@ -43,25 +46,42 @@ export function ContactDrawer({ chat, onClose, onArchived }: {
     onError: (error) => pushNotice(error instanceof Error ? error.message : 'Could not update this conversation')
   })
   const muted = Boolean(details.mutedUntil && details.mutedUntil > Date.now())
+  const conversationOverview = <ConversationOverview details={details} muted={muted} pending={action.isPending}
+    onUpdate={(patch) => action.mutate(patch)} />
+
+  if (details.kind === 'direct' && crmQuery.data) return <CrmContactPanel contactId={crmQuery.data.id}
+    stages={stagesQuery.data ?? []} onClose={onClose} inConversation overviewPrefix={conversationOverview}
+    onJumpToMessage={onJumpToMessage} />
+
+  if (details.kind === 'direct' && crmQuery.isFetching && !crmQuery.isError) return <aside className="crm-contact-panel in-conversation"
+    aria-label="CRM contact record"><header><div><span>Customer details</span><strong>{details.title}</strong></div>
+      <button className="icon-button" aria-label="Close customer details" onClick={onClose}><X /></button></header>
+    <div className="crm-state"><LoaderCircle className="spin" /><span>Loading customer details…</span></div></aside>
+
+  if (details.kind === 'direct') return <aside className="crm-contact-panel in-conversation crm-untracked-contact" aria-label="CRM contact record">
+    <header><div><span>Customer details</span><strong>{details.title}</strong></div><button className="icon-button" aria-label="Close customer details" onClick={onClose}><X /></button></header>
+    <div className="crm-contact-hero"><Avatar title={details.title} src={details.avatarUrl} large /><div><h2>{details.title}</h2>
+      {details.whatsappName && details.whatsappName !== details.title && <span className="whatsapp-profile-pill">{details.whatsappName}</span>}
+      {details.phoneNumber && <p>{details.phoneNumber}</p>}<div><span className="stage-pill" style={{ '--stage-color': '#0ea5a4' } as React.CSSProperties}><i />New enquiry</span></div></div></div>
+    <div className="crm-contact-actions"><button onClick={onClose}><MessageCircle />Message</button>
+      <button disabled={ensureCrm.isPending} onClick={() => ensureCrm.mutate()}><BriefcaseBusiness />Track</button>
+      <button disabled><Archive />Order</button><button disabled><UserRound />Google</button></div>
+    <label className="crm-stage-select"><span>Pipeline stage</span><select disabled value="stage-new"><option value="stage-new">New enquiry</option></select></label>
+    <nav className="crm-contact-tabs"><button className="active">Overview</button><button disabled>Notes</button><button disabled>Tasks</button><button disabled>Orders</button><button disabled>Activity</button></nav>
+    <div className="crm-contact-body"><div className="crm-profile-section">{conversationOverview}<section className="crm-start-tracking"><BriefcaseBusiness />
+      <strong>Not tracked in CRM</strong><button className="primary-button" disabled={ensureCrm.isPending} onClick={() => ensureCrm.mutate()}>
+        {ensureCrm.isPending ? <LoaderCircle className="spin" /> : <BriefcaseBusiness />}Add to CRM</button></section></div></div>
+  </aside>
 
   return <aside className="contact-drawer" aria-label="Conversation details">
     <header><strong>Conversation info</strong><button className="icon-button" aria-label="Close conversation info" onClick={onClose}><X /></button></header>
     {detailsQuery.isFetching && !details ? <div className="loading-row"><LoaderCircle className="spin" />Loading details…</div> : <>
-      <div className="contact-profile"><Avatar title={details.title} src={details.avatarUrl} large /><h2>{details.title}</h2>
-        {details.kind === 'direct' && !details.savedName && !details.whatsappName && <span>Identity details are not shared by WhatsApp.</span>}
-      </div>
+      <div className="contact-profile"><Avatar title={details.title} src={details.avatarUrl} large /><h2>{details.title}</h2></div>
       <div className="contact-actions">
         <button disabled={action.isPending} onClick={() => action.mutate({ pinned: !details.pinned })}>{details.pinned ? <PinOff /> : <Pin />}<span>{details.pinned ? 'Unpin' : 'Pin'}</span></button>
         <button disabled={action.isPending} onClick={() => action.mutate({ mutedUntil: muted ? 0 : Number.MAX_SAFE_INTEGER })}>{muted ? <BellRing /> : <BellOff />}<span>{muted ? 'Unmute' : 'Mute'}</span></button>
         <button disabled={action.isPending} onClick={() => action.mutate({ archived: !details.archived })}>{details.archived ? <ArchiveRestore /> : <Archive />}<span>{details.archived ? 'Restore' : 'Archive'}</span></button>
       </div>
-      {details.kind === 'direct' && <button className="contact-crm-entry" disabled={ensureCrm.isPending}
-        onClick={() => crmQuery.data ? openCrmContact(crmQuery.data.id) : ensureCrm.mutate()}>
-        <span><BriefcaseBusiness /></span><div><strong>{crmQuery.data ? 'Open CRM record' : 'Add to CRM'}</strong>
-          <small>{crmQuery.data ? `${crmQuery.data.stageName} · ${crmQuery.data.orderCount} orders · ${crmQuery.data.openTaskCount} open tasks`
-            : 'Track enquiries, follow-ups, notes, orders, and customer history.'}</small></div>
-        {ensureCrm.isPending ? <LoaderCircle className="spin" /> : <ChevronRight />}
-      </button>}
       <section className="contact-detail-list">
         <Detail icon={<KindIcon kind={details.kind} />} label="Conversation type" value={kindLabel(details)} />
         {details.savedName && <Detail icon={<UserRound />} label="Saved contact name" value={details.savedName} />}
@@ -72,6 +92,23 @@ export function ContactDrawer({ chat, onClose, onArchived }: {
       </section>
     </>}
   </aside>
+}
+
+function ConversationOverview({ details, muted, pending, onUpdate }: {
+  details: ContactDetails
+  muted: boolean
+  pending: boolean
+  onUpdate(patch: Partial<Pick<ChatSummary, 'archived' | 'pinned' | 'mutedUntil'>>): void
+}): React.JSX.Element {
+  return <section className="conversation-overview"><header><strong>Conversation</strong></header><div className="contact-actions">
+    <button disabled={pending} onClick={() => onUpdate({ pinned: !details.pinned })}>{details.pinned ? <PinOff /> : <Pin />}<span>{details.pinned ? 'Unpin' : 'Pin'}</span></button>
+    <button disabled={pending} onClick={() => onUpdate({ mutedUntil: muted ? 0 : Number.MAX_SAFE_INTEGER })}>{muted ? <BellRing /> : <BellOff />}<span>{muted ? 'Unmute' : 'Mute'}</span></button>
+    <button disabled={pending} onClick={() => onUpdate({ archived: !details.archived })}>{details.archived ? <ArchiveRestore /> : <Archive />}<span>{details.archived ? 'Restore' : 'Archive'}</span></button>
+  </div><div className="contact-detail-list">
+    {details.savedName && <Detail icon={<UserRound />} label="Saved contact name" value={details.savedName} />}
+    {details.whatsappName && <Detail icon={<MessageCircle />} label="WhatsApp profile name" value={details.whatsappName} />}
+    {details.phoneNumber && <Detail icon={<Info />} label="Phone number" value={details.phoneNumber} />}
+  </div></section>
 }
 
 function Detail({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }): React.JSX.Element {

@@ -1,17 +1,19 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { format } from 'date-fns'
-import { Check, CheckCheck, Clock3, Copy, Download, File, Forward, Heart, Images, List, MessageSquareText, Package, Pencil, RefreshCw, Reply, Trash2, Vote, X } from 'lucide-react'
+import { Check, CheckCheck, Clock3, Copy, Download, File, Forward, Heart, Images, List, ListTodo, MessageSquareText, NotebookPen, Package, Pencil, RefreshCw, Reply, Trash2, Vote, X } from 'lucide-react'
 import type { MessageDto } from '../../../shared/contracts'
 import type { MessageGroupPosition } from '../message-grouping'
 
-export function MessageBubble({ message, groupPosition = 'single', readOnly = false, showSender, onReply, onForward, onOpenQuote, onResize, onRetry, onError }: {
+export function MessageBubble({ message, groupPosition = 'single', readOnly = false, showSender, onReply, onForward, onAddNote, onAddTask, onOpenQuote, onResize, onRetry, onError }: {
   message: MessageDto
   groupPosition?: MessageGroupPosition
   readOnly?: boolean
   showSender: boolean
   onReply(message: MessageDto): void
   onForward(message: MessageDto): void
+  onAddNote?(message: MessageDto): void
+  onAddTask?(message: MessageDto): void
   onOpenQuote(messageId: string): void
   onResize(): void
   onRetry?(messageId: string): void
@@ -82,6 +84,8 @@ export function MessageBubble({ message, groupPosition = 'single', readOnly = fa
           {!readOnly && <button title="Reply" aria-label="Reply" onClick={() => onReply(message)}><Reply /></button>}
           {!readOnly && <button title="React with heart" aria-label="React with heart" onClick={() => void react()}><Heart /></button>}
           {message.text && <button title="Copy text" aria-label="Copy message text" onClick={() => void copy()}><Copy /></button>}
+          {onAddNote && <button title="Add to CRM notes" aria-label="Add message to CRM notes" onClick={() => onAddNote(message)}><NotebookPen /></button>}
+          {onAddTask && <button title="Create CRM task" aria-label="Create task from message" onClick={() => onAddTask(message)}><ListTodo /></button>}
           <button title="Forward" aria-label="Forward" onClick={() => onForward(message)}><Forward /></button>
           {!readOnly && message.fromMe && message.kind === 'text' && <button title="Edit" aria-label="Edit message" onClick={() => { setEditText(message.text ?? ''); setEditOpen(true) }}><Pencil /></button>}
           {!readOnly && <button title="Delete" aria-label="Delete message" onClick={() => setDeleteOpen(true)}><Trash2 /></button>}

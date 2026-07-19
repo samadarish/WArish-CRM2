@@ -4,8 +4,9 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import pino from 'pino'
 import { afterEach, describe, expect, it } from 'vitest'
-import { CrmRepository } from '../src/core/crm-repository'
+import { ContactRestrictedError, CrmRepository } from '../src/core/crm-repository'
 import { WarishDatabase } from '../src/core/database'
+import { toAppError } from '../src/core/rpc-router'
 import type { CoreEventEnvelope } from '../src/shared/contracts'
 
 const directories: string[] = []
@@ -100,6 +101,36 @@ describe('CrmRepository', () => {
     database.close()
   })
 
+  it('exposes chat CRM signals and keeps bounded source-message snapshots immutable', () => {
+    const { database, crm } = setup()
+    const chatId = directContact(database, '919899991111', { whatsappName: 'Lead Profile' })
+    const originalText = `Customer requirement: ${'x'.repeat(700)}`
+    database.storeMessage({ id: 'crm-source-message', chatId, fromMe: false, senderName: 'Lead Profile', kind: 'text',
+      text: originalText, timestamp: Date.now() - 2_000, status: 'read' })
+    const contact = crm.ensureContact(chatId)
+    crm.updateContact(contact.id, { name: 'CRM Alias', doNotContact: true, consentStatus: 'denied' })
+    crm.setStage(contact.id, 'stage-qualified')
+    const note = crm.saveNote({ contactId: contact.id, body: 'Clarify the requirement', sourceMessageId: 'crm-source-message' })
+    const task = crm.saveTask({ contactId: contact.id, title: 'Send revised quote', dueAt: Date.now() + 60_000,
+      priority: 'high', sourceMessageId: 'crm-source-message' })
+
+    expect(note.sourceMessage).toMatchObject({ messageId: 'crm-source-message', fromMe: false, senderName: 'Lead Profile' })
+    expect(note.sourceMessage?.text).toHaveLength(500)
+    expect(task.sourceMessage).toEqual(note.sourceMessage)
+    expect(database.getChat(chatId).crm).toMatchObject({ contactId: contact.id, name: 'CRM Alias', stageKey: 'qualified',
+      openTaskCount: 1, restricted: true, nextTask: { id: task.id, title: 'Send revised quote', priority: 'high' } })
+
+    database.markMessageEdited('crm-source-message', 'Changed after linking')
+    const updated = crm.saveNote({ id: note.id, contactId: contact.id, body: 'Updated CRM note' })
+    expect(updated.sourceMessage).toEqual(note.sourceMessage)
+    expect(() => crm.assertCanContact(chatId, false)).toThrow(/Confirmation required/)
+    expect(() => crm.assertCanContact(chatId, true)).not.toThrow()
+    expect(toAppError(new ContactRestrictedError('CRM Alias', ['consent is denied']))).toMatchObject({
+      code: 'CONTACT_RESTRICTED', retryable: false
+    })
+    database.close()
+  })
+
   it('backfills only unsaved inbound conversations from the previous 90 days during migration v9', () => {
     const { database, directory } = setup()
     const recentUnknown = directContact(database, '919811110001', { whatsappName: 'Recent Lead' })
@@ -119,7 +150,7 @@ describe('CrmRepository', () => {
       DROP TABLE google_contact_links; DROP TABLE crm_activity; DROP TABLE crm_payments; DROP TABLE crm_order_items;
       DROP TABLE crm_tasks; DROP TABLE crm_orders; DROP TABLE crm_notes; DROP TABLE crm_contact_tags; DROP TABLE crm_tags;
       DROP TABLE crm_catalog_items; DROP TABLE crm_contacts; DROP TABLE crm_pipeline_stages;
-      DELETE FROM schema_migrations WHERE version=9;
+      DELETE FROM schema_migrations WHERE version>=9;
     `)
     legacy.close()
 

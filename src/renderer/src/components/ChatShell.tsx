@@ -4,10 +4,10 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import { format, isSameDay, isToday, isYesterday } from 'date-fns'
 import {
   Archive, ArchiveRestore, ArrowDown, ArrowUp, Check, CheckCheck, ChevronDown, ChevronRight,
-  CircleAlert, Link2, LoaderCircle, Menu, MessageCircle, Mic, Paperclip, Pin, PinOff, Radio, RefreshCw,
-  Search, Send, Settings, Smile, Square, WifiOff, X
+  CalendarClock, CircleAlert, Link2, ListTodo, LoaderCircle, Menu, MessageCircle, Mic, NotebookPen, Paperclip,
+  Pin, PinOff, Radio, RefreshCw, Search, Send, Settings, Smile, Square, WifiOff, X
 } from 'lucide-react'
-import type { AppSettings, ChatCategory, ChatSummary, CommunitySummary, DraftDto, MessageDto, Page, PickedAttachment, SessionState } from '../../../shared/contracts'
+import type { AppSettings, ChatCategory, ChatSummary, CommunitySummary, CrmChatIndicatorDto, CrmContactDetailsDto, CrmTaskDto, DraftDto, MessageDto, Page, PickedAttachment, SessionState } from '../../../shared/contracts'
 import { useUiStore } from '../store'
 import { shouldSubmitComposer } from '../composer-keyboard'
 import { contactIdentityPresentation, type ContactIdentityPresentation } from '../contact-identity'
@@ -115,15 +115,16 @@ function ConversationShell({ session }: { session: SessionState }): React.JSX.El
     getScrollElement: () => chatListRef.current,
     estimateSize: (index) => {
       const item = sidebarItems[index]
+      const crmExtra = item?.type === 'chat' && item.chat.crm ? 18 : 0
       if (document.documentElement.dataset.density === 'compact') {
         const hasIdentity = item?.type === 'chat' ? contactIdentityPresentation(item.chat).hasSecondary : false
         if (item?.type === 'community') return 68
-        return showChatPreviews ? (hasIdentity ? 76 : 64) : (hasIdentity ? 64 : 58)
+        return (showChatPreviews ? (hasIdentity ? 76 : 64) : (hasIdentity ? 64 : 58)) + crmExtra
       }
       const hasIdentity = item?.type === 'chat' ? contactIdentityPresentation(item.chat).hasSecondary : false
       if (item?.type === 'community') return 78
-      if (item?.type === 'chat' && item.nested && !hasIdentity) return showChatPreviews ? 70 : 64
-      return showChatPreviews ? (hasIdentity ? 88 : 76) : (hasIdentity ? 72 : 64)
+      if (item?.type === 'chat' && item.nested && !hasIdentity) return (showChatPreviews ? 70 : 64) + crmExtra
+      return (showChatPreviews ? (hasIdentity ? 88 : 76) : (hasIdentity ? 72 : 64)) + crmExtra
     },
     getItemKey: (index) => {
       const item = sidebarItems[index]
@@ -318,11 +319,17 @@ function CommunityParentRow({ community, expanded, onToggle }: {
 
 function ChatRow({ chat, active, showPreview, nested = false, onClick }: { chat: ChatSummary; active: boolean; showPreview: boolean; nested?: boolean; onClick(): void }): React.JSX.Element {
   const identity = contactIdentityPresentation(chat)
-  return <button className={`chat-row ${chat.kind === 'direct' ? 'direct' : ''} ${identity.hasSecondary ? 'has-identity' : ''} ${nested ? 'nested' : ''} ${active ? 'active' : ''}`} onClick={onClick}>
+  return <button className={`chat-row ${chat.kind === 'direct' ? 'direct' : ''} ${identity.hasSecondary ? 'has-identity' : ''} ${chat.crm ? 'has-crm' : ''} ${nested ? 'nested' : ''} ${active ? 'active' : ''}`} onClick={onClick}>
     <Avatar title={identity.primary} src={chat.avatarUrl} /><span className="chat-row-copy"><span className="chat-row-top"><strong title={identity.primary}>{identity.primary}</strong>{chat.lastMessageAt && <time>{chatTime(chat.lastMessageAt)}</time>}{!showPreview && chat.unreadCount > 0 && <b>{chat.unreadCount > 99 ? '99+' : chat.unreadCount}</b>}</span>
       {identity.hasSecondary && <ContactIdentityDetails identity={identity} />}
+      {chat.crm && <ChatCrmSignal crm={chat.crm} />}
       {showPreview && <span className="chat-row-bottom"><span>{chat.typing ? 'typing…' : chat.lastMessage ?? 'No messages yet'}</span>{chat.unreadCount > 0 && <b>{chat.unreadCount > 99 ? '99+' : chat.unreadCount}</b>}</span>}</span>
   </button>
+}
+
+function ChatCrmSignal({ crm }: { crm: CrmChatIndicatorDto }): React.JSX.Element {
+  return <span className="chat-crm-signal"><span style={{ '--stage-color': crm.stageColor } as React.CSSProperties}><i />{crm.stageName}</span>
+    {crm.nextTask && <span className={crm.nextTask.dueAt && crm.nextTask.dueAt < Date.now() ? 'overdue' : ''}><CalendarClock />{crm.nextTask.dueAt ? compactTaskDate(crm.nextTask.dueAt) : 'Next task'}</span>}</span>
 }
 
 function ContactIdentityDetails({ identity, header = false }: { identity: ContactIdentityPresentation; header?: boolean }): React.JSX.Element {
@@ -353,6 +360,7 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
   const [messageSearch, setMessageSearch] = useState('')
   const [focusedMessageId, setFocusedMessageId] = useState<string>()
   const [replyTo, setReplyTo] = useState<MessageDto>()
+  const [crmCapture, setCrmCapture] = useState<{ kind: 'note' | 'task'; message: MessageDto }>()
   const [attachment, setAttachment] = useState<PickedAttachment>()
   const [attachmentKind, setAttachmentKind] = useState<'image' | 'video' | 'document' | 'audio' | 'voice' | 'sticker'>()
   const recorder = useRef<MediaRecorder | undefined>(undefined)
@@ -506,7 +514,8 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
   }, [measureRenderedRows, restoreAnchor, scrollToNewest])
   const sendMutation = useMutation({
     mutationFn: (input: { chatId: string; clientId: string; text?: string; attachmentToken?: string;
-      attachmentKind?: 'image' | 'video' | 'document' | 'audio' | 'voice' | 'sticker'; quotedMessageId?: string }) =>
+      attachmentKind?: 'image' | 'video' | 'document' | 'audio' | 'voice' | 'sticker'; quotedMessageId?: string;
+      restrictedContactAcknowledged?: boolean }) =>
       window.warish.messages.send(input),
     onMutate: (input) => {
       pendingOwnSendRef.current = true
@@ -532,8 +541,12 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
   })
   const submitMessage = (): void => {
     if (chat.readOnly || sendMutation.isPending || session.phase !== 'connected' || (!text.trim() && !attachment)) return
+    const restrictedContactAcknowledged = chat.crm?.restricted
+      ? window.confirm(`Send a new message to ${chat.crm.name ?? chat.title}? This contact is marked as restricted in CRM.`)
+      : false
+    if (chat.crm?.restricted && !restrictedContactAcknowledged) return
     sendMutation.mutate({ chatId: chat.id, clientId: crypto.randomUUID(), text: text.trim() || undefined,
-      attachmentToken: attachment?.token, attachmentKind, quotedMessageId: replyTo?.id })
+      attachmentToken: attachment?.token, attachmentKind, quotedMessageId: replyTo?.id, restrictedContactAcknowledged })
   }
   const earlierMutation = useMutation({
     mutationFn: () => window.warish.messages.loadEarlier(chat.id),
@@ -563,6 +576,7 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
     setSearchOpen(false)
     setMessageSearch('')
     setFocusedMessageId(undefined)
+    setCrmCapture(undefined)
     if (recorder.current?.state === 'recording') {
       recorder.current.ondataavailable = null
       recorder.current.onstop = null
@@ -771,8 +785,11 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
 
   const conversationIdentity = contactIdentityPresentation(chat)
   return <>
-    <header className="conversation-header"><button className="conversation-identity" title="Open conversation info" onClick={() => { setSearchOpen(false); setConversationMenuOpen(false); setContactDrawerOpen(true) }}><Avatar title={conversationIdentity.primary} src={chat.avatarUrl} /><span title={chat.description}><strong>{conversationIdentity.primary}</strong>{chat.kind === 'direct'
-      ? conversationIdentity.hasSecondary && <ContactIdentityDetails identity={conversationIdentity} header />
+    <header className="conversation-header"><button className="conversation-identity" title={chat.kind === 'direct' ? 'Open customer details' : 'Open conversation info'} onClick={() => { setSearchOpen(false); setConversationMenuOpen(false); setContactDrawerOpen(true) }}><Avatar title={conversationIdentity.primary} src={chat.avatarUrl} /><span title={chat.description}><strong>{conversationIdentity.primary}</strong>{chat.kind === 'direct'
+      ? <span className="conversation-crm-line">{chat.crm?.name && chat.crm.name !== conversationIdentity.primary && <span className="conversation-crm-alias">CRM: {chat.crm.name}</span>}
+        {conversationIdentity.profileName && <span className="whatsapp-profile-pill">{conversationIdentity.profileName}</span>}
+        {chat.crm && <><span className="conversation-stage" style={{ '--stage-color': chat.crm.stageColor } as React.CSSProperties}><i />{chat.crm.stageName}</span>
+          {chat.crm.nextTask && <span className="conversation-next-task"><CalendarClock />{chat.crm.nextTask.title}</span>}</>}</span>
       : <span>{chatSubtitle(chat)}</span>}</span></button>
       <button className={`icon-button ${searchOpen ? 'active' : ''}`} title="Search this conversation" aria-label="Search this conversation" aria-expanded={searchOpen} onClick={() => { setConversationMenuOpen(false); setContactDrawerOpen(false); setSearchOpen((open) => !open) }}><Search /></button>
       <button className="icon-button" title="Conversation menu" aria-label="Conversation menu" aria-haspopup="menu" aria-expanded={conversationMenuOpen} onClick={() => { setSearchOpen(false); setContactDrawerOpen(false); setConversationMenuOpen((open) => !open) }}><Menu /></button>
@@ -801,6 +818,8 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
           return <div key={String(item.key)} ref={virtualizer.measureElement} data-index={item.index} data-message-id={message.id}
             className={`virtual-message message-item group-${groupPosition} ${message.id === focusedMessageId ? 'search-target' : ''}`} style={{ transform: `translateY(${item.start + virtualMessageOffset}px)` }}>
             <MessageBubble message={message} groupPosition={groupPosition} readOnly={chat.readOnly} showSender={showSenderById.get(message.id) ?? false} onReply={setReplyTo} onForward={onForward}
+              onAddNote={chat.kind === 'direct' ? (source) => setCrmCapture({ kind: 'note', message: source }) : undefined}
+              onAddTask={chat.kind === 'direct' ? (source) => setCrmCapture({ kind: 'task', message: source }) : undefined}
               onOpenQuote={(messageId) => void revealMessage(messageId)} onResize={handleRowResize}
               onRetry={(messageId) => void window.warish.messages.retry(messageId).catch((error) => pushNotice(errorMessage(error)))}
               onError={(error) => pushNotice(errorMessage(error))} />
@@ -823,10 +842,11 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
         {messageSearchQuery.isFetchingNextPage && <LoadingRow label="Loading more matches…" />}
       </div>
     </aside>}
-    {contactDrawerOpen && <Suspense fallback={<aside className="contact-drawer"><LoadingRow label="Loading conversation info…" /></aside>}><ContactDrawer chat={chat} onClose={() => setContactDrawerOpen(false)} onArchived={() => {
+    {contactDrawerOpen && <Suspense fallback={<aside className="contact-drawer"><LoadingRow label="Loading customer details…" /></aside>}><ContactDrawer chat={chat} onClose={() => setContactDrawerOpen(false)} onArchived={() => {
       setContactDrawerOpen(false)
       onChatHidden()
-    }} /></Suspense>}
+    }} onJumpToMessage={(messageId) => { setContactDrawerOpen(false); void revealMessage(messageId) }} /></Suspense>}
+    {crmCapture && <CrmCaptureDialog chat={chat} capture={crmCapture} onClose={() => setCrmCapture(undefined)} />}
     {newMessageCount > 0 && <button className="new-messages-button" onClick={() => scrollToNewest()}><ArrowDown />{newMessageCount} new {newMessageCount === 1 ? 'message' : 'messages'}</button>}
     {!chat.readOnly && (replyTo || attachment) && <div className="composer-context">
       <div>{replyTo && <><strong>Replying to {replyTo.senderName ?? (replyTo.fromMe ? 'yourself' : chat.title)}</strong><span>{replyTo.text ?? replyTo.kind}</span></>}{attachment && <><strong>{attachmentKind === 'voice' ? 'Voice message' : attachment.name}</strong><span>{formatBytes(attachment.size)}</span></>}</div>
@@ -852,6 +872,55 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
   </>
 }
 
+function CrmCaptureDialog({ chat, capture, onClose }: {
+  chat: ChatSummary
+  capture: { kind: 'note' | 'task'; message: MessageDto }
+  onClose(): void
+}): React.JSX.Element {
+  const preview = messagePreview(capture.message)
+  const [body, setBody] = useState(preview)
+  const [title, setTitle] = useState('Follow up on WhatsApp')
+  const [description, setDescription] = useState(preview)
+  const [due, setDue] = useState(toLocalDateTimeInput(Date.now() + 24 * 60 * 60 * 1000))
+  const [priority, setPriority] = useState<CrmTaskDto['priority']>('normal')
+  const queryClient = useQueryClient()
+  const pushNotice = useUiStore((state) => state.pushNotice)
+  const save = useMutation({ mutationFn: async () => {
+    let contactId = chat.crm?.contactId
+    if (!contactId) {
+      const contact = await window.warish.crm.contacts.ensure(chat.id)
+      contactId = contact.id
+      queryClient.setQueryData<CrmContactDetailsDto>(['crm', 'contact', contact.id], contact)
+      queryClient.setQueryData<CrmContactDetailsDto>(['crm', 'contact', 'chat', chat.id], contact)
+    }
+    if (capture.kind === 'note') return window.warish.crm.notes.save({ contactId, body, sourceMessageId: capture.message.id })
+    return window.warish.crm.tasks.save({ contactId, title, description, dueAt: due ? new Date(due).getTime() : undefined,
+      priority, sourceMessageId: capture.message.id })
+  }, onSuccess: () => {
+    void queryClient.invalidateQueries({ queryKey: ['crm'] })
+    void queryClient.invalidateQueries({ queryKey: ['chats'] })
+    pushNotice(capture.kind === 'note' ? 'Message added to CRM notes' : 'Follow-up task created', 'info')
+    onClose()
+  }, onError: (error) => pushNotice(errorMessage(error)) })
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent): void => { if (event.key === 'Escape') onClose() }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [onClose])
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="modal crm-capture-dialog" role="dialog" aria-modal="true" aria-label={capture.kind === 'note' ? 'Add CRM note' : 'Create follow-up task'}>
+    <header><div><span>{capture.kind === 'note' ? 'CRM note' : 'Follow-up task'}</span><h2>{capture.kind === 'note' ? 'Add message to notes' : 'Create task from message'}</h2></div><button className="icon-button" aria-label="Close" onClick={onClose}><X /></button></header>
+    <form onSubmit={(event) => { event.preventDefault(); save.mutate() }}><div className="crm-capture-source"><MessageCircle /><span><small>{capture.message.fromMe ? 'You' : capture.message.senderName ?? chat.title}</small><strong>{preview}</strong></span></div>
+      {capture.kind === 'note' ? <label><span>Note</span><textarea autoFocus value={body} onChange={(event) => setBody(event.target.value)} required /></label>
+        : <><label><span>Task</span><input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} required /></label>
+          <label><span>Notes</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} /></label>
+          <div className="form-grid"><label><span>Due</span><input type="datetime-local" value={due} onChange={(event) => setDue(event.target.value)} /></label>
+            <label><span>Priority</span><select value={priority} onChange={(event) => setPriority(event.target.value as CrmTaskDto['priority'])}><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option></select></label></div></>}
+      <footer><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button"
+        disabled={save.isPending || (capture.kind === 'note' ? !body.trim() : !title.trim())}>{save.isPending ? 'Saving…' : capture.kind === 'note' ? <><NotebookPen />Add note</> : <><ListTodo />Create task</>}</button></footer>
+    </form>
+  </section></div>
+}
+
 function ForwardDialog({ message, onClose }: { message: MessageDto; onClose(): void }): React.JSX.Element {
   const [selected, setSelected] = useState<string[]>([])
   const [query, setQuery] = useState('')
@@ -864,8 +933,13 @@ function ForwardDialog({ message, onClose }: { message: MessageDto; onClose(): v
     getNextPageParam: (page) => page.nextCursor
   })
   const chats = useMemo(() => chatsQuery.data?.pages.flatMap((page) => page.items).filter((chat) => !chat.readOnly) ?? [], [chatsQuery.data])
-  const mutation = useMutation({ mutationFn: () => window.warish.messages.forward(message.id, selected), onSuccess: onClose,
+  const mutation = useMutation({ mutationFn: (acknowledgements: string[]) => window.warish.messages.forward(message.id, selected, acknowledgements), onSuccess: onClose,
     onError: (error) => pushNotice(errorMessage(error)) })
+  const submitForward = (): void => {
+    const restricted = chats.filter((chat) => selected.includes(chat.id) && chat.crm?.restricted)
+    if (restricted.length && !window.confirm(`Forward this message to ${restricted.map((chat) => chat.crm?.name ?? chat.title).join(', ')}? ${restricted.length === 1 ? 'This contact is' : 'These contacts are'} marked as restricted in CRM.`)) return
+    mutation.mutate(restricted.map((chat) => chat.id))
+  }
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent): void => { if (event.key === 'Escape') onClose() }
     window.addEventListener('keydown', closeOnEscape)
@@ -881,7 +955,7 @@ function ForwardDialog({ message, onClose }: { message: MessageDto; onClose(): v
       {chatsQuery.isError && <QueryError label="Could not load conversations" onRetry={() => void chatsQuery.refetch()} />}
       {chats.map((chat) => <label key={chat.id}><input type="checkbox" checked={selected.includes(chat.id)} onChange={() => setSelected((items) => items.includes(chat.id) ? items.filter((id) => id !== chat.id) : [...items, chat.id])} /><Avatar title={chat.title} src={chat.avatarUrl} /><span>{chat.title}</span>{selected.includes(chat.id) && <Check />}</label>)}
       {chatsQuery.isFetchingNextPage && <LoadingRow label="Loading more conversations…" />}
-    </div><footer><button onClick={onClose}>Cancel</button><button className="primary-button" disabled={!selected.length || mutation.isPending} onClick={() => mutation.mutate()}>{mutation.isPending ? 'Forwarding…' : 'Forward'}</button></footer></section></div>
+    </div><footer><button onClick={onClose}>Cancel</button><button className="primary-button" disabled={!selected.length || mutation.isPending} onClick={submitForward}>{mutation.isPending ? 'Forwarding…' : 'Forward'}</button></footer></section></div>
 }
 
 function WelcomePanel(): React.JSX.Element { return <div className="welcome-panel"><div className="brand-mark large">W</div><h2>WArish for Windows</h2><p>Select a conversation to start messaging. Your history and credentials remain on this computer.</p></div> }
@@ -908,6 +982,12 @@ function chatSubtitle(chat: ChatSummary): string {
   return 'WhatsApp conversation'
 }
 function chatTime(timestamp: number): string { const date = new Date(timestamp); return isToday(date) ? format(date, 'HH:mm') : isYesterday(date) ? 'Yesterday' : format(date, 'dd/MM/yy') }
+function compactTaskDate(timestamp: number): string {
+  const date = new Date(timestamp)
+  if (timestamp < Date.now()) return 'Overdue'
+  if (isToday(date)) return format(date, 'HH:mm')
+  return format(date, 'dd MMM')
+}
 function compareMessages(left: MessageDto, right: MessageDto): number {
   return left.timestamp - right.timestamp || left.id.localeCompare(right.id)
 }
@@ -940,6 +1020,13 @@ function useDebouncedValue<T>(value: T, delay: number): T {
   return debounced
 }
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : 'Something went wrong' }
+function messagePreview(message: MessageDto): string {
+  return (message.text ?? message.rich?.body ?? message.rich?.title ?? message.attachment?.fileName ?? message.kind).trim().slice(0, 500)
+}
+function toLocalDateTimeInput(value: number): string {
+  const date = new Date(value - new Date(value).getTimezoneOffset() * 60_000)
+  return date.toISOString().slice(0, 16)
+}
 function onMediaRecorderError(_event: Event, notify: (message: string) => void): void {
   notify('Voice recording failed. Check your microphone and try again.')
 }

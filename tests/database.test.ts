@@ -67,7 +67,7 @@ describe('WarishDatabase', () => {
     const migrated = new WarishDatabase(path, Buffer.alloc(32, 7), pino({ enabled: false }))
     expect(migrated.getChat(lid)).toMatchObject({ title: 'Migrated name', savedName: 'Migrated name',
       whatsappName: 'Migrated profile', phoneNumber: '+33612345678' })
-    expect((migrated.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as { version: number }).version).toBe(9)
+    expect((migrated.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as { version: number }).version).toBe(10)
     migrated.close()
   })
 
@@ -100,6 +100,32 @@ describe('WarishDatabase', () => {
     expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
       'thumbnail_checked_at', 'thumbnail_missing_until', 'thumbnail_failures'
     ]))
+    migrated.close()
+  })
+
+  it('migrates CRM notes and tasks to immutable message references in v10', () => {
+    const { database, directory } = createDatabase()
+    const path = join(directory, 'warish.sqlite')
+    database.close()
+
+    const legacy = new DatabaseSync(path)
+    legacy.exec(`
+      DROP INDEX crm_tasks_contact_status_due_v10_idx;
+      ALTER TABLE crm_notes DROP COLUMN source_message_snapshot;
+      ALTER TABLE crm_notes DROP COLUMN source_message_id;
+      ALTER TABLE crm_tasks DROP COLUMN source_message_snapshot;
+      ALTER TABLE crm_tasks DROP COLUMN source_message_id;
+      DELETE FROM schema_migrations WHERE version>=10;
+    `)
+    legacy.close()
+
+    const migrated = new WarishDatabase(path, Buffer.alloc(32, 7), pino({ enabled: false }))
+    const noteColumns = migrated.db.prepare("SELECT name FROM pragma_table_info('crm_notes')").all() as Array<{ name: string }>
+    const taskColumns = migrated.db.prepare("SELECT name FROM pragma_table_info('crm_tasks')").all() as Array<{ name: string }>
+    const taskIndexes = migrated.db.prepare("SELECT name FROM pragma_index_list('crm_tasks')").all() as Array<{ name: string }>
+    expect(noteColumns.map((column) => column.name)).toEqual(expect.arrayContaining(['source_message_id', 'source_message_snapshot']))
+    expect(taskColumns.map((column) => column.name)).toEqual(expect.arrayContaining(['source_message_id', 'source_message_snapshot']))
+    expect(taskIndexes.map((index) => index.name)).toContain('crm_tasks_contact_status_due_v10_idx')
     migrated.close()
   })
 
