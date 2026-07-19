@@ -1,7 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
-  AppSettings, ChatSummary, CommunitySummary, ContactDetails, ContactSyncState, CoreEventEnvelope, DiagnosticsDto, DraftDto, LogEntryDto, MessageContextDto, MessageDto, OlderHistoryResult, Page, PickedAttachment,
-  SessionState, WarishApi
+  AppSettings, ChatSummary, CommunitySummary, ContactDetails, ContactSyncState, CoreEventEnvelope, CrmActivityDto,
+  CrmCatalogItemDto, CrmContactDetailsDto, CrmContactSummaryDto, CrmDashboardDto, CrmNoteDto, CrmOrderDto,
+  CrmStageDto, CrmTaskDto, DiagnosticsDto, DraftDto, GoogleConnectionStatus, GoogleContactPreview, LogEntryDto,
+  MessageContextDto, MessageDto, OlderHistoryResult, Page, PickedAttachment, SessionState, WarishApi
 } from '../shared/contracts'
 
 const invoke = <T>(method: string, params: Record<string, unknown> = {}): Promise<T> =>
@@ -51,6 +53,48 @@ const api: WarishApi = {
     open: (cacheToken) => ipcRenderer.invoke('warish:open-media', cacheToken) as Promise<void>,
     clearCache: () => invoke<void>('media.clearCache'),
     discardDraft: (token) => invoke<void>('media.discardDraft', { token })
+  },
+  crm: {
+    dashboard: () => invoke<CrmDashboardDto>('crm.dashboard.get'),
+    pipeline: () => invoke<CrmStageDto[]>('crm.pipeline.get'),
+    contacts: {
+      list: (input = {}) => invoke<CrmContactSummaryDto[]>('crm.contacts.list', { input }),
+      get: (input) => invoke<CrmContactDetailsDto>('crm.contacts.get', input),
+      ensure: (chatId) => invoke<CrmContactDetailsDto>('crm.contacts.ensure', { chatId }),
+      update: (contactId, patch) => invoke<CrmContactDetailsDto>('crm.contacts.update', { contactId, patch }),
+      setStage: (contactId, stageId) => invoke<CrmContactDetailsDto>('crm.contacts.setStage', { contactId, stageId }),
+      setLifecycle: (contactId, lifecycle) => invoke<CrmContactDetailsDto>('crm.contacts.setLifecycle', { contactId, lifecycle })
+    },
+    notes: {
+      list: (contactId) => invoke<CrmNoteDto[]>('crm.notes.list', { contactId }),
+      add: (contactId, body) => invoke<CrmNoteDto>('crm.notes.add', { contactId, body }),
+      delete: (noteId) => invoke<void>('crm.notes.delete', { noteId })
+    },
+    tasks: {
+      list: (input = {}) => invoke<CrmTaskDto[]>('crm.tasks.list', { input }),
+      save: (input) => invoke<CrmTaskDto>('crm.tasks.save', { input }),
+      delete: (taskId) => invoke<void>('crm.tasks.delete', { taskId })
+    },
+    catalog: {
+      list: (query, includeInactive) => invoke<CrmCatalogItemDto[]>('crm.catalog.list', { query, includeInactive }),
+      save: (input) => invoke<CrmCatalogItemDto>('crm.catalog.save', { input }),
+      delete: (itemId) => invoke<void>('crm.catalog.delete', { itemId })
+    },
+    orders: {
+      list: (contactId) => invoke<CrmOrderDto[]>('crm.orders.list', { contactId }),
+      get: (orderId) => invoke<CrmOrderDto>('crm.orders.get', { orderId }),
+      save: (input) => invoke<CrmOrderDto>('crm.orders.save', { input }),
+      delete: (orderId) => invoke<void>('crm.orders.delete', { orderId })
+    },
+    activity: (contactId, limit) => invoke<CrmActivityDto[]>('crm.activity.list', { contactId, limit })
+  },
+  google: {
+    status: () => invoke<GoogleConnectionStatus>('google.status'),
+    configure: (clientId) => invoke<GoogleConnectionStatus>('google.configure', { clientId }),
+    connect: () => ipcRenderer.invoke('warish:google-connect') as Promise<GoogleConnectionStatus>,
+    disconnect: () => invoke<GoogleConnectionStatus>('google.disconnect'),
+    previewContact: (contactId) => invoke<GoogleContactPreview>('google.contact.preview', { contactId }),
+    saveContact: (contactId, draft, resourceName) => invoke<CrmContactDetailsDto>('google.contact.save', { contactId, draft, resourceName })
   },
   search: { messages: (query, chatId, cursor) => invoke<Page<MessageDto>>('search.messages', { query, chatId, cursor }) },
   settings: {

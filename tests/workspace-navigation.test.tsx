@@ -16,7 +16,7 @@ beforeEach(() => useUiStore.setState({ destination: 'direct', selectedChatId: un
 
 describe('workspace navigation', () => {
   it('keeps Chats first and All conversations below Channels', () => {
-    expect(WORKSPACE_DESTINATIONS).toEqual(['direct', 'group', 'community', 'channel', 'all', 'archived'])
+    expect(WORKSPACE_DESTINATIONS).toEqual(['direct', 'crm', 'group', 'community', 'channel', 'all', 'archived'])
     expect(useUiStore.getState().destination).toBe('direct')
   })
 

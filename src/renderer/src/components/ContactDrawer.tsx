@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Archive, ArchiveRestore, BellOff, BellRing, Info, LoaderCircle, MessageCircle, Network, Pin, PinOff,
+  Archive, ArchiveRestore, BellOff, BellRing, BriefcaseBusiness, ChevronRight, Info, LoaderCircle, MessageCircle, Network, Pin, PinOff,
   Radio, UserRound, UsersRound, X
 } from 'lucide-react'
 import type { ChatSummary, ContactDetails } from '../../../shared/contracts'
@@ -13,6 +13,7 @@ export function ContactDrawer({ chat, onClose, onArchived }: {
   onArchived(): void
 }): React.JSX.Element {
   const pushNotice = useUiStore((state) => state.pushNotice)
+  const openCrmContact = useUiStore((state) => state.openCrmContact)
   const queryClient = useQueryClient()
   const detailsQuery = useQuery({
     queryKey: ['contact', chat.id],
@@ -20,6 +21,13 @@ export function ContactDrawer({ chat, onClose, onArchived }: {
     initialData: toInitialDetails(chat)
   })
   const details = detailsQuery.data
+  const crmQuery = useQuery({ queryKey: ['crm', 'contact', 'chat', chat.id],
+    queryFn: () => window.warish.crm.contacts.get({ chatId: chat.id }), enabled: details.kind === 'direct', retry: false })
+  const ensureCrm = useMutation({ mutationFn: () => window.warish.crm.contacts.ensure(chat.id), onSuccess: (contact) => {
+    queryClient.setQueryData(['crm', 'contact', contact.id], contact)
+    queryClient.setQueryData(['crm', 'contact', 'chat', chat.id], contact)
+    openCrmContact(contact.id)
+  }, onError: (error) => pushNotice(error instanceof Error ? error.message : 'Could not add this contact to CRM') })
   const action = useMutation({
     mutationFn: (patch: Partial<Pick<ChatSummary, 'archived' | 'pinned' | 'mutedUntil'>>) =>
       window.warish.chats.update(chat.id, patch),
@@ -47,6 +55,13 @@ export function ContactDrawer({ chat, onClose, onArchived }: {
         <button disabled={action.isPending} onClick={() => action.mutate({ mutedUntil: muted ? 0 : Number.MAX_SAFE_INTEGER })}>{muted ? <BellRing /> : <BellOff />}<span>{muted ? 'Unmute' : 'Mute'}</span></button>
         <button disabled={action.isPending} onClick={() => action.mutate({ archived: !details.archived })}>{details.archived ? <ArchiveRestore /> : <Archive />}<span>{details.archived ? 'Restore' : 'Archive'}</span></button>
       </div>
+      {details.kind === 'direct' && <button className="contact-crm-entry" disabled={ensureCrm.isPending}
+        onClick={() => crmQuery.data ? openCrmContact(crmQuery.data.id) : ensureCrm.mutate()}>
+        <span><BriefcaseBusiness /></span><div><strong>{crmQuery.data ? 'Open CRM record' : 'Add to CRM'}</strong>
+          <small>{crmQuery.data ? `${crmQuery.data.stageName} · ${crmQuery.data.orderCount} orders · ${crmQuery.data.openTaskCount} open tasks`
+            : 'Track enquiries, follow-ups, notes, orders, and customer history.'}</small></div>
+        {ensureCrm.isPending ? <LoaderCircle className="spin" /> : <ChevronRight />}
+      </button>}
       <section className="contact-detail-list">
         <Detail icon={<KindIcon kind={details.kind} />} label="Conversation type" value={kindLabel(details)} />
         {details.savedName && <Detail icon={<UserRound />} label="Saved contact name" value={details.savedName} />}

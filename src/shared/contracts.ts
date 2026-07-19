@@ -30,6 +30,35 @@ export const RPC_METHODS = [
   'media.cancel',
   'media.clearCache',
   'media.discardDraft',
+  'crm.dashboard.get',
+  'crm.pipeline.get',
+  'crm.contacts.list',
+  'crm.contacts.get',
+  'crm.contacts.ensure',
+  'crm.contacts.update',
+  'crm.contacts.setStage',
+  'crm.contacts.setLifecycle',
+  'crm.notes.list',
+  'crm.notes.add',
+  'crm.notes.delete',
+  'crm.tasks.list',
+  'crm.tasks.save',
+  'crm.tasks.delete',
+  'crm.catalog.list',
+  'crm.catalog.save',
+  'crm.catalog.delete',
+  'crm.orders.list',
+  'crm.orders.get',
+  'crm.orders.save',
+  'crm.orders.delete',
+  'crm.activity.list',
+  'google.status',
+  'google.configure',
+  'google.beginAuth',
+  'google.completeAuth',
+  'google.disconnect',
+  'google.contact.preview',
+  'google.contact.save',
   'search.messages',
   'draft.get',
   'draft.save',
@@ -77,6 +106,10 @@ export interface CoreEventPayloadMap {
   'media.progress': unknown
   'settings.changed': AppSettings
   'navigation.openChat': { chatId: string }
+  'navigation.openCrm': { contactId: string }
+  'crm.changed': { contactId?: string; chatId?: string; scope: 'contact' | 'pipeline' | 'order' | 'task' | 'catalog' | 'all' }
+  'crm.taskDue': { taskId: string; contactId: string; title: string; dueAt: number }
+  'google.statusChanged': GoogleConnectionStatus
 }
 
 export type CoreEventType = keyof CoreEventPayloadMap
@@ -282,6 +315,217 @@ export interface DraftDto {
   updatedAt: number
 }
 
+export type CrmLifecycle = 'lead' | 'customer' | 'ignored' | 'spam'
+export type CrmStageKey = 'new' | 'qualified' | 'quoted' | 'won' | 'lost'
+
+export interface CrmStageDto {
+  id: string
+  key: CrmStageKey
+  name: string
+  color: string
+  position: number
+  outcome: 'open' | 'won' | 'lost'
+}
+
+export interface CrmTagDto {
+  id: string
+  name: string
+  color: string
+}
+
+export interface CrmContactSummaryDto {
+  id: string
+  identityId: string
+  chatId: string
+  lifecycle: CrmLifecycle
+  stageId: string
+  stageKey: CrmStageKey
+  stageName: string
+  stageColor: string
+  name: string
+  whatsappName?: string
+  phoneNumber?: string
+  avatarUrl?: string
+  company?: string
+  source: string
+  tags: CrmTagDto[]
+  createdAt: number
+  lastActivityAt: number
+  orderCount: number
+  lifetimeValue: number
+  openTaskCount: number
+  googleLinked: boolean
+}
+
+export interface CrmContactDetailsDto extends CrmContactSummaryDto {
+  email?: string
+  address?: string
+  birthday?: string
+  taxId?: string
+  preferences?: string
+  consentStatus: 'unknown' | 'granted' | 'denied'
+  doNotContact: boolean
+  customFields: Record<string, string>
+}
+
+export interface CrmDashboardDto {
+  newLeads: number
+  openLeads: number
+  customers: number
+  overdueTasks: number
+  ordersThisMonth: number
+  revenueThisMonth: number
+  lifetimeRevenue: number
+  recentContacts: CrmContactSummaryDto[]
+  pipeline: Array<CrmStageDto & { count: number; value: number }>
+}
+
+export interface CrmNoteDto {
+  id: string
+  contactId: string
+  body: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface CrmTaskDto {
+  id: string
+  contactId: string
+  orderId?: string
+  title: string
+  description?: string
+  dueAt?: number
+  priority: 'low' | 'normal' | 'high'
+  status: 'open' | 'completed' | 'cancelled'
+  reminderAt?: number
+  notifiedAt?: number
+  createdAt: number
+  completedAt?: number
+}
+
+export interface CrmCatalogItemDto {
+  id: string
+  type: 'product' | 'service'
+  name: string
+  sku?: string
+  description?: string
+  unitPrice: number
+  currency: string
+  active: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+export type CrmOrderStatus = 'draft' | 'confirmed' | 'in-progress' | 'completed' | 'cancelled'
+export type CrmPaymentStatus = 'unpaid' | 'partial' | 'paid' | 'refunded'
+
+export interface CrmOrderItemDto {
+  id: string
+  catalogItemId?: string
+  type: 'product' | 'service'
+  name: string
+  sku?: string
+  quantity: number
+  unitPrice: number
+  discount: number
+  taxRate: number
+  lineTotal: number
+}
+
+export interface CrmPaymentDto {
+  id: string
+  amount: number
+  method?: string
+  reference?: string
+  paidAt: number
+  note?: string
+}
+
+export interface CrmOrderDto {
+  id: string
+  contactId: string
+  orderNumber: string
+  status: CrmOrderStatus
+  paymentStatus: CrmPaymentStatus
+  currency: string
+  subtotal: number
+  discount: number
+  tax: number
+  total: number
+  paidAmount: number
+  balanceAmount: number
+  shippingAddress?: string
+  appointmentAt?: number
+  expectedAt?: number
+  customerNote?: string
+  internalNote?: string
+  items: CrmOrderItemDto[]
+  payments: CrmPaymentDto[]
+  createdAt: number
+  updatedAt: number
+  completedAt?: number
+}
+
+export interface CrmActivityDto {
+  id: string
+  contactId: string
+  type: 'lead-created' | 'stage-changed' | 'lifecycle-changed' | 'note-added' | 'task-created' | 'task-updated' | 'task-completed' | 'order-created' | 'order-updated' | 'google-saved'
+  summary: string
+  metadata?: Record<string, unknown>
+  createdAt: number
+}
+
+export interface GoogleConnectionStatus {
+  configured: boolean
+  connected: boolean
+  accountEmail?: string
+  connectedAt?: number
+  message?: string
+}
+
+export interface GoogleContactDraft {
+  name: string
+  phoneNumber: string
+  email?: string
+  company?: string
+}
+
+export interface GoogleContactPreview {
+  mode: 'create' | 'update' | 'choose'
+  draft: GoogleContactDraft
+  matches: Array<{ resourceName: string; name: string; phoneNumbers: string[]; email?: string }>
+  selectedResourceName?: string
+}
+
+export interface CrmContactPatch {
+  name?: string
+  email?: string
+  company?: string
+  address?: string
+  birthday?: string
+  taxId?: string
+  preferences?: string
+  source?: string
+  consentStatus?: CrmContactDetailsDto['consentStatus']
+  doNotContact?: boolean
+  customFields?: Record<string, string>
+  tags?: Array<{ name: string; color?: string }>
+}
+
+export interface CrmOrderInput {
+  id?: string
+  contactId: string
+  status: CrmOrderStatus
+  currency?: string
+  shippingAddress?: string
+  appointmentAt?: number
+  expectedAt?: number
+  customerNote?: string
+  internalNote?: string
+  items: Array<Omit<CrmOrderItemDto, 'id' | 'lineTotal'>>
+  payments?: Array<Omit<CrmPaymentDto, 'id'>>
+}
+
 export interface AppSettings {
   theme: 'system' | 'light' | 'dark' | 'black'
   density: 'comfortable' | 'compact'
@@ -390,6 +634,48 @@ export interface WarishApi {
     open(cacheToken: string): Promise<void>
     clearCache(): Promise<void>
     discardDraft(token: string): Promise<void>
+  }
+  crm: {
+    dashboard(): Promise<CrmDashboardDto>
+    pipeline(): Promise<CrmStageDto[]>
+    contacts: {
+      list(input?: { lifecycle?: CrmLifecycle | 'active'; stageId?: string; query?: string; limit?: number }): Promise<CrmContactSummaryDto[]>
+      get(input: { contactId?: string; chatId?: string }): Promise<CrmContactDetailsDto>
+      ensure(chatId: string): Promise<CrmContactDetailsDto>
+      update(contactId: string, patch: CrmContactPatch): Promise<CrmContactDetailsDto>
+      setStage(contactId: string, stageId: string): Promise<CrmContactDetailsDto>
+      setLifecycle(contactId: string, lifecycle: CrmLifecycle): Promise<CrmContactDetailsDto>
+    }
+    notes: {
+      list(contactId: string): Promise<CrmNoteDto[]>
+      add(contactId: string, body: string): Promise<CrmNoteDto>
+      delete(noteId: string): Promise<void>
+    }
+    tasks: {
+      list(input?: { contactId?: string; status?: CrmTaskDto['status']; due?: 'overdue' | 'today' | 'upcoming' }): Promise<CrmTaskDto[]>
+      save(input: Partial<CrmTaskDto> & Pick<CrmTaskDto, 'contactId' | 'title'>): Promise<CrmTaskDto>
+      delete(taskId: string): Promise<void>
+    }
+    catalog: {
+      list(query?: string, includeInactive?: boolean): Promise<CrmCatalogItemDto[]>
+      save(input: Partial<CrmCatalogItemDto> & Pick<CrmCatalogItemDto, 'type' | 'name' | 'unitPrice'>): Promise<CrmCatalogItemDto>
+      delete(itemId: string): Promise<void>
+    }
+    orders: {
+      list(contactId?: string): Promise<CrmOrderDto[]>
+      get(orderId: string): Promise<CrmOrderDto>
+      save(input: CrmOrderInput): Promise<CrmOrderDto>
+      delete(orderId: string): Promise<void>
+    }
+    activity(contactId: string, limit?: number): Promise<CrmActivityDto[]>
+  }
+  google: {
+    status(): Promise<GoogleConnectionStatus>
+    configure(clientId: string): Promise<GoogleConnectionStatus>
+    connect(): Promise<GoogleConnectionStatus>
+    disconnect(): Promise<GoogleConnectionStatus>
+    previewContact(contactId: string): Promise<GoogleContactPreview>
+    saveContact(contactId: string, draft: GoogleContactDraft, resourceName?: string): Promise<CrmContactDetailsDto>
   }
   search: {
     messages(query: string, chatId?: string, cursor?: string): Promise<Page<MessageDto>>

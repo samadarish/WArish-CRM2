@@ -22,6 +22,7 @@ import type {
   SessionState
 } from '../shared/contracts'
 import { createPersistentAuthState, type PersistentAuthState } from './auth-store'
+import { CrmRepository } from './crm-repository'
 import { WarishDatabase } from './database'
 import { MediaManager } from './media-manager'
 import { deserializeRawMessage, isVisibleChatJid, normalizeWhatsAppMessage } from './normalizer'
@@ -47,6 +48,7 @@ interface OutgoingMessageInput {
 
 export class WhatsAppClient {
   readonly #database: WarishDatabase
+  readonly #crm: CrmRepository
   readonly #logger: Logger
   readonly #emit: EmitEvent
   readonly #auth: PersistentAuthState
@@ -68,9 +70,11 @@ export class WhatsAppClient {
   readonly #avatarRequests = new Map<string, Promise<void>>()
   readonly #avatarQueue: Array<() => void> = []
   #activeAvatarRequests = 0
+  #silentCrmChanges = false
 
-  constructor(database: WarishDatabase, logger: Logger, media: MediaManager, emit: EmitEvent) {
+  constructor(database: WarishDatabase, logger: Logger, media: MediaManager, crm: CrmRepository, emit: EmitEvent) {
     this.#database = database
+    this.#crm = crm
     this.#logger = logger
     this.media = media
     this.#emit = emit
@@ -438,6 +442,7 @@ export class WhatsAppClient {
         this.#emit({ type: 'contact.changed', payload: { chatIds: [], bulk: true } })
       }
       const affectedChatIds = new Set<string>()
+      this.#silentCrmChanges = false
       for (let index = 0; index < messages.length; index += 500) {
         this.#database.transaction(() => {
           for (const message of messages.slice(index, index + 500)) {
@@ -456,6 +461,7 @@ export class WhatsAppClient {
         chatIds: [...affectedChatIds], messageCount: messages.length, onDemand: isOnDemand
       }
       this.#emit({ type: 'history.batch', payload: batch })
+      if (this.#silentCrmChanges) this.#emit({ type: 'crm.changed', payload: { scope: 'all' } })
       this.#logger.info({ syncType: history.syncType, contacts: history.contacts?.length ?? 0,
         mappings: history.lidPnMappings?.length ?? 0, received: received.length, stored: messages.length,
         skipped: received.length - messages.length, historyDays, isOnDemand,
@@ -643,6 +649,10 @@ export class WhatsAppClient {
       this.#emit({ type: 'message.upserted', payload: stored })
     } else {
       this.#database.storeMessage(normalized.message)
+    }
+    if (!normalized.message.fromMe) {
+      const created = this.#crm.ensureInboundLead(normalized.message.chatId, normalized.message.timestamp, emitChange)
+      if (created && !emitChange) this.#silentCrmChanges = true
     }
     if (normalized.message.chatId.endsWith('@newsletter') && emitChange) {
       void this.#hydrateChannelMetadata(normalized.message.chatId, this.#socket)

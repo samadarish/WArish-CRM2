@@ -79,6 +79,25 @@ test('starts at the supported desktop width and exposes settings diagnostics', a
   await expect(page.getByRole('dialog')).not.toBeVisible()
 })
 
+test('keeps the offline workspace available and opens the dedicated CRM', async () => {
+  await expect(page.getByRole('heading', { name: 'Welcome to WArish' })).toBeVisible()
+  await application.close()
+  const database = new DatabaseSync(join(userDataPath, 'warish.sqlite'))
+  database.prepare("INSERT INTO accounts(id, created_at, linked_at) VALUES ('primary', ?, ?) ON CONFLICT(id) DO UPDATE SET linked_at=excluded.linked_at")
+    .run(Date.now(), Date.now())
+  database.close()
+
+  application = await electron.launch({ args: [resolve('.'), `--user-data-dir=${userDataPath}`],
+    env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' } })
+  page = await application.firstWindow()
+  await expect(page.getByRole('button', { name: 'CRM' })).toBeVisible()
+  await page.getByRole('button', { name: 'CRM' }).click()
+  await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible()
+  await expect(page.getByText('Customer workspace')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Leads', exact: true })).toBeVisible()
+  await expect(page.getByText('No enquiries yet')).toBeVisible()
+})
+
 test('keeps local history in the workspace when an existing account needs relinking', async () => {
   await application.close()
   const database = new DatabaseSync(join(userDataPath, 'warish.sqlite'))
@@ -104,8 +123,8 @@ test('keeps local history in the workspace when an existing account needs relink
   await expect(page.getByRole('heading', { name: 'Welcome to WArish' })).not.toBeVisible()
   await expect(page.getByText('WhatsApp session expired')).toBeVisible()
   const navigation = page.getByRole('navigation', { name: 'Primary navigation' })
-  expect((await navigation.getByRole('button').allTextContents()).slice(0, 6)).toEqual([
-    'Chats', 'Groups', 'Communities', 'Channels', 'All conversations', 'Archived'
+  expect((await navigation.getByRole('button').allTextContents()).slice(0, 7)).toEqual([
+    'Chats', 'CRM', 'Groups', 'Communities', 'Channels', 'All conversations', 'Archived'
   ])
   await expect(navigation.getByRole('button', { name: 'Chats' })).toHaveAttribute('aria-current', 'page')
   const chatList = page.locator('.chat-list')
@@ -124,6 +143,15 @@ test('keeps local history in the workspace when an existing account needs relink
   const unsavedContact = chatList.getByRole('button', { name: /\+15550002222/ })
   await expect(unsavedContact.getByText('+15550002222')).toHaveCount(1)
   await expect(unsavedContact.locator('.whatsapp-profile-pill')).toHaveText('Profile Only')
+  await unsavedContact.click()
+  await conversationHeader.locator('.conversation-identity').click()
+  await expect(details.getByRole('button', { name: /Add to CRM/ })).toBeVisible()
+  await details.getByRole('button', { name: /Add to CRM/ }).click()
+  const crmRecord = page.getByRole('complementary', { name: 'CRM contact record' })
+  await expect(crmRecord).toBeVisible()
+  await expect(crmRecord.getByText('Profile Only', { exact: true }).first()).toBeVisible()
+  await expect(crmRecord.getByRole('button', { name: 'Google' })).toBeVisible()
+  await page.getByRole('button', { name: 'Chats', exact: true }).click()
 
   await page.getByRole('button', { name: 'Relink account' }).click()
   await expect(page.getByRole('dialog', { name: 'Relink WhatsApp' })).toBeVisible()

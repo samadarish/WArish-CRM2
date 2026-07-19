@@ -254,6 +254,17 @@ export class WarishDatabase {
   resetUserData(): void {
     this.transaction(() => {
       this.db.exec(`
+        DELETE FROM crm_activity;
+        DELETE FROM crm_payments;
+        DELETE FROM crm_order_items;
+        DELETE FROM crm_orders;
+        DELETE FROM crm_tasks;
+        DELETE FROM crm_notes;
+        DELETE FROM crm_contact_tags;
+        DELETE FROM crm_tags;
+        DELETE FROM google_contact_links;
+        DELETE FROM crm_contacts;
+        DELETE FROM crm_catalog_items;
         DELETE FROM reactions;
         DELETE FROM receipts;
         DELETE FROM attachments;
@@ -332,6 +343,11 @@ export class WarishDatabase {
       current = row.canonical_id
     }
     return current
+  }
+
+  ensureCanonicalContact(chatId: string): string {
+    const resolved = this.resolveChatId(chatId)
+    return this.#upsertCanonicalContact({ id: resolved })
   }
 
   upsertChat(input: Omit<Partial<ChatSummary>, 'id' | 'title' | 'kind' | 'communityId'> & Pick<ChatSummary, 'id' | 'title' | 'kind'> & {
@@ -1067,6 +1083,10 @@ export class WarishDatabase {
       .run(canonicalId, Date.now(), ...candidates)
     this.db.prepare(`UPDATE outbox SET chat_id=?, updated_at=? WHERE chat_id IN (${placeholders})`)
       .run(canonicalId, Date.now(), ...candidates)
+    if (this.#crmSchemaAvailable()) {
+      this.db.prepare(`UPDATE crm_contacts SET chat_id=?, updated_at=? WHERE chat_id IN (${placeholders})`)
+        .run(canonicalId, Date.now(), ...candidates)
+    }
 
     const bestTitle = rows.map((row) => String(row.title)).filter((title) => title && !/^\+?\d+$/.test(title) && title !== 'Group')
       .sort((left, right) => right.length - left.length)[0] ?? String(source.title)
@@ -1131,6 +1151,7 @@ export class WarishDatabase {
     const avatarMissingUntil = Math.max(0, ...candidates.map((row) => Number(row.avatar_missing_until ?? 0))) || undefined
     const avatarFailures = candidates.reduce((total, row) => total + Number(row.avatar_failures ?? 0), 0)
     const now = Date.now()
+    const preferredChatId = lid ?? phoneJid ?? normalizedId
 
     this.transaction(() => {
       this.db.prepare(
@@ -1141,6 +1162,7 @@ export class WarishDatabase {
       for (const candidate of candidates) {
         const candidateId = String(candidate.identity_id)
         if (candidateId === identityId) continue
+        this.#mergeCrmIdentity(candidateId, identityId, preferredChatId, now)
         this.db.prepare('UPDATE contact_identity_aliases SET identity_id=?, updated_at=? WHERE identity_id=?')
           .run(identityId, now, candidateId)
         this.db.prepare('DELETE FROM contact_identities WHERE identity_id=?').run(candidateId)
@@ -1159,8 +1181,76 @@ export class WarishDatabase {
            ON CONFLICT(alias_id) DO UPDATE SET identity_id=excluded.identity_id, updated_at=excluded.updated_at`
         ).run(alias, identityId, now)
       }
+      if (this.#crmSchemaAvailable()) {
+        this.db.prepare('UPDATE crm_contacts SET chat_id=?, updated_at=? WHERE identity_id=?')
+          .run(preferredChatId, now, identityId)
+      }
     })
     return identityId
+  }
+
+  #crmSchemaAvailable(): boolean {
+    return Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='crm_contacts'").get())
+  }
+
+  #mergeCrmIdentity(sourceIdentityId: string, targetIdentityId: string, chatId: string, now: number): void {
+    if (!this.#crmSchemaAvailable()) return
+    const source = this.db.prepare('SELECT * FROM crm_contacts WHERE identity_id=?').get(sourceIdentityId) as Record<string, unknown> | undefined
+    if (!source) return
+    const target = this.db.prepare('SELECT * FROM crm_contacts WHERE identity_id=?').get(targetIdentityId) as Record<string, unknown> | undefined
+    const sourceContactId = String(source.id)
+    if (!target) {
+      this.db.prepare('UPDATE crm_contacts SET identity_id=?, chat_id=?, updated_at=? WHERE id=?')
+        .run(targetIdentityId, chatId, now, sourceContactId)
+      return
+    }
+
+    const targetContactId = String(target.id)
+    if (targetContactId === sourceContactId) return
+    this.db.prepare(`INSERT OR IGNORE INTO crm_contact_tags(contact_id, tag_id)
+      SELECT ?, tag_id FROM crm_contact_tags WHERE contact_id=?`).run(targetContactId, sourceContactId)
+    this.db.prepare('DELETE FROM crm_contact_tags WHERE contact_id=?').run(sourceContactId)
+    for (const table of ['crm_notes', 'crm_orders', 'crm_tasks', 'crm_activity'] as const) {
+      this.db.prepare(`UPDATE ${table} SET contact_id=? WHERE contact_id=?`).run(targetContactId, sourceContactId)
+    }
+
+    const sourceGoogle = this.db.prepare('SELECT * FROM google_contact_links WHERE contact_id=?').get(sourceContactId) as Record<string, unknown> | undefined
+    const targetGoogle = this.db.prepare('SELECT * FROM google_contact_links WHERE contact_id=?').get(targetContactId) as Record<string, unknown> | undefined
+    if (sourceGoogle && !targetGoogle) this.db.prepare('UPDATE google_contact_links SET contact_id=? WHERE contact_id=?')
+      .run(targetContactId, sourceContactId)
+    else if (sourceGoogle && targetGoogle && Number(sourceGoogle.last_synced_at) > Number(targetGoogle.last_synced_at)) {
+      this.db.prepare(`UPDATE google_contact_links SET resource_name=?, etag=?, account_email=?, last_synced_at=? WHERE contact_id=?`)
+        .run(String(sourceGoogle.resource_name), nullableString(sourceGoogle.etag) ?? null,
+          nullableString(sourceGoogle.account_email) ?? null, Number(sourceGoogle.last_synced_at), targetContactId)
+      this.db.prepare('DELETE FROM google_contact_links WHERE contact_id=?').run(sourceContactId)
+    } else if (sourceGoogle) this.db.prepare('DELETE FROM google_contact_links WHERE contact_id=?').run(sourceContactId)
+
+    const lifecycleRank: Record<string, number> = { spam: 0, ignored: 1, lead: 2, customer: 3 }
+    const lifecycle = (lifecycleRank[String(source.lifecycle)] ?? -1) > (lifecycleRank[String(target.lifecycle)] ?? -1)
+      ? String(source.lifecycle) : String(target.lifecycle)
+    const stageRank: Record<string, number> = {
+      'stage-new': 0, 'stage-qualified': 1, 'stage-quoted': 2, 'stage-lost': 3, 'stage-won': 4
+    }
+    const stageId = lifecycle === 'customer' ? 'stage-won'
+      : (stageRank[String(source.stage_id)] ?? -1) > (stageRank[String(target.stage_id)] ?? -1)
+        ? String(source.stage_id) : String(target.stage_id)
+    const mergedCustomFields = {
+      ...parseJsonRecord(source.custom_fields),
+      ...parseJsonRecord(target.custom_fields)
+    }
+    this.db.prepare(`UPDATE crm_contacts SET identity_id=?, chat_id=?, lifecycle=?, stage_id=?,
+      name=COALESCE(NULLIF(name, ''), ?), email=COALESCE(NULLIF(email, ''), ?), company=COALESCE(NULLIF(company, ''), ?),
+      address=COALESCE(NULLIF(address, ''), ?), birthday=COALESCE(NULLIF(birthday, ''), ?), tax_id=COALESCE(NULLIF(tax_id, ''), ?),
+      preferences=COALESCE(NULLIF(preferences, ''), ?), consent_status=CASE WHEN consent_status='unknown' THEN ? ELSE consent_status END,
+      do_not_contact=MAX(do_not_contact, ?), custom_fields=?, created_at=MIN(created_at, ?),
+      last_activity_at=MAX(last_activity_at, ?), updated_at=? WHERE id=?`)
+      .run(targetIdentityId, chatId, lifecycle, stageId, nullableString(source.name) ?? null,
+        nullableString(source.email) ?? null, nullableString(source.company) ?? null,
+        nullableString(source.address) ?? null, nullableString(source.birthday) ?? null,
+        nullableString(source.tax_id) ?? null, nullableString(source.preferences) ?? null,
+        nullableString(source.consent_status) ?? 'unknown', Number(source.do_not_contact ?? 0), JSON.stringify(mergedCustomFields),
+        Number(source.created_at), Number(source.last_activity_at), now, targetContactId)
+    this.db.prepare('DELETE FROM crm_contacts WHERE id=?').run(sourceContactId)
   }
 
   rebuildCanonicalContacts(): { contacts: number; directChats: number } {
@@ -1365,6 +1455,200 @@ export class WarishDatabase {
           (8, CAST(strftime('%s','now') AS INTEGER) * 1000);
       `))
     }
+    if (version.version < 9) {
+      this.#logger.info({ version: 9 }, 'applying CRM database migration')
+      const now = Date.now()
+      const activeCutoff = now - 90 * 24 * 60 * 60 * 1000
+      this.transaction(() => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS crm_pipeline_stages(
+            id TEXT PRIMARY KEY,
+            key TEXT NOT NULL UNIQUE CHECK(key IN ('new','qualified','quoted','won','lost')),
+            name TEXT NOT NULL,
+            color TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            outcome TEXT NOT NULL CHECK(outcome IN ('open','won','lost'))
+          );
+          INSERT OR IGNORE INTO crm_pipeline_stages(id, key, name, color, position, outcome) VALUES
+            ('stage-new', 'new', 'New enquiry', '#0ea5a4', 0, 'open'),
+            ('stage-qualified', 'qualified', 'Qualified', '#3b82f6', 1, 'open'),
+            ('stage-quoted', 'quoted', 'Quoted', '#8b5cf6', 2, 'open'),
+            ('stage-won', 'won', 'Won', '#16a34a', 3, 'won'),
+            ('stage-lost', 'lost', 'Lost', '#64748b', 4, 'lost');
+
+          CREATE TABLE IF NOT EXISTS crm_contacts(
+            id TEXT PRIMARY KEY,
+            identity_id TEXT NOT NULL UNIQUE,
+            chat_id TEXT NOT NULL,
+            lifecycle TEXT NOT NULL DEFAULT 'lead' CHECK(lifecycle IN ('lead','customer','ignored','spam')),
+            stage_id TEXT NOT NULL DEFAULT 'stage-new',
+            name TEXT,
+            email TEXT,
+            company TEXT,
+            address TEXT,
+            birthday TEXT,
+            tax_id TEXT,
+            preferences TEXT,
+            source TEXT NOT NULL DEFAULT 'whatsapp',
+            consent_status TEXT NOT NULL DEFAULT 'unknown' CHECK(consent_status IN ('unknown','granted','denied')),
+            do_not_contact INTEGER NOT NULL DEFAULT 0,
+            custom_fields TEXT NOT NULL DEFAULT '{}',
+            created_at INTEGER NOT NULL,
+            last_activity_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY(stage_id) REFERENCES crm_pipeline_stages(id)
+          );
+          CREATE INDEX IF NOT EXISTS crm_contacts_pipeline_v9_idx ON crm_contacts(lifecycle, stage_id, last_activity_at DESC);
+          CREATE INDEX IF NOT EXISTS crm_contacts_chat_v9_idx ON crm_contacts(chat_id);
+
+          CREATE TABLE IF NOT EXISTS crm_tags(
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            color TEXT NOT NULL DEFAULT '#64748b',
+            created_at INTEGER NOT NULL
+          );
+          CREATE TABLE IF NOT EXISTS crm_contact_tags(
+            contact_id TEXT NOT NULL,
+            tag_id TEXT NOT NULL,
+            PRIMARY KEY(contact_id, tag_id),
+            FOREIGN KEY(contact_id) REFERENCES crm_contacts(id) ON DELETE CASCADE,
+            FOREIGN KEY(tag_id) REFERENCES crm_tags(id) ON DELETE CASCADE
+          );
+          CREATE TABLE IF NOT EXISTS crm_notes(
+            id TEXT PRIMARY KEY,
+            contact_id TEXT NOT NULL,
+            body TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY(contact_id) REFERENCES crm_contacts(id) ON DELETE CASCADE
+          );
+          CREATE INDEX IF NOT EXISTS crm_notes_contact_v9_idx ON crm_notes(contact_id, created_at DESC);
+
+          CREATE TABLE IF NOT EXISTS crm_catalog_items(
+            id TEXT PRIMARY KEY,
+            type TEXT NOT NULL CHECK(type IN ('product','service')),
+            name TEXT NOT NULL,
+            sku TEXT,
+            description TEXT,
+            unit_price REAL NOT NULL DEFAULT 0,
+            currency TEXT NOT NULL DEFAULT 'INR',
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS crm_catalog_name_v9_idx ON crm_catalog_items(active, name COLLATE NOCASE);
+
+          CREATE TABLE IF NOT EXISTS crm_orders(
+            id TEXT PRIMARY KEY,
+            contact_id TEXT NOT NULL,
+            order_number TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL CHECK(status IN ('draft','confirmed','in-progress','completed','cancelled')),
+            payment_status TEXT NOT NULL DEFAULT 'unpaid' CHECK(payment_status IN ('unpaid','partial','paid','refunded')),
+            currency TEXT NOT NULL DEFAULT 'INR',
+            subtotal REAL NOT NULL DEFAULT 0,
+            discount REAL NOT NULL DEFAULT 0,
+            tax REAL NOT NULL DEFAULT 0,
+            total REAL NOT NULL DEFAULT 0,
+            shipping_address TEXT,
+            appointment_at INTEGER,
+            expected_at INTEGER,
+            customer_note TEXT,
+            internal_note TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            completed_at INTEGER,
+            FOREIGN KEY(contact_id) REFERENCES crm_contacts(id) ON DELETE CASCADE
+          );
+          CREATE INDEX IF NOT EXISTS crm_orders_contact_v9_idx ON crm_orders(contact_id, created_at DESC);
+          CREATE INDEX IF NOT EXISTS crm_orders_status_v9_idx ON crm_orders(status, updated_at DESC);
+          CREATE TABLE IF NOT EXISTS crm_order_items(
+            id TEXT PRIMARY KEY,
+            order_id TEXT NOT NULL,
+            catalog_item_id TEXT,
+            type TEXT NOT NULL CHECK(type IN ('product','service')),
+            name TEXT NOT NULL,
+            sku TEXT,
+            quantity REAL NOT NULL,
+            unit_price REAL NOT NULL,
+            discount REAL NOT NULL DEFAULT 0,
+            tax_rate REAL NOT NULL DEFAULT 0,
+            line_total REAL NOT NULL,
+            position INTEGER NOT NULL,
+            FOREIGN KEY(order_id) REFERENCES crm_orders(id) ON DELETE CASCADE,
+            FOREIGN KEY(catalog_item_id) REFERENCES crm_catalog_items(id) ON DELETE SET NULL
+          );
+          CREATE TABLE IF NOT EXISTS crm_payments(
+            id TEXT PRIMARY KEY,
+            order_id TEXT NOT NULL,
+            amount REAL NOT NULL,
+            method TEXT,
+            reference TEXT,
+            paid_at INTEGER NOT NULL,
+            note TEXT,
+            FOREIGN KEY(order_id) REFERENCES crm_orders(id) ON DELETE CASCADE
+          );
+
+          CREATE TABLE IF NOT EXISTS crm_tasks(
+            id TEXT PRIMARY KEY,
+            contact_id TEXT NOT NULL,
+            order_id TEXT,
+            title TEXT NOT NULL,
+            description TEXT,
+            due_at INTEGER,
+            priority TEXT NOT NULL DEFAULT 'normal' CHECK(priority IN ('low','normal','high')),
+            status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','completed','cancelled')),
+            reminder_at INTEGER,
+            notified_at INTEGER,
+            created_at INTEGER NOT NULL,
+            completed_at INTEGER,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY(contact_id) REFERENCES crm_contacts(id) ON DELETE CASCADE,
+            FOREIGN KEY(order_id) REFERENCES crm_orders(id) ON DELETE CASCADE
+          );
+          CREATE INDEX IF NOT EXISTS crm_tasks_due_v9_idx ON crm_tasks(status, due_at, reminder_at);
+
+          CREATE TABLE IF NOT EXISTS crm_activity(
+            id TEXT PRIMARY KEY,
+            contact_id TEXT NOT NULL,
+            type TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            metadata TEXT,
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY(contact_id) REFERENCES crm_contacts(id) ON DELETE CASCADE
+          );
+          CREATE INDEX IF NOT EXISTS crm_activity_contact_v9_idx ON crm_activity(contact_id, created_at DESC);
+          CREATE TABLE IF NOT EXISTS google_contact_links(
+            contact_id TEXT PRIMARY KEY,
+            resource_name TEXT NOT NULL,
+            etag TEXT,
+            account_email TEXT,
+            last_synced_at INTEGER NOT NULL,
+            FOREIGN KEY(contact_id) REFERENCES crm_contacts(id) ON DELETE CASCADE
+          );
+        `)
+        this.db.prepare(`
+          INSERT OR IGNORE INTO crm_contacts(
+            id, identity_id, chat_id, lifecycle, stage_id, name, source, created_at, last_activity_at, updated_at
+          )
+          SELECT lower(hex(randomblob(16))), identity.identity_id, chats.id, 'lead', 'stage-new',
+            COALESCE(identity.whatsapp_name, identity.phone_number, NULLIF(chats.title, 'WhatsApp contact')),
+            'whatsapp-backfill', MIN(inbound.timestamp), MAX(messages.timestamp), ?
+          FROM chats
+          JOIN contact_identity_aliases identity_alias ON identity_alias.alias_id=chats.id
+          JOIN contact_identities identity ON identity.identity_id=identity_alias.identity_id
+          JOIN messages inbound ON inbound.chat_id=chats.id AND inbound.from_me=0 AND inbound.timestamp>=?
+          JOIN messages ON messages.chat_id=chats.id
+          WHERE chats.kind='direct' AND identity.saved_name IS NULL
+          GROUP BY identity.identity_id, chats.id
+        `).run(now, activeCutoff)
+        this.db.prepare(`
+          INSERT INTO crm_activity(id, contact_id, type, summary, created_at)
+          SELECT lower(hex(randomblob(16))), id, 'lead-created', 'Imported from recent WhatsApp enquiries', created_at
+          FROM crm_contacts WHERE source='whatsapp-backfill'
+        `).run()
+        this.db.prepare('INSERT INTO schema_migrations(version, applied_at) VALUES (9, ?)').run(now)
+      })
+    }
   }
 }
 
@@ -1475,6 +1759,13 @@ function phoneNumberFromJid(jid: string): string | undefined {
   return jid.endsWith('@s.whatsapp.net') || jid.endsWith('@hosted') ? normalizePhoneNumber(jid) : undefined
 }
 function formatPhoneNumber(value?: string): string | undefined { return value ? `+${value.replace(/^\+/, '')}` : undefined }
+function parseJsonRecord(value: unknown): Record<string, unknown> {
+  if (typeof value !== 'string' || !value) return {}
+  try {
+    const parsed = JSON.parse(value) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
+  } catch { return {} }
+}
 function validIdentity(value?: string): string | undefined {
   // WhatsApp can prefix privacy-masked LID labels with a bidi/zero-width control
   // character. Strip those before validation so a value such as

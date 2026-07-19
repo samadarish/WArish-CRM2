@@ -1,9 +1,9 @@
 import type { ChatCategory, ChatSummary } from '../../shared/contracts'
 
-export type WorkspaceDestination = ChatCategory | 'archived'
+export type WorkspaceDestination = ChatCategory | 'archived' | 'crm'
 
 export const WORKSPACE_DESTINATIONS: readonly WorkspaceDestination[] = [
-  'direct', 'group', 'community', 'channel', 'all', 'archived'
+  'direct', 'crm', 'group', 'community', 'channel', 'all', 'archived'
 ]
 
 export function destinationForChat(chat: ChatSummary): WorkspaceDestination {

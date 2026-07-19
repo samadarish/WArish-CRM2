@@ -20,8 +20,20 @@ const ContactDrawer = lazy(async () => {
   const module = await import('./ContactDrawer')
   return { default: module.ContactDrawer }
 })
+const CrmShell = lazy(async () => {
+  const module = await import('./CrmShell')
+  return { default: module.CrmShell }
+})
 
 export function ChatShell({ session }: { session: SessionState }): React.JSX.Element {
+  const destination = useUiStore((state) => state.destination)
+  const navigate = useUiStore((state) => state.navigate)
+  if (destination === 'crm') return <div className="crm-shell-frame"><NavigationRail current={destination} onNavigate={navigate} />
+    <Suspense fallback={<div className="crm-state"><LoaderCircle className="spin" />Opening CRM…</div>}><CrmShell /></Suspense></div>
+  return <ConversationShell session={session} />
+}
+
+function ConversationShell({ session }: { session: SessionState }): React.JSX.Element {
   const [chatQuery, setChatQuery] = useState('')
   const [forwardMessage, setForwardMessage] = useState<MessageDto>()
   const [expandedCommunities, setExpandedCommunities] = useState<Set<string>>(() => new Set())
@@ -35,7 +47,7 @@ export function ChatShell({ session }: { session: SessionState }): React.JSX.Ele
   const setSettingsOpen = useUiStore((state) => state.setSettingsOpen)
   const pushNotice = useUiStore((state) => state.pushNotice)
   const showArchived = destination === 'archived'
-  const category: ChatCategory = showArchived ? 'all' : destination
+  const category: ChatCategory = showArchived || destination === 'crm' ? 'all' : destination
   const chatListRef = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
   const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: () => window.warish.settings.get() })
@@ -883,7 +895,7 @@ function QueryError({ label, onRetry }: { label: string; onRetry(): void }): Rea
 }
 function destinationLabel(destination: SidebarDestination): string {
   const labels: Record<SidebarDestination, string> = {
-    all: 'All conversations', direct: 'Chats', group: 'Groups', community: 'Communities', channel: 'Channels', archived: 'Archived'
+    all: 'All conversations', direct: 'Chats', crm: 'CRM', group: 'Groups', community: 'Communities', channel: 'Channels', archived: 'Archived'
   }
   return labels[destination]
 }

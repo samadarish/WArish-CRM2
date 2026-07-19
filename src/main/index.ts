@@ -1,13 +1,18 @@
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { copyFile, stat } from 'node:fs/promises'
+import { createServer, type ServerResponse } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { basename, extname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
   app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, Notification, protocol,
   session, shell, Tray
 } from 'electron'
-import { rpcInvocationSchema, type AppSettings, type ChatSummary, type CoreEventEnvelope, type MessageDto, type PickedAttachment, type SessionState } from '../shared/contracts'
+import {
+  rpcInvocationSchema, type AppSettings, type ChatSummary, type CoreEventEnvelope, type GoogleConnectionStatus,
+  type MessageDto, type PickedAttachment, type SessionState
+} from '../shared/contracts'
 import { CoreBridge } from './core-bridge'
 import { loadOrCreateMasterKey } from './security'
 
@@ -20,6 +25,7 @@ let isQuitting = false
 let settings: AppSettings | undefined
 let currentSession: SessionState = { phase: 'starting', accountState: 'never-linked' }
 let resetRunning = false
+let googleAuthRunning: Promise<GoogleConnectionStatus> | undefined
 
 if (!app.requestSingleInstanceLock()) app.quit()
 else {
@@ -123,10 +129,71 @@ function registerIpc(userDataPath: string): void {
     assertTrustedSender(event.sender)
     return openMedia(userDataPath, token)
   })
+  ipcMain.handle('warish:google-connect', (event) => {
+    assertTrustedSender(event.sender)
+    if (!googleAuthRunning) googleAuthRunning = connectGoogleContacts().finally(() => { googleAuthRunning = undefined })
+    return googleAuthRunning
+  })
   ipcMain.handle('warish:reset-local-data', async (event) => {
     assertTrustedSender(event.sender)
     await resetLocalData(userDataPath)
   })
+}
+
+async function connectGoogleContacts(): Promise<GoogleConnectionStatus> {
+  if (!core) throw new Error('The application core is not ready')
+  let callbackResponse: ServerResponse | undefined
+  let timeout: NodeJS.Timeout | undefined
+  const server = createServer()
+  try {
+    await new Promise<void>((resolveListen, rejectListen) => {
+      server.once('error', rejectListen)
+      server.listen(0, '127.0.0.1', () => { server.off('error', rejectListen); resolveListen() })
+    })
+    const address = server.address() as AddressInfo
+    const redirectUri = `http://127.0.0.1:${address.port}/oauth/google`
+    const callback = new Promise<{ code: string; state: string }>((resolveCallback, rejectCallback) => {
+      let settled = false
+      timeout = setTimeout(() => {
+        settled = true
+        rejectCallback(new Error('Google sign-in timed out. Please try again.'))
+      }, 3 * 60 * 1000)
+      server.on('request', (request, response) => {
+        const url = new URL(request.url ?? '/', redirectUri)
+        if (url.pathname !== '/oauth/google' || settled) { response.writeHead(404).end('Not found'); return }
+        settled = true
+        callbackResponse = response
+        const error = url.searchParams.get('error')
+        const code = url.searchParams.get('code')
+        const state = url.searchParams.get('state')
+        if (error) rejectCallback(new Error(`Google sign-in was cancelled (${error})`))
+        else if (!code || !state) rejectCallback(new Error('Google sign-in returned an incomplete response'))
+        else resolveCallback({ code, state })
+      })
+    })
+    const begin = await core.request<{ authorizationUrl: string }>('google.beginAuth', { redirectUri })
+    await shell.openExternal(begin.authorizationUrl)
+    const { code, state } = await callback
+    const status = await core.request<GoogleConnectionStatus>('google.completeAuth', { code, state, redirectUri })
+    sendOAuthResult(callbackResponse, true, 'Google Contacts connected. You can close this tab and return to WArish.')
+    callbackResponse = undefined
+    return status
+  } catch (error) {
+    sendOAuthResult(callbackResponse, false, error instanceof Error ? error.message : 'Google sign-in failed')
+    callbackResponse = undefined
+    throw error
+  } finally {
+    if (timeout) clearTimeout(timeout)
+    server.close()
+  }
+}
+
+function sendOAuthResult(response: ServerResponse | undefined, success: boolean, message: string): void {
+  if (!response || response.headersSent) return
+  const safeMessage = message.replace(/[&<>"']/g, (value) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[value]!)
+  response.writeHead(success ? 200 : 400, { 'content-type': 'text/html; charset=utf-8',
+    'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'" })
+  response.end(`<!doctype html><meta charset="utf-8"><title>WArish · Google Contacts</title><style>body{font:16px system-ui;display:grid;place-items:center;min-height:90vh;background:#f5f7f8;color:#16232a}.card{max-width:520px;padding:32px;border:1px solid #d9e1e5;border-radius:16px;background:white;box-shadow:0 12px 40px #19313d18}h1{font-size:22px;margin:0 0 10px}p{line-height:1.5;margin:0;color:#52636b}</style><main class="card"><h1>${success ? 'Connected' : 'Could not connect'}</h1><p>${safeMessage}</p></main>`)
 }
 
 async function resetLocalData(userDataPath: string): Promise<void> {
@@ -231,6 +298,15 @@ function handleCoreEvent(event: CoreEventEnvelope): void {
     currentSession = event.payload as SessionState
   }
   if (event.type === 'settings.changed') settings = event.payload as AppSettings
+  if (event.type === 'crm.taskDue' && !mainWindow?.isFocused()) {
+    const task = event.payload
+    const notification = new Notification({ title: 'CRM follow-up due', body: task.title, silent: false })
+    notification.on('click', () => {
+      showWindow()
+      mainWindow?.webContents.send('warish:event', { type: 'navigation.openCrm', payload: { contactId: task.contactId } } satisfies CoreEventEnvelope)
+    })
+    notification.show()
+  }
   if (event.type !== 'message.upserted' || currentSession.phase !== 'connected' || mainWindow?.isFocused()) return
   const message = event.payload as MessageDto
   if (message.fromMe) return

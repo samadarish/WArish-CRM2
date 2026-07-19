@@ -1,6 +1,11 @@
 import type { Logger } from 'pino'
-import type { AppError, AppSettings, CoreEventEnvelope, DraftDto, PickedAttachment, RpcMethod } from '../shared/contracts'
+import type {
+  AppError, AppSettings, CoreEventEnvelope, CrmCatalogItemDto, CrmContactPatch, CrmLifecycle, CrmOrderInput,
+  CrmOrderItemDto, CrmPaymentDto, CrmTaskDto, DraftDto, PickedAttachment, RpcMethod
+} from '../shared/contracts'
 import { WarishDatabase } from './database'
+import { CrmRepository } from './crm-repository'
+import { GoogleContactsService } from './google-contacts'
 import { flushCoreLogger, readErrorLogs } from './logger'
 import { MediaManager } from './media-manager'
 import { WhatsAppClient } from './whatsapp-client'
@@ -11,6 +16,8 @@ export class RpcRouter {
   readonly #database: WarishDatabase
   readonly #whatsapp: WhatsAppClient
   readonly #media: MediaManager
+  readonly #crm: CrmRepository
+  readonly #google: GoogleContactsService
   readonly #emit: EmitEvent
   readonly #runtime: { appVersion: string; electronVersion: string; nodeVersion: string; logDirectory: string }
   readonly #logger: Logger
@@ -19,6 +26,8 @@ export class RpcRouter {
     database: WarishDatabase,
     whatsapp: WhatsAppClient,
     media: MediaManager,
+    crm: CrmRepository,
+    google: GoogleContactsService,
     emit: EmitEvent,
     logger: Logger,
     runtime: { appVersion: string; electronVersion: string; nodeVersion: string; logDirectory: string }
@@ -26,6 +35,8 @@ export class RpcRouter {
     this.#database = database
     this.#whatsapp = whatsapp
     this.#media = media
+    this.#crm = crm
+    this.#google = google
     this.#emit = emit
     this.#logger = logger
     this.#runtime = runtime
@@ -103,6 +114,47 @@ export class RpcRouter {
       case 'media.cancel': this.#media.cancel(requiredString(params, 'messageId')); return undefined
       case 'media.clearCache': this.#media.clear(); return undefined
       case 'media.discardDraft': this.#media.discardDraft(requiredString(params, 'token')); return undefined
+      case 'crm.dashboard.get': return this.#crm.dashboard()
+      case 'crm.pipeline.get': return this.#crm.pipeline()
+      case 'crm.contacts.list': {
+        const input = params.input === undefined ? params : objectValue(params.input)
+        return this.#crm.listContacts({ lifecycle: crmLifecycleFilter(input.lifecycle), stageId: optionalString(input.stageId),
+          query: optionalString(input.query), limit: optionalNumber(input.limit) })
+      }
+      case 'crm.contacts.get': return this.#crm.getContact({
+        contactId: optionalString(params.contactId), chatId: optionalString(params.chatId)
+      })
+      case 'crm.contacts.ensure': return this.#crm.ensureContact(requiredString(params, 'chatId'))
+      case 'crm.contacts.update': return this.#crm.updateContact(requiredString(params, 'contactId'),
+        crmContactPatch(objectValue(params.patch)))
+      case 'crm.contacts.setStage': return this.#crm.setStage(requiredString(params, 'contactId'), requiredString(params, 'stageId'))
+      case 'crm.contacts.setLifecycle': return this.#crm.setLifecycle(requiredString(params, 'contactId'), crmLifecycle(params.lifecycle))
+      case 'crm.notes.list': return this.#crm.listNotes(requiredString(params, 'contactId'))
+      case 'crm.notes.add': return this.#crm.addNote(requiredString(params, 'contactId'), requiredString(params, 'body'))
+      case 'crm.notes.delete': this.#crm.deleteNote(requiredString(params, 'noteId')); return undefined
+      case 'crm.tasks.list': {
+        const input = params.input === undefined ? params : objectValue(params.input)
+        return this.#crm.listTasks({ contactId: optionalString(input.contactId), status: taskStatus(input.status), due: taskDue(input.due) })
+      }
+      case 'crm.tasks.save': return this.#crm.saveTask(crmTaskInput(objectValue(params.input)))
+      case 'crm.tasks.delete': this.#crm.deleteTask(requiredString(params, 'taskId')); return undefined
+      case 'crm.catalog.list': return this.#crm.listCatalog(optionalString(params.query), optionalBoolean(params.includeInactive) ?? false)
+      case 'crm.catalog.save': return this.#crm.saveCatalog(crmCatalogInput(objectValue(params.input)))
+      case 'crm.catalog.delete': this.#crm.deleteCatalog(requiredString(params, 'itemId')); return undefined
+      case 'crm.orders.list': return this.#crm.listOrders(optionalString(params.contactId))
+      case 'crm.orders.get': return this.#crm.getOrder(requiredString(params, 'orderId'))
+      case 'crm.orders.save': return this.#crm.saveOrder(crmOrderInput(objectValue(params.input)))
+      case 'crm.orders.delete': this.#crm.deleteOrder(requiredString(params, 'orderId')); return undefined
+      case 'crm.activity.list': return this.#crm.activity(requiredString(params, 'contactId'), optionalNumber(params.limit))
+      case 'google.status': return this.#google.status()
+      case 'google.configure': return this.#google.configure(requiredString(params, 'clientId'))
+      case 'google.beginAuth': return this.#google.beginAuth(requiredString(params, 'redirectUri'))
+      case 'google.completeAuth': return this.#google.completeAuth(requiredString(params, 'code'), requiredString(params, 'state'),
+        requiredString(params, 'redirectUri'))
+      case 'google.disconnect': return this.#google.disconnect()
+      case 'google.contact.preview': return this.#google.previewContact(requiredString(params, 'contactId'))
+      case 'google.contact.save': return this.#google.saveContact(requiredString(params, 'contactId'),
+        googleContactDraft(objectValue(params.draft)), optionalString(params.resourceName))
       case 'search.messages': return this.#database.searchMessages(requiredString(params, 'query'), optionalString(params.chatId), optionalString(params.cursor))
       case 'draft.get': return this.#database.getDraft(requiredString(params, 'chatId'))
       case 'draft.save': {
@@ -213,4 +265,106 @@ function optionalAttachment(value: unknown): PickedAttachment | undefined {
     mimeType: requiredString(input, 'mimeType'),
     previewUrl: requiredString(input, 'previewUrl')
   }
+}
+
+function crmLifecycle(value: unknown): CrmLifecycle {
+  if (value === 'lead' || value === 'customer' || value === 'ignored' || value === 'spam') return value
+  throw new Error('Invalid lifecycle')
+}
+function crmLifecycleFilter(value: unknown): CrmLifecycle | 'active' | undefined {
+  return value === 'active' ? value : value === undefined ? undefined : crmLifecycle(value)
+}
+function taskStatus(value: unknown): CrmTaskDto['status'] | undefined {
+  return value === 'open' || value === 'completed' || value === 'cancelled' ? value : undefined
+}
+function taskDue(value: unknown): 'overdue' | 'today' | 'upcoming' | undefined {
+  return value === 'overdue' || value === 'today' || value === 'upcoming' ? value : undefined
+}
+function taskPriority(value: unknown): CrmTaskDto['priority'] | undefined {
+  return value === 'low' || value === 'normal' || value === 'high' ? value : undefined
+}
+function crmContactPatch(input: Record<string, unknown>): CrmContactPatch {
+  const patch: CrmContactPatch = {}
+  for (const key of ['name', 'email', 'company', 'address', 'birthday', 'taxId', 'preferences', 'source'] as const) {
+    if (key in input) patch[key] = optionalString(input[key]) ?? ''
+  }
+  if ('consentStatus' in input) {
+    if (input.consentStatus !== 'unknown' && input.consentStatus !== 'granted' && input.consentStatus !== 'denied') {
+      throw new Error('Invalid consent status')
+    }
+    patch.consentStatus = input.consentStatus
+  }
+  if ('doNotContact' in input) {
+    const value = optionalBoolean(input.doNotContact)
+    if (value === undefined) throw new Error('Invalid do-not-contact value')
+    patch.doNotContact = value
+  }
+  if ('customFields' in input) patch.customFields = optionalStringRecord(input.customFields) ?? {}
+  if ('tags' in input) patch.tags = optionalTags(input.tags) ?? []
+  return patch
+}
+function crmTaskInput(input: Record<string, unknown>): Partial<CrmTaskDto> & Pick<CrmTaskDto, 'contactId' | 'title'> {
+  return {
+    id: optionalString(input.id), contactId: requiredString(input, 'contactId'), orderId: optionalString(input.orderId),
+    title: requiredString(input, 'title'), description: optionalString(input.description), dueAt: optionalNumber(input.dueAt),
+    priority: taskPriority(input.priority), status: taskStatus(input.status), reminderAt: optionalNumber(input.reminderAt)
+  }
+}
+function crmCatalogInput(input: Record<string, unknown>): Partial<CrmCatalogItemDto> & Pick<CrmCatalogItemDto, 'type' | 'name' | 'unitPrice'> {
+  if (input.type !== 'product' && input.type !== 'service') throw new Error('Invalid catalog type')
+  return {
+    id: optionalString(input.id), type: input.type, name: requiredString(input, 'name'),
+    sku: optionalString(input.sku), description: optionalString(input.description), unitPrice: requiredNumber(input, 'unitPrice'),
+    currency: optionalString(input.currency), active: optionalBoolean(input.active)
+  }
+}
+function crmOrderInput(input: Record<string, unknown>): CrmOrderInput {
+  if (!['draft', 'confirmed', 'in-progress', 'completed', 'cancelled'].includes(String(input.status))) throw new Error('Invalid order status')
+  if (!Array.isArray(input.items)) throw new Error('Invalid order items')
+  if (input.payments !== undefined && !Array.isArray(input.payments)) throw new Error('Invalid order payments')
+  return {
+    id: optionalString(input.id), contactId: requiredString(input, 'contactId'), status: input.status as CrmOrderInput['status'],
+    currency: optionalString(input.currency), shippingAddress: optionalString(input.shippingAddress),
+    appointmentAt: optionalNumber(input.appointmentAt), expectedAt: optionalNumber(input.expectedAt),
+    customerNote: optionalString(input.customerNote), internalNote: optionalString(input.internalNote),
+    items: input.items.map((item) => crmOrderItem(objectValue(item))),
+    payments: input.payments?.map((payment) => crmPayment(objectValue(payment)))
+  }
+}
+function crmOrderItem(input: Record<string, unknown>): Omit<CrmOrderItemDto, 'id' | 'lineTotal'> {
+  if (input.type !== 'product' && input.type !== 'service') throw new Error('Invalid order item type')
+  return { catalogItemId: optionalString(input.catalogItemId), type: input.type, name: requiredString(input, 'name'),
+    sku: optionalString(input.sku), quantity: requiredNumber(input, 'quantity'), unitPrice: requiredNumber(input, 'unitPrice'),
+    discount: optionalNumber(input.discount) ?? 0, taxRate: optionalNumber(input.taxRate) ?? 0 }
+}
+function crmPayment(input: Record<string, unknown>): Omit<CrmPaymentDto, 'id'> {
+  return { amount: requiredNumber(input, 'amount'), method: optionalString(input.method), reference: optionalString(input.reference),
+    paidAt: optionalNumber(input.paidAt) ?? Date.now(), note: optionalString(input.note) }
+}
+function requiredNumber(input: Record<string, unknown>, key: string): number {
+  const value = optionalNumber(input[key])
+  if (value === undefined) throw new Error(`Invalid ${key}`)
+  return value
+}
+function optionalStringRecord(value: unknown): Record<string, string> | undefined {
+  if (value === undefined) return undefined
+  const input = objectValue(value)
+  const result: Record<string, string> = {}
+  for (const [key, entry] of Object.entries(input)) {
+    if (typeof entry !== 'string') throw new Error('Invalid custom fields')
+    result[key] = entry
+  }
+  return result
+}
+function optionalTags(value: unknown): Array<{ name: string; color?: string }> | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value)) throw new Error('Invalid tags')
+  return value.map((entry) => {
+    const input = objectValue(entry)
+    return { name: requiredString(input, 'name'), color: optionalString(input.color) }
+  })
+}
+function googleContactDraft(input: Record<string, unknown>): { name: string; phoneNumber: string; email?: string; company?: string } {
+  return { name: requiredString(input, 'name'), phoneNumber: requiredString(input, 'phoneNumber'),
+    email: optionalString(input.email), company: optionalString(input.company) }
 }

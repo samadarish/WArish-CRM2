@@ -19,6 +19,23 @@ function createDatabase(): { database: WarishDatabase; directory: string } {
   }
 }
 
+function dropCrmV9Schema(database: DatabaseSync): void {
+  database.exec(`
+    DROP TABLE IF EXISTS google_contact_links;
+    DROP TABLE IF EXISTS crm_activity;
+    DROP TABLE IF EXISTS crm_payments;
+    DROP TABLE IF EXISTS crm_order_items;
+    DROP TABLE IF EXISTS crm_tasks;
+    DROP TABLE IF EXISTS crm_orders;
+    DROP TABLE IF EXISTS crm_notes;
+    DROP TABLE IF EXISTS crm_contact_tags;
+    DROP TABLE IF EXISTS crm_tags;
+    DROP TABLE IF EXISTS crm_catalog_items;
+    DROP TABLE IF EXISTS crm_contacts;
+    DROP TABLE IF EXISTS crm_pipeline_stages;
+  `)
+}
+
 afterEach(() => {
   while (directories.length) rmSync(directories.pop()!, { recursive: true, force: true })
 })
@@ -36,6 +53,7 @@ describe('WarishDatabase', () => {
     database.close()
 
     const legacy = new DatabaseSync(path)
+    dropCrmV9Schema(legacy)
     legacy.exec(`
       DROP TABLE contact_identity_aliases;
       DROP TABLE contact_identities;
@@ -49,7 +67,7 @@ describe('WarishDatabase', () => {
     const migrated = new WarishDatabase(path, Buffer.alloc(32, 7), pino({ enabled: false }))
     expect(migrated.getChat(lid)).toMatchObject({ title: 'Migrated name', savedName: 'Migrated name',
       whatsappName: 'Migrated profile', phoneNumber: '+33612345678' })
-    expect((migrated.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as { version: number }).version).toBe(8)
+    expect((migrated.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as { version: number }).version).toBe(9)
     migrated.close()
   })
 
@@ -66,11 +84,12 @@ describe('WarishDatabase', () => {
     database.close()
 
     const legacy = new DatabaseSync(path)
+    dropCrmV9Schema(legacy)
     legacy.exec(`
       ALTER TABLE attachments DROP COLUMN thumbnail_checked_at;
       ALTER TABLE attachments DROP COLUMN thumbnail_missing_until;
       ALTER TABLE attachments DROP COLUMN thumbnail_failures;
-      DELETE FROM schema_migrations WHERE version=8;
+      DELETE FROM schema_migrations WHERE version>=8;
     `)
     legacy.close()
 

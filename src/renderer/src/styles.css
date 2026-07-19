@@ -643,3 +643,333 @@ svg { width: 20px; height: 20px; stroke-width: 1.8; }
 @media (max-width: 1120px) {
   :root[data-navigation='auto'] { --rail-width: 56px; }
 }
+
+/* CRM workspace */
+.crm-shell-frame { display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; grid-template-columns: var(--rail-width) minmax(0, 1fr); overflow: hidden; background: var(--panel); }
+.crm-workspace { position: relative; display: grid; min-width: 0; min-height: 0; grid-template-rows: 66px minmax(0, 1fr); overflow: hidden; background: var(--panel-soft); }
+.crm-topbar { display: flex; min-width: 0; align-items: center; gap: 24px; padding: 8px 20px 8px 24px; border-bottom: 1px solid var(--border); background: var(--panel); }
+.crm-topbar > div:first-child { min-width: 150px; flex: 1; }
+.crm-topbar > div:first-child > span, .crm-contact-panel > header span, .crm-dialog > header span { display: block; margin-bottom: 1px; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .65px; text-transform: uppercase; }
+.crm-topbar h1 { margin: 0; font-size: 21px; letter-spacing: -.4px; }
+.crm-topbar-actions { display: flex; align-items: center; justify-content: flex-end; gap: 9px; }
+.crm-topbar-actions .primary-button { min-height: 38px; }
+.crm-search { display: flex; width: min(360px, 34vw); height: 38px; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel-soft); color: var(--muted); }
+.crm-search svg { width: 17px; height: 17px; }
+.crm-search input { min-width: 0; flex: 1; border: 0; outline: none; background: transparent; }
+.crm-search button { display: grid; padding: 2px; place-items: center; color: var(--muted); background: transparent; }
+.crm-layout { display: grid; min-width: 0; min-height: 0; grid-template-columns: 172px minmax(0, 1fr); }
+.crm-section-nav { display: flex; min-height: 0; flex-direction: column; gap: 4px; padding: 14px 9px; overflow-y: auto; border-right: 1px solid var(--border); background: var(--panel); }
+.crm-section-nav button { position: relative; display: flex; min-height: 40px; align-items: center; gap: 9px; padding: 0 10px; border-radius: 8px; color: var(--muted); background: transparent; text-align: left; }
+.crm-section-nav button:hover { color: var(--text); background: var(--hover); }
+.crm-section-nav button.active { color: var(--accent-strong); background: color-mix(in srgb, var(--accent) 11%, var(--panel)); font-weight: 650; }
+.crm-section-nav button.active::before { position: absolute; top: 9px; bottom: 9px; left: 0; width: 3px; border-radius: 3px; background: var(--accent); content: ''; }
+.crm-section-nav svg { width: 18px; height: 18px; flex: 0 0 auto; }
+.crm-section-nav span { min-width: 0; flex: 1; }
+.crm-section-nav b { min-width: 20px; padding: 2px 5px; border-radius: 10px; color: white; background: var(--accent); font-size: 10px; text-align: center; }
+.crm-content { min-width: 0; min-height: 0; padding: 18px 20px 28px; overflow: auto; scrollbar-color: var(--muted) transparent; scrollbar-width: thin; }
+.crm-overview { display: grid; gap: 16px; max-width: 1380px; margin: 0 auto; }
+.crm-stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.crm-stat { display: flex; min-width: 0; min-height: 104px; align-items: center; gap: 12px; padding: 15px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); box-shadow: 0 2px 7px rgb(18 38 48 / 4%); text-align: left; }
+.crm-stat:hover { border-color: color-mix(in srgb, var(--accent) 28%, var(--border)); box-shadow: 0 7px 20px rgb(18 38 48 / 7%); transform: translateY(-1px); }
+.crm-stat > span { display: grid; width: 39px; height: 39px; flex: 0 0 auto; place-items: center; border-radius: 10px; color: var(--accent-strong); background: color-mix(in srgb, var(--accent) 11%, var(--panel)); }
+.crm-stat > span svg { width: 19px; height: 19px; }
+.crm-stat > div { min-width: 0; flex: 1; }
+.crm-stat small, .crm-stat strong, .crm-stat em { display: block; }
+.crm-stat small { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.crm-stat strong { margin: 4px 0 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 21px; letter-spacing: -.35px; }
+.crm-stat em { overflow: hidden; color: var(--muted); font-size: 10px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.crm-stat > svg { width: 16px; height: 16px; flex: 0 0 auto; color: var(--muted); }
+.crm-overview-grid { display: grid; grid-template-columns: minmax(350px, 1.05fr) minmax(350px, .95fr); gap: 16px; }
+.crm-card { min-width: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); box-shadow: 0 2px 7px rgb(18 38 48 / 4%); }
+.crm-card > header { display: flex; min-height: 62px; align-items: center; gap: 12px; padding: 10px 15px; border-bottom: 1px solid var(--border); }
+.crm-card > header > div { min-width: 0; flex: 1; }
+.crm-card > header span, .crm-card > header strong { display: block; }
+.crm-card > header span { color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .45px; text-transform: uppercase; }
+.crm-card > header strong { margin-top: 2px; font-size: 15px; }
+.crm-card > header button { display: flex; align-items: center; gap: 4px; padding: 7px 8px; border-radius: 7px; color: var(--accent-strong); background: transparent; font-size: 11px; font-weight: 650; }
+.crm-card > header button:hover { background: var(--hover); }
+.crm-card > header button svg { width: 14px; height: 14px; }
+.crm-pipeline > div { display: grid; padding: 6px 0; }
+.crm-pipeline > div > button { display: flex; min-height: 51px; align-items: center; gap: 10px; padding: 7px 15px; background: transparent; text-align: left; }
+.crm-pipeline > div > button:hover, .contact-compact-row:hover { background: var(--hover); }
+.crm-pipeline i { width: 7px; height: 30px; flex: 0 0 auto; border-radius: 5px; }
+.crm-pipeline button > span { min-width: 0; flex: 1; }
+.crm-pipeline button strong, .crm-pipeline button small { display: block; }
+.crm-pipeline button strong { font-size: 12px; }
+.crm-pipeline button small { margin-top: 2px; color: var(--muted); font-size: 10px; }
+.crm-pipeline button b { font-size: 12px; }
+.crm-recent > div { min-height: 281px; }
+.contact-compact-row { display: flex; width: 100%; min-height: 59px; align-items: center; gap: 9px; padding: 6px 13px; border-bottom: 1px solid var(--border); background: transparent; text-align: left; }
+.contact-compact-row:last-child { border-bottom: 0; }
+.contact-compact-row .avatar { width: 39px; height: 39px; border-radius: 9px; }
+.contact-compact-row > span { min-width: 0; flex: 1; }
+.contact-compact-row > span strong, .contact-compact-row > span small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.contact-compact-row > span strong { font-size: 12px; }
+.contact-compact-row > span small { margin-top: 2px; color: var(--muted); font-size: 10px; }
+.contact-compact-row > svg { width: 15px; height: 15px; color: var(--muted); }
+.crm-revenue-strip { display: flex; min-height: 76px; align-items: center; gap: 13px; padding: 13px 16px; }
+.crm-revenue-strip > span { display: grid; width: 39px; height: 39px; flex: 0 0 auto; place-items: center; border-radius: 10px; color: var(--accent-strong); background: color-mix(in srgb, var(--accent) 11%, var(--panel)); }
+.crm-revenue-strip small, .crm-revenue-strip strong { display: block; }
+.crm-revenue-strip small { color: var(--muted); font-size: 10px; }
+.crm-revenue-strip strong { margin-top: 2px; font-size: 16px; }
+.crm-revenue-strip p { max-width: 500px; margin: 0 0 0 auto; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.crm-list-view { max-width: 1380px; margin: 0 auto; }
+.crm-filter-row { display: flex; gap: 6px; margin-bottom: 12px; overflow-x: auto; }
+.crm-filter-row button { display: flex; height: 32px; flex: 0 0 auto; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--border); border-radius: 16px; color: var(--muted); background: var(--panel); font-size: 11px; }
+.crm-filter-row button:hover, .crm-filter-row button.active { color: var(--text); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
+.crm-filter-row i { width: 7px; height: 7px; border-radius: 50%; }
+.crm-table-card { max-width: 1380px; margin: 0 auto; overflow: auto; border: 1px solid var(--border); border-radius: 11px; background: var(--panel); box-shadow: 0 2px 7px rgb(18 38 48 / 4%); }
+.crm-table { width: 100%; border-collapse: collapse; white-space: nowrap; }
+.crm-table th { height: 40px; padding: 0 12px; border-bottom: 1px solid var(--border); color: var(--muted); background: var(--panel-soft); font-size: 10px; font-weight: 700; letter-spacing: .35px; text-align: left; text-transform: uppercase; }
+.crm-table td { height: 58px; padding: 6px 12px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.crm-table tbody tr { cursor: pointer; }
+.crm-table tbody tr:hover { background: var(--hover); }
+.crm-table tbody tr:last-child td { border-bottom: 0; }
+.crm-table td > strong, .crm-table td > small { display: block; }
+.crm-table td > small { margin-top: 3px; color: var(--muted); font-size: 10px; }
+.crm-contact-cell { display: flex; min-width: 200px; align-items: center; gap: 9px; }
+.crm-contact-cell .avatar { width: 38px; height: 38px; border-radius: 8px; }
+.crm-contact-cell > span { min-width: 0; }
+.crm-contact-cell strong, .crm-contact-cell small { display: block; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crm-contact-cell small { margin-top: 2px; color: var(--muted); font-size: 10px; }
+.stage-pill { --stage-color: #64748b; display: inline-flex; max-width: 145px; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid color-mix(in srgb, var(--stage-color) 28%, var(--border)); border-radius: 12px; color: color-mix(in srgb, var(--stage-color) 80%, var(--text)); background: color-mix(in srgb, var(--stage-color) 8%, var(--panel)); font-size: 10px; font-weight: 650; }
+.stage-pill i { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: var(--stage-color); }
+.crm-tags { display: inline-flex; max-width: 220px; align-items: center; gap: 4px; overflow: hidden; }
+.crm-tags > span { --tag-color: #64748b; max-width: 90px; overflow: hidden; padding: 3px 7px; border-radius: 10px; color: color-mix(in srgb, var(--tag-color) 78%, var(--text)); background: color-mix(in srgb, var(--tag-color) 11%, var(--panel-soft)); font-size: 9px; text-overflow: ellipsis; }
+.crm-tags b { color: var(--muted); font-size: 9px; }
+.task-count { color: var(--accent-strong); font-size: 10px; font-weight: 650; }
+.muted { color: var(--muted); }
+.status-pill, .priority-pill { display: inline-flex; padding: 4px 8px; border-radius: 11px; color: #42525a; background: #eef1f3; font-size: 9px; font-weight: 700; text-transform: capitalize; }
+.status-pill.confirmed, .status-pill.in-progress, .status-pill.partial, .priority-pill.normal { color: #245c91; background: #e3f0fc; }
+.status-pill.completed, .status-pill.paid { color: #11633c; background: #def4e7; }
+.status-pill.cancelled, .status-pill.refunded, .priority-pill.high { color: #9a3333; background: #fce5e5; }
+.status-pill.draft, .status-pill.unpaid, .priority-pill.low { color: #616d73; background: #edf0f1; }
+:root[data-theme='dark'] .status-pill, :root[data-theme='black'] .status-pill,
+:root[data-theme='dark'] .priority-pill, :root[data-theme='black'] .priority-pill { filter: brightness(.78) saturate(1.2); }
+.crm-task-list { display: grid; max-width: 1100px; gap: 8px; margin: 0 auto; }
+.crm-task { display: grid; min-height: 70px; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 11px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+.crm-task.overdue { border-left: 3px solid var(--danger); }
+.crm-task.completed { opacity: .68; }
+.crm-task-check { display: grid; width: 22px; height: 22px; place-items: center; border: 1px solid var(--border); border-radius: 7px; color: white; background: var(--panel-soft); }
+.crm-task-check:hover { border-color: var(--accent); }
+.crm-task.completed .crm-task-check { border-color: var(--accent); background: var(--accent); }
+.crm-task-check svg { width: 14px; height: 14px; }
+.crm-task > div { min-width: 0; }
+.crm-task > div > span { display: flex; align-items: center; gap: 7px; }
+.crm-task > div > span strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.crm-task p { margin: 3px 0; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.crm-task > time { color: var(--muted); font-size: 10px; }
+.link-button { display: inline-flex; align-items: center; gap: 4px; padding: 1px 0; color: var(--accent-strong); background: transparent; font-size: 10px; }
+.link-button svg { width: 11px; height: 11px; }
+.danger-text, .error-text, .danger-text { color: var(--danger) !important; }
+.catalog-grid { display: grid; max-width: 1250px; grid-template-columns: repeat(3, minmax(230px, 1fr)); gap: 12px; margin: 0 auto; }
+.catalog-card { display: grid; min-height: 178px; grid-template-rows: auto minmax(36px, 1fr) auto; padding: 14px; border: 1px solid var(--border); border-radius: 11px; background: var(--panel); }
+.catalog-card.inactive { opacity: .62; }
+.catalog-card > header { display: flex; align-items: center; gap: 10px; }
+.catalog-icon { display: grid; width: 36px; height: 36px; flex: 0 0 auto; place-items: center; border-radius: 9px; color: var(--accent-strong); background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
+.catalog-icon svg { width: 17px; height: 17px; }
+.catalog-card header > div { min-width: 0; flex: 1; }
+.catalog-card header small, .catalog-card header strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.catalog-card header small { color: var(--muted); font-size: 9px; font-weight: 700; text-transform: uppercase; }
+.catalog-card header strong { margin-top: 2px; font-size: 13px; }
+.catalog-card .icon-button { width: 30px; height: 30px; }
+.catalog-card .icon-button svg { width: 15px; height: 15px; }
+.catalog-card p { margin: 12px 0; overflow: hidden; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.catalog-card > footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.catalog-card > footer strong { font-size: 14px; }
+.catalog-card > footer button { display: flex; align-items: center; gap: 5px; color: var(--muted); background: transparent; font-size: 9px; }
+.catalog-card > footer button:hover { color: var(--danger); }
+.catalog-card > footer svg { width: 13px; height: 13px; }
+.crm-state { display: flex; min-height: 300px; align-items: center; justify-content: center; flex-direction: column; gap: 11px; color: var(--muted); }
+.crm-state > svg { width: 24px; height: 24px; }
+.crm-empty { display: flex; min-height: 260px; align-items: center; justify-content: center; flex-direction: column; padding: 28px; color: var(--muted); text-align: center; }
+.crm-empty > svg { width: 38px; height: 38px; margin-bottom: 12px; opacity: .6; }
+.crm-empty strong { color: var(--text); font-size: 14px; }
+.crm-empty p { max-width: 360px; margin: 5px 0 0; font-size: 11px; line-height: 1.5; }
+.crm-recent .crm-empty { min-height: 280px; }
+.crm-recent .crm-empty > svg { width: 30px; height: 30px; }
+
+.crm-contact-panel { position: absolute; top: 0; right: 0; bottom: 0; z-index: 24; display: grid; width: min(540px, 92%); min-height: 0; grid-template-rows: 62px auto auto auto 42px minmax(0, 1fr); border-left: 1px solid var(--border); background: var(--panel); box-shadow: -16px 0 48px rgb(11 20 26 / 18%); }
+.crm-contact-panel > header { display: flex; align-items: center; gap: 10px; padding: 8px 12px 8px 18px; border-bottom: 1px solid var(--border); }
+.crm-contact-panel > header > div { min-width: 0; flex: 1; }
+.crm-contact-panel > header strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
+.crm-contact-hero { display: flex; align-items: center; gap: 14px; padding: 16px 18px 12px; }
+.crm-contact-hero .avatar.large { width: 74px; height: 74px; border-radius: 14px; }
+.crm-contact-hero > div { min-width: 0; flex: 1; }
+.crm-contact-hero h2 { margin: 0 0 3px; overflow: hidden; font-size: 20px; letter-spacing: -.35px; text-overflow: ellipsis; white-space: nowrap; }
+.crm-contact-hero p { margin: 5px 0; color: var(--muted); font-size: 11px; }
+.crm-contact-hero > div > div { display: flex; align-items: center; gap: 6px; }
+.google-linked { padding: 4px 7px; border-radius: 10px; color: #24669a; background: #e3f0fc; font-size: 9px; font-weight: 650; }
+.crm-contact-actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; padding: 3px 18px 13px; border-bottom: 1px solid var(--border); }
+.crm-contact-actions button { display: flex; min-width: 0; height: 46px; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--border); border-radius: 8px; color: var(--accent-strong); background: var(--panel-soft); font-size: 10px; }
+.crm-contact-actions button:hover { background: var(--hover); }
+.crm-contact-actions svg { width: 15px; height: 15px; }
+.crm-stage-select { display: flex; min-height: 49px; align-items: center; gap: 10px; padding: 7px 18px; border-bottom: 1px solid var(--border); }
+.crm-stage-select span { flex: 1; color: var(--muted); font-size: 10px; font-weight: 650; }
+.crm-stage-select select { min-width: 160px; height: 32px; border: 1px solid var(--border); border-radius: 7px; padding: 0 8px; background: var(--panel); font-size: 11px; }
+.crm-contact-tabs { display: flex; min-width: 0; padding: 0 12px; overflow-x: auto; border-bottom: 1px solid var(--border); }
+.crm-contact-tabs button { position: relative; min-width: max-content; padding: 0 8px; color: var(--muted); background: transparent; font-size: 10px; font-weight: 650; text-transform: capitalize; }
+.crm-contact-tabs button.active { color: var(--accent-strong); }
+.crm-contact-tabs button.active::after { position: absolute; right: 7px; bottom: 0; left: 7px; height: 2px; border-radius: 2px; background: var(--accent); content: ''; }
+.crm-contact-body { min-height: 0; padding: 15px 18px 28px; overflow-y: auto; scrollbar-color: var(--muted) transparent; scrollbar-width: thin; }
+.crm-profile-section > header { display: flex; align-items: center; margin-bottom: 12px; }
+.crm-profile-section > header strong { flex: 1; font-size: 13px; }
+.crm-profile-section > header .secondary-button { min-height: 30px; padding: 5px 9px; font-size: 10px; }
+.crm-profile-section > header svg { width: 13px; height: 13px; }
+.crm-profile-section dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; margin: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 9px; background: var(--border); }
+.crm-profile-section dl > div { min-width: 0; min-height: 59px; padding: 10px 11px; background: var(--panel); }
+.crm-profile-section dt { color: var(--muted); font-size: 9px; font-weight: 650; }
+.crm-profile-section dd { margin: 4px 0 0; overflow: hidden; font-size: 11px; line-height: 1.35; text-overflow: ellipsis; }
+.crm-profile-section > section { margin-top: 14px; }
+.crm-profile-section > section > small { display: block; margin-bottom: 7px; color: var(--muted); font-size: 9px; font-weight: 650; }
+.crm-tags.large { max-width: none; }
+.crm-tags.large > span { font-size: 10px; }
+.crm-mini-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-top: 14px; }
+.crm-mini-stats span { padding: 10px 7px; border: 1px solid var(--border); border-radius: 8px; color: var(--muted); background: var(--panel-soft); font-size: 9px; text-align: center; }
+.crm-mini-stats strong { display: block; margin-bottom: 3px; color: var(--text); font-size: 12px; }
+.crm-note-section > form { display: grid; gap: 8px; margin-bottom: 15px; }
+.crm-note-section textarea { min-height: 82px; resize: vertical; border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; background: var(--panel); line-height: 1.45; }
+.crm-note-section form button { justify-self: end; min-height: 34px; padding: 6px 10px; font-size: 10px; }
+.crm-note-section form button svg { width: 14px; height: 14px; }
+.crm-note-list { display: grid; gap: 7px; }
+.crm-note-list article { padding: 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-soft); }
+.crm-note-list p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; line-height: 1.5; }
+.crm-note-list time { display: block; margin-top: 7px; color: var(--muted); font-size: 9px; }
+.crm-contact-body .crm-empty { min-height: 210px; }
+.contact-tab-action { min-height: 32px; margin: 0 0 10px auto; padding: 5px 9px; font-size: 10px; }
+.contact-tab-action svg { width: 14px; height: 14px; }
+.contact-order { display: grid; min-height: 54px; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--border); }
+.contact-order span strong, .contact-order span small { display: block; }
+.contact-order span strong { font-size: 11px; }
+.contact-order span small { margin-top: 2px; color: var(--muted); font-size: 9px; }
+.contact-order b { font-size: 11px; }
+.contact-task { display: flex; min-height: 54px; align-items: center; gap: 9px; padding: 7px 8px; border-bottom: 1px solid var(--border); }
+.contact-task > span { display: grid; width: 20px; height: 20px; place-items: center; border: 1px solid var(--border); border-radius: 6px; }
+.contact-task > span.checked { color: white; border-color: var(--accent); background: var(--accent); }
+.contact-task > span svg { width: 13px; height: 13px; }
+.contact-task > div { min-width: 0; flex: 1; }
+.contact-task strong, .contact-task small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.contact-task strong { font-size: 11px; }
+.contact-task small { margin-top: 2px; color: var(--muted); font-size: 9px; }
+.crm-timeline { position: relative; display: grid; padding-left: 10px; }
+.crm-timeline::before { position: absolute; top: 6px; bottom: 8px; left: 14px; width: 1px; background: var(--border); content: ''; }
+.crm-timeline article { position: relative; display: flex; min-height: 54px; gap: 12px; }
+.crm-timeline article > i { z-index: 1; width: 9px; height: 9px; flex: 0 0 auto; margin-top: 5px; border: 2px solid var(--panel); border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.crm-timeline article > div { min-width: 0; padding: 0 0 14px; }
+.crm-timeline strong, .crm-timeline time { display: block; }
+.crm-timeline strong { font-size: 11px; font-weight: 600; }
+.crm-timeline time { margin-top: 3px; color: var(--muted); font-size: 9px; }
+
+.contact-crm-entry { display: flex; width: calc(100% - 36px); min-height: 62px; align-items: center; gap: 11px; margin: 12px 18px 3px; padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border)); border-radius: 9px; background: color-mix(in srgb, var(--accent) 6%, var(--panel)); text-align: left; }
+.contact-crm-entry:hover { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
+.contact-crm-entry > span { display: grid; width: 34px; height: 34px; flex: 0 0 auto; place-items: center; border-radius: 8px; color: var(--accent-strong); background: color-mix(in srgb, var(--accent) 13%, var(--panel)); }
+.contact-crm-entry > span svg { width: 17px; height: 17px; }
+.contact-crm-entry > div { min-width: 0; flex: 1; }
+.contact-crm-entry strong, .contact-crm-entry small { display: block; }
+.contact-crm-entry strong { font-size: 11px; }
+.contact-crm-entry small { margin-top: 3px; overflow: hidden; color: var(--muted); font-size: 9px; line-height: 1.35; text-overflow: ellipsis; }
+.contact-crm-entry > svg { width: 15px; height: 15px; flex: 0 0 auto; color: var(--muted); }
+
+.crm-dialog-backdrop { z-index: 70; place-items: center; padding: 22px; backdrop-filter: blur(5px); }
+.crm-dialog { display: grid; width: min(560px, 100%); max-height: min(820px, calc(100vh - 44px)); grid-template-rows: 62px minmax(0, 1fr); overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: var(--panel); box-shadow: 0 28px 80px rgb(4 17 23 / 28%); }
+.crm-dialog.wide { width: min(1050px, 100%); }
+.crm-dialog > header { display: flex; min-width: 0; align-items: center; gap: 12px; padding: 8px 12px 8px 18px; border-bottom: 1px solid var(--border); }
+.crm-dialog > header > div { min-width: 0; flex: 1; }
+.crm-dialog h2 { margin: 0; overflow: hidden; font-size: 18px; letter-spacing: -.25px; text-overflow: ellipsis; white-space: nowrap; }
+.crm-dialog-body { min-height: 0; padding: 18px; overflow-y: auto; scrollbar-color: var(--muted) transparent; scrollbar-width: thin; }
+.crm-form { display: grid; gap: 13px; }
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
+.form-field { display: grid; min-width: 0; gap: 5px; }
+.form-field > span { color: var(--muted); font-size: 9px; font-weight: 700; }
+.form-field input, .form-field select, .form-field textarea, .crm-form > input, .crm-form > textarea { width: 100%; min-height: 37px; border: 1px solid var(--border); border-radius: 7px; outline: none; padding: 7px 9px; background: var(--panel); font-size: 11px; }
+.form-field textarea { min-height: 68px; resize: vertical; line-height: 1.45; }
+.form-field input:focus, .form-field select:focus, .form-field textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 9%, transparent); }
+.checkbox-field { display: flex; min-height: 37px; align-items: center; gap: 8px; align-self: end; padding: 0 9px; border: 1px solid var(--border); border-radius: 7px; color: var(--muted); font-size: 10px; }
+.checkbox-field input { accent-color: var(--accent); }
+.crm-form > footer { display: flex; justify-content: flex-end; gap: 8px; margin: 3px -18px -18px; padding: 13px 18px; border-top: 1px solid var(--border); background: var(--panel-soft); }
+.crm-form > footer button { min-height: 36px; padding: 7px 13px; font-size: 11px; }
+.contact-edit-form > footer { margin-inline: 0; margin-bottom: 0; border: 0; border-radius: 8px; }
+.order-lines { display: grid; gap: 6px; padding: 11px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel-soft); }
+.order-lines > header { display: flex; align-items: center; margin-bottom: 3px; }
+.order-lines > header strong { flex: 1; font-size: 11px; }
+.order-lines > header button { display: flex; align-items: center; gap: 4px; padding: 5px 7px; border-radius: 6px; color: var(--accent-strong); background: transparent; font-size: 9px; font-weight: 650; }
+.order-lines > header button:hover { background: var(--hover); }
+.order-lines > header svg { width: 13px; height: 13px; }
+.order-line { display: grid; grid-template-columns: 125px minmax(140px, 1fr) 90px 64px 86px 78px 68px 92px 30px; align-items: end; gap: 5px; }
+.order-line > input, .order-line > select, .order-line label input { width: 100%; height: 34px; min-width: 0; border: 1px solid var(--border); border-radius: 6px; padding: 5px 7px; background: var(--panel); font-size: 9px; }
+.order-line label { display: grid; gap: 3px; color: var(--muted); font-size: 8px; }
+.order-line > strong { height: 34px; overflow: hidden; padding: 9px 3px; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.order-line .icon-button { width: 30px; height: 34px; border-radius: 6px; }
+.order-line .icon-button svg { width: 14px; height: 14px; }
+.order-footer-grid { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 12px; }
+.order-total { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; padding: 10px; border-radius: 8px; color: var(--muted); background: var(--panel-soft); }
+.order-total strong { color: var(--text); font-size: 16px; }
+.google-connect-state { display: flex; min-height: 280px; align-items: center; justify-content: center; flex-direction: column; text-align: center; }
+.google-connect-state > svg { width: 42px; height: 42px; color: var(--accent-strong); }
+.google-connect-state h3 { margin: 14px 0 6px; font-size: 17px; }
+.google-connect-state p { max-width: 390px; margin: 0 0 17px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.google-account-row { display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: 8px; background: var(--panel-soft); }
+.google-account-row > svg { width: 18px; height: 18px; color: var(--accent-strong); }
+.google-account-row > span { min-width: 0; }
+.google-account-row small, .google-account-row strong { display: block; }
+.google-account-row small { color: var(--muted); font-size: 9px; }
+.google-account-row strong { margin-top: 2px; font-size: 11px; }
+.duplicate-status, .duplicate-matches > header { display: flex; align-items: center; gap: 9px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-soft); }
+.duplicate-status.clear { color: #1b754a; background: color-mix(in srgb, #20a467 8%, var(--panel)); }
+.duplicate-status > svg, .duplicate-matches > header > svg { width: 18px; height: 18px; flex: 0 0 auto; }
+.duplicate-status strong, .duplicate-status small, .duplicate-matches header strong, .duplicate-matches header small { display: block; }
+.duplicate-status strong, .duplicate-matches header strong { font-size: 10px; }
+.duplicate-status small, .duplicate-matches header small { margin-top: 2px; color: var(--muted); font-size: 9px; }
+.duplicate-matches { display: grid; gap: 5px; }
+.duplicate-matches > label { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; }
+.duplicate-matches > label:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
+.duplicate-matches label > span { min-width: 0; }
+.duplicate-matches label strong, .duplicate-matches label small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.duplicate-matches label strong { font-size: 10px; }
+.duplicate-matches label small { margin-top: 2px; color: var(--muted); font-size: 9px; }
+.google-client-form { display: flex; align-items: flex-end; gap: 10px; padding: 13px; }
+.google-client-form label { min-width: 0; flex: 1; }
+.google-client-form label > span { display: block; margin-bottom: 8px; }
+.google-client-form strong, .google-client-form small { display: block; }
+.google-client-form small { margin-top: 3px; color: var(--muted); line-height: 1.4; }
+.google-client-form input { width: 100%; height: 38px; border: 1px solid var(--border); border-radius: 7px; outline: none; padding: 0 10px; background: var(--panel); }
+.google-client-form input:focus { border-color: var(--accent); }
+.google-client-form .secondary-button { min-height: 38px; margin: 0; }
+.google-account-card { display: flex; min-height: 78px; align-items: center; gap: 12px; padding: 13px; }
+.google-account-card > span { display: grid; width: 39px; height: 39px; flex: 0 0 auto; place-items: center; border-radius: 10px; color: var(--muted); background: var(--panel-soft); }
+.google-account-card > span.connected { color: var(--accent-strong); background: color-mix(in srgb, var(--accent) 11%, var(--panel)); }
+.google-account-card > span svg { width: 19px; height: 19px; }
+.google-account-card > div { min-width: 0; flex: 1; }
+.google-account-card strong, .google-account-card small { display: block; }
+.google-account-card small { margin-top: 4px; color: var(--muted); line-height: 1.4; }
+.google-account-card .secondary-button, .google-account-card .primary-button { min-height: 36px; margin: 0; padding: 7px 11px; }
+
+:root[data-density='compact'] .crm-workspace { grid-template-rows: 56px minmax(0, 1fr); }
+:root[data-density='compact'] .crm-topbar { padding-block: 5px; }
+:root[data-density='compact'] .crm-layout { grid-template-columns: 160px minmax(0, 1fr); }
+:root[data-density='compact'] .crm-section-nav { padding-top: 10px; }
+:root[data-density='compact'] .crm-section-nav button { min-height: 35px; }
+:root[data-density='compact'] .crm-content { padding-top: 14px; }
+
+@media (max-width: 1050px) {
+  .crm-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .catalog-grid { grid-template-columns: repeat(2, minmax(220px, 1fr)); }
+  .crm-overview-grid { grid-template-columns: 1fr; }
+  .order-line { grid-template-columns: 110px minmax(130px, 1fr) 80px 58px 78px 70px 62px 82px 28px; }
+}
+@media (max-width: 760px) {
+  .crm-layout { grid-template-columns: 52px minmax(0, 1fr); }
+  :root[data-density='compact'] .crm-layout { grid-template-columns: 48px minmax(0, 1fr); }
+  .crm-section-nav { align-items: center; padding-inline: 5px; }
+  .crm-section-nav button { width: 38px; justify-content: center; padding: 0; }
+  .crm-section-nav span, .crm-section-nav b { display: none; }
+  .crm-content { padding-inline: 11px; }
+  .crm-stat-grid, .catalog-grid { grid-template-columns: 1fr; }
+  .crm-revenue-strip p { display: none; }
+  .crm-topbar { padding-inline: 12px; }
+  .crm-search { width: min(250px, 38vw); }
+  .crm-contact-panel { width: calc(100% - var(--rail-width)); }
+  .crm-dialog-backdrop { padding: 8px; }
+  .form-grid, .order-footer-grid { grid-template-columns: 1fr; }
+  .order-line { grid-template-columns: 1fr 1fr; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+}

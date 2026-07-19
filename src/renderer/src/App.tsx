@@ -90,6 +90,7 @@ function handleEvent(event: CoreEventEnvelope, queryClient: ReturnType<typeof us
       scheduleChatRefresh(queryClient)
     })
   }
+  if (event.type === 'navigation.openCrm') useUiStore.getState().openCrmContact(event.payload.contactId)
   if (event.type === 'chat.merged') {
     const merge = event.payload as ChatMergedEvent
     const state = useUiStore.getState()
@@ -97,6 +98,7 @@ function handleEvent(event: CoreEventEnvelope, queryClient: ReturnType<typeof us
     scheduleChatRefresh(queryClient)
     for (const chatId of merge.mergedChatIds) queryClient.removeQueries({ queryKey: ['messages', chatId] })
     void queryClient.invalidateQueries({ queryKey: ['messages', merge.chatId] })
+    void queryClient.invalidateQueries({ queryKey: ['crm'] })
   }
   if (event.type === 'history.batch') {
     const batch = event.payload as HistoryBatchEvent
@@ -123,6 +125,18 @@ function handleEvent(event: CoreEventEnvelope, queryClient: ReturnType<typeof us
     const payload = event.payload as { chatId: string; messageId: string; status: MessageDto['status'] }
     patchMessageStatus(queryClient, payload.chatId, payload.messageId, payload.status)
   }
+  if (event.type === 'crm.changed') {
+    const payload = event.payload
+    void queryClient.invalidateQueries({ queryKey: ['crm'] })
+    if (payload.contactId) void queryClient.invalidateQueries({ queryKey: ['crm', 'contact', payload.contactId] })
+    if (payload.chatId) void queryClient.invalidateQueries({ queryKey: ['crm', 'contact', 'chat', payload.chatId] })
+  }
+  if (event.type === 'crm.taskDue') {
+    void queryClient.invalidateQueries({ queryKey: ['crm', 'tasks'] })
+    void queryClient.invalidateQueries({ queryKey: ['crm', 'dashboard'] })
+    useUiStore.getState().pushNotice(`Follow-up due: ${event.payload.title}`, 'info')
+  }
+  if (event.type === 'google.statusChanged') queryClient.setQueryData(['google', 'status'], event.payload)
 }
 
 let chatRefreshTimer: number | undefined

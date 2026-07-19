@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Archive, Inbox, Network, PanelLeftClose, PanelLeftOpen, Radio, Settings, UserRound, UsersRound
+  Archive, BriefcaseBusiness, Inbox, Network, PanelLeftClose, PanelLeftOpen, Radio, Settings, UserRound, UsersRound
 } from 'lucide-react'
 import type { AppSettings } from '../../../shared/contracts'
 import { useUiStore, type WorkspaceDestination } from '../store'
@@ -44,13 +44,14 @@ export function NavigationRail({ current, onNavigate }: {
 
 function destinationLabel(destination: SidebarDestination): string {
   const labels: Record<SidebarDestination, string> = {
-    direct: 'Chats', group: 'Groups', community: 'Communities', channel: 'Channels', all: 'All conversations', archived: 'Archived'
+    direct: 'Chats', crm: 'CRM', group: 'Groups', community: 'Communities', channel: 'Channels', all: 'All conversations', archived: 'Archived'
   }
   return labels[destination]
 }
 
 function destinationIcon(destination: SidebarDestination): React.ReactNode {
   if (destination === 'direct') return <UserRound />
+  if (destination === 'crm') return <BriefcaseBusiness />
   if (destination === 'group') return <UsersRound />
   if (destination === 'community') return <Network />
   if (destination === 'channel') return <Radio />

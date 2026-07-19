@@ -3,6 +3,8 @@ import { join } from 'node:path'
 import type { MessagePortMain } from 'electron'
 import type { CoreEventEnvelope, RpcRequest, RpcResponse, SessionState } from '../shared/contracts'
 import { WarishDatabase } from './database'
+import { CrmRepository } from './crm-repository'
+import { GoogleContactsService } from './google-contacts'
 import { closeCoreLogger, createCoreLogger } from './logger'
 import { MediaManager } from './media-manager'
 import { RpcRouter, toAppError } from './rpc-router'
@@ -45,8 +47,10 @@ function initializeCore(data: InitPayload, ports: MessagePortMain[]): void {
   const database = new WarishDatabase(join(data.userDataPath, 'warish.sqlite'), Buffer.from(data.masterKey, 'base64'), logger)
   const emit = (event: CoreEventEnvelope): void => port.postMessage({ type: 'event', event })
   const media = new MediaManager(data.userDataPath, database, logger)
-  const whatsapp = new WhatsAppClient(database, logger, media, emit)
-  const router = new RpcRouter(database, whatsapp, media, emit, logger, {
+  const crm = new CrmRepository(database, emit)
+  const google = new GoogleContactsService(database, crm, emit)
+  const whatsapp = new WhatsAppClient(database, logger, media, crm, emit)
+  const router = new RpcRouter(database, whatsapp, media, crm, google, emit, logger, {
     appVersion: data.appVersion,
     electronVersion: data.electronVersion,
     nodeVersion: data.nodeVersion,
@@ -64,6 +68,12 @@ function initializeCore(data: InitPayload, ports: MessagePortMain[]): void {
   })
   port.start()
   const initialization = whatsapp.initialize()
+  const taskTimer = setInterval(() => {
+    for (const task of crm.takeDueTaskNotifications()) emit({ type: 'crm.taskDue', payload: {
+      taskId: task.id, contactId: task.contactId, title: task.title, dueAt: task.dueAt ?? task.reminderAt ?? Date.now()
+    } })
+  }, 30_000)
+  taskTimer.unref()
   port.postMessage({ type: 'ready' })
   void initialization.catch((error) => {
     logger.error({ error }, 'WhatsApp initialization failed')
@@ -74,6 +84,7 @@ function initializeCore(data: InitPayload, ports: MessagePortMain[]): void {
   const closeCore = async (): Promise<void> => {
     if (closed) return
     closed = true
+    clearInterval(taskTimer)
     try { await closeCoreLogger(logger) }
     catch { /* The database still needs to close if logging is unavailable. */ }
     database.close()
