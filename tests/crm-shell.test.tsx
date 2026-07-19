@@ -15,7 +15,7 @@ const contact: CrmContactSummaryDto = {
   id: 'crm-1', identityId: 'identity-1', chatId: 'chat-1', lifecycle: 'lead', stageId: 'stage-new', stageKey: 'new',
   stageName: 'New enquiry', stageColor: '#0ea5a4', name: 'Priya Enquiry', whatsappName: 'Priya WA',
   phoneNumber: '+919876543210', company: 'Priya Studio', source: 'whatsapp', tags: [], createdAt: Date.now() - 60_000,
-  lastActivityAt: Date.now(), orderCount: 0, lifetimeValue: 0, openTaskCount: 1, googleLinked: false
+  lastActivityAt: Date.now(), orderCount: 0, lifetimeValue: 0, openTaskCount: 1
 }
 const details: CrmContactDetailsDto = { ...contact, consentStatus: 'unknown', doNotContact: false, customFields: {} }
 const dashboard: CrmDashboardDto = { newLeads: 1, openLeads: 1, customers: 0, overdueTasks: 1, ordersThisMonth: 0,
@@ -34,8 +34,10 @@ function mockApi(): Record<string, unknown> {
       orders: { list: vi.fn().mockResolvedValue([]), get: vi.fn(), save: vi.fn(), delete: vi.fn() },
       activity: vi.fn().mockResolvedValue([])
     },
-    google: { status: vi.fn().mockResolvedValue({ configured: false, connected: false }), configure: vi.fn(), connect: vi.fn(),
-      disconnect: vi.fn(), previewContact: vi.fn(), saveContact: vi.fn() }
+    contacts: { get: vi.fn().mockResolvedValue({ chatId: contact.chatId, kind: 'direct', title: contact.name,
+      savedName: undefined, whatsappName: contact.whatsappName, phoneNumber: contact.phoneNumber,
+      pinned: false, archived: false }), save: vi.fn() },
+    session: { getState: vi.fn().mockResolvedValue({ phase: 'connected', accountState: 'linked' }) }
   }
 }
 
@@ -63,7 +65,7 @@ describe('CrmShell', () => {
     fireEvent.click(screen.getByText('Priya Enquiry'))
     await waitFor(() => expect(useUiStore.getState().selectedCrmContactId).toBe('crm-1'))
     expect(await screen.findByRole('complementary', { name: 'CRM contact record' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Google' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save contact' })).toBeInTheDocument()
     expect(screen.getAllByText('+919876543210').length).toBeGreaterThan(0)
   })
 })

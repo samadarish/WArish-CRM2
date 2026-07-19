@@ -1,6 +1,6 @@
 import { Component, lazy, Suspense, useEffect, type ErrorInfo, type ReactNode } from 'react'
 import { useQuery, useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query'
-import type { AppSettings, ChatMergedEvent, ContactSyncState, CoreEventEnvelope, HistoryBatchEvent, MessageDto, Page, SessionState } from '../../shared/contracts'
+import type { AppSettings, ChatMergedEvent, ChatSummary, CommunitySummary, ContactSyncState, CoreEventEnvelope, CoreEventPayloadMap, HistoryBatchEvent, MessageDto, Page, SessionState } from '../../shared/contracts'
 import { ChatShell } from './components/ChatShell'
 import { Onboarding } from './components/Onboarding'
 import { resolveSessionSurface } from './session-surface'
@@ -65,7 +65,7 @@ function handleEvent(event: CoreEventEnvelope, queryClient: ReturnType<typeof us
   if (event.type === 'chat.changed') {
     const payload = event.payload as { chatId?: string }
     if (payload.chatId) void queryClient.invalidateQueries({ queryKey: ['chat', payload.chatId] })
-    scheduleChatRefresh(queryClient)
+    scheduleChatRefresh(queryClient, payload.chatId ? [payload.chatId] : undefined)
   }
   if (event.type === 'contact.changed') {
     const payload = event.payload as { chatIds: string[]; bulk?: boolean }
@@ -73,7 +73,7 @@ function handleEvent(event: CoreEventEnvelope, queryClient: ReturnType<typeof us
       void queryClient.invalidateQueries({ queryKey: ['chat', chatId] })
       void queryClient.invalidateQueries({ queryKey: ['contact', chatId] })
     }
-    scheduleChatRefresh(queryClient)
+    scheduleChatRefresh(queryClient, payload.chatIds)
   }
   if (event.type === 'contact.syncChanged') {
     queryClient.setQueryData(['contact-sync'], event.payload as ContactSyncState)
@@ -84,10 +84,10 @@ function handleEvent(event: CoreEventEnvelope, queryClient: ReturnType<typeof us
     void window.warish.chats.get(chatId).then((chat) => {
       queryClient.setQueryData(['chat', chatId], chat)
       useUiStore.getState().openChat(chatId, destinationForChat(chat))
-      scheduleChatRefresh(queryClient)
+      scheduleChatRefresh(queryClient, [chatId])
     }).catch(() => {
       useUiStore.getState().openChat(chatId, 'all')
-      scheduleChatRefresh(queryClient)
+      scheduleChatRefresh(queryClient, [chatId])
     })
   }
   if (event.type === 'navigation.openCrm') useUiStore.getState().openCrmContact(event.payload.contactId)
@@ -98,28 +98,32 @@ function handleEvent(event: CoreEventEnvelope, queryClient: ReturnType<typeof us
     scheduleChatRefresh(queryClient)
     for (const chatId of merge.mergedChatIds) queryClient.removeQueries({ queryKey: ['messages', chatId] })
     void queryClient.invalidateQueries({ queryKey: ['messages', merge.chatId] })
-    void queryClient.invalidateQueries({ queryKey: ['crm'] })
+    void queryClient.invalidateQueries({ queryKey: ['crm', 'contacts'] })
+    void queryClient.invalidateQueries({ queryKey: ['crm', 'dashboard'] })
+    void queryClient.invalidateQueries({
+      predicate: (query) => query.queryKey[0] === 'crm' && query.queryKey[1] === 'contact'
+    })
   }
   if (event.type === 'history.batch') {
     const batch = event.payload as HistoryBatchEvent
     const affectedChats = new Set(batch.chatIds)
-    scheduleChatRefresh(queryClient)
+    scheduleChatRefresh(queryClient, batch.chatIds)
     for (const chatId of affectedChats) void refreshLatestMessagePage(queryClient, chatId)
   }
   if (event.type === 'message.upserted') {
     const message = event.payload as MessageDto
     patchMessage(queryClient, message)
-    scheduleChatRefresh(queryClient)
+    scheduleChatRefresh(queryClient, [message.chatId])
   }
   if (event.type === 'message.changed') {
     const payload = event.payload as { message: MessageDto; replacedId?: string }
     patchMessage(queryClient, payload.message, payload.replacedId)
-    scheduleChatRefresh(queryClient)
+    scheduleChatRefresh(queryClient, [payload.message.chatId])
   }
   if (event.type === 'message.batch') {
     const payload = event.payload as { messages: MessageDto[] }
     for (const message of payload.messages) patchMessage(queryClient, message)
-    scheduleChatRefresh(queryClient)
+    scheduleChatRefresh(queryClient, [...new Set(payload.messages.map((message) => message.chatId))])
   }
   if (event.type === 'message.statusChanged') {
     const payload = event.payload as { chatId: string; messageId: string; status: MessageDto['status'] }
@@ -127,30 +131,103 @@ function handleEvent(event: CoreEventEnvelope, queryClient: ReturnType<typeof us
   }
   if (event.type === 'crm.changed') {
     const payload = event.payload
-    void queryClient.invalidateQueries({ queryKey: ['crm'] })
-    if (payload.contactId) void queryClient.invalidateQueries({ queryKey: ['crm', 'contact', payload.contactId] })
+    invalidateCrmChange(queryClient, payload)
     if (payload.chatId) {
       void queryClient.invalidateQueries({ queryKey: ['chat', payload.chatId] })
-      void queryClient.invalidateQueries({ queryKey: ['crm', 'contact', 'chat', payload.chatId] })
     }
-    scheduleChatRefresh(queryClient)
+    if (payload.chatId) scheduleChatRefresh(queryClient, [payload.chatId])
+    else if (payload.scope === 'all') scheduleChatRefresh(queryClient)
   }
   if (event.type === 'crm.taskDue') {
     void queryClient.invalidateQueries({ queryKey: ['crm', 'tasks'] })
     void queryClient.invalidateQueries({ queryKey: ['crm', 'dashboard'] })
     useUiStore.getState().pushNotice(`Follow-up due: ${event.payload.title}`, 'info')
   }
-  if (event.type === 'google.statusChanged') queryClient.setQueryData(['google', 'status'], event.payload)
+}
+
+function invalidateCrmChange(queryClient: QueryClient, payload: CoreEventPayloadMap['crm.changed']): void {
+  if (payload.scope === 'all') {
+    void queryClient.invalidateQueries({ queryKey: ['crm'] })
+    return
+  }
+  const keys: Array<readonly unknown[]> = []
+  if (payload.contactId) {
+    keys.push(['crm', 'contact', payload.contactId], ['crm', 'activity', payload.contactId])
+  }
+  if (payload.chatId) keys.push(['crm', 'contact', 'chat', payload.chatId])
+  if (payload.scope === 'catalog') keys.push(['crm', 'catalog'])
+  if (payload.scope === 'contact') {
+    keys.push(['crm', 'contacts'], ['crm', 'dashboard'])
+    if (payload.contactId) keys.push(['crm', 'notes', payload.contactId])
+  }
+  if (payload.scope === 'pipeline') keys.push(['crm', 'contacts'], ['crm', 'dashboard'], ['crm', 'pipeline'])
+  if (payload.scope === 'task') keys.push(['crm', 'tasks'], ['crm', 'contacts'], ['crm', 'dashboard'])
+  if (payload.scope === 'order') keys.push(['crm', 'orders'], ['crm', 'contacts'], ['crm', 'dashboard'])
+  void Promise.all(keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })))
 }
 
 let chatRefreshTimer: number | undefined
-function scheduleChatRefresh(queryClient: QueryClient): void {
+let fullChatRefreshPending = false
+const pendingChatRefreshIds = new Set<string>()
+function scheduleChatRefresh(queryClient: QueryClient, chatIds?: string[]): void {
+  if (chatIds?.length) for (const chatId of chatIds) pendingChatRefreshIds.add(chatId)
+  else fullChatRefreshPending = true
   if (chatRefreshTimer !== undefined) return
-  chatRefreshTimer = window.setTimeout(() => {
-    chatRefreshTimer = undefined
-    void queryClient.invalidateQueries({ queryKey: ['chats'], refetchType: 'active' })
-    void queryClient.invalidateQueries({ queryKey: ['communities'], refetchType: 'active' })
-  }, 120)
+  chatRefreshTimer = window.setTimeout(() => { void flushChatRefresh(queryClient) }, 120)
+}
+
+async function flushChatRefresh(queryClient: QueryClient): Promise<void> {
+  chatRefreshTimer = undefined
+  const ids = [...pendingChatRefreshIds]
+  pendingChatRefreshIds.clear()
+  const refreshAll = fullChatRefreshPending
+  fullChatRefreshPending = false
+  if (refreshAll || !ids.length) {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['chats'], refetchType: 'active' }),
+      queryClient.invalidateQueries({ queryKey: ['communities'], refetchType: 'active' })
+    ])
+    return
+  }
+  try {
+    const chats = await window.warish.chats.getMany(ids)
+    for (const chat of chats) patchChatSummary(queryClient, chat)
+  } catch {
+    await queryClient.invalidateQueries({ queryKey: ['chats'], refetchType: 'active' })
+  }
+}
+
+function patchChatSummary(queryClient: QueryClient, chat: ChatSummary): void {
+  queryClient.setQueryData(['chat', chat.id], chat)
+  queryClient.setQueriesData<InfiniteData<Page<ChatSummary>, string | undefined>>({ queryKey: ['chats'] }, (current) => {
+    if (!current) return current
+    const pageSizes = current.pages.map((page) => page.items.length)
+    const items = current.pages.flatMap((page) => page.items)
+    const index = items.findIndex((item) => item.id === chat.id)
+    if (index < 0) return current
+    items[index] = chat
+    items.sort(compareChatSummaries)
+    let offset = 0
+    return { ...current, pages: current.pages.map((page, pageIndex) => {
+      const size = pageSizes[pageIndex] ?? 0
+      const next = { ...page, items: items.slice(offset, offset + size) }
+      offset += size
+      return next
+    }) }
+  })
+  queryClient.setQueriesData<InfiniteData<Page<CommunitySummary>, string | undefined>>(
+    { queryKey: ['communities'] }, (current) => current ? ({ ...current, pages: current.pages.map((page) => ({ ...page,
+      items: page.items.map((community) => ({ ...community,
+        children: community.children.map((child) => child.id === chat.id ? chat : child)
+      }))
+    })) }) : current
+  )
+}
+
+function compareChatSummaries(left: ChatSummary, right: ChatSummary): number {
+  return Number(right.pinned) - Number(left.pinned)
+    || (right.lastMessageAt ?? 0) - (left.lastMessageAt ?? 0)
+    || right.id.localeCompare(left.id)
 }
 
 type MessagePages = InfiniteData<Page<MessageDto>, string | undefined>
@@ -226,7 +303,8 @@ function applyAppearance(settings?: AppSettings): void {
     ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
     : settings.theme
   document.documentElement.dataset.theme = theme
-  document.documentElement.dataset.density = settings.density
+  document.documentElement.dataset.density = settings.density === 'ultra-dense' ? 'dense' : settings.density
+  document.documentElement.dataset.densityMode = settings.density
   document.documentElement.dataset.navigation = settings.navigationMode
   document.documentElement.dataset.motion = settings.reduceMotion ? 'reduced' : 'system'
   document.documentElement.dataset.conversationBackground = settings.conversationBackground

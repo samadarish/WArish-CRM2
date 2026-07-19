@@ -4,7 +4,6 @@ import type { MessagePortMain } from 'electron'
 import type { CoreEventEnvelope, RpcRequest, RpcResponse, SessionState } from '../shared/contracts'
 import { WarishDatabase } from './database'
 import { CrmRepository } from './crm-repository'
-import { GoogleContactsService } from './google-contacts'
 import { closeCoreLogger, createCoreLogger } from './logger'
 import { MediaManager } from './media-manager'
 import { RpcRouter, toAppError } from './rpc-router'
@@ -48,9 +47,8 @@ function initializeCore(data: InitPayload, ports: MessagePortMain[]): void {
   const emit = (event: CoreEventEnvelope): void => port.postMessage({ type: 'event', event })
   const media = new MediaManager(data.userDataPath, database, logger)
   const crm = new CrmRepository(database, emit)
-  const google = new GoogleContactsService(database, crm, emit)
   const whatsapp = new WhatsAppClient(database, logger, media, crm, emit)
-  const router = new RpcRouter(database, whatsapp, media, crm, google, emit, logger, {
+  const router = new RpcRouter(database, whatsapp, media, crm, emit, logger, {
     appVersion: data.appVersion,
     electronVersion: data.electronVersion,
     nodeVersion: data.nodeVersion,

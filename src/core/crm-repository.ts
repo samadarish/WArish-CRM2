@@ -19,8 +19,7 @@ import type {
   CrmStageKey,
   CrmTagDto,
   CrmTaskDto,
-  CrmTaskInput,
-  GoogleContactDraft
+  CrmTaskInput
 } from '../shared/contracts'
 import { WarishDatabase } from './database'
 
@@ -35,19 +34,11 @@ const CONTACT_SELECT = `
     (SELECT COUNT(*) FROM crm_orders orders WHERE orders.contact_id=crm.id AND orders.status!='cancelled') AS order_count,
     (SELECT COALESCE(SUM(orders.total), 0) FROM crm_orders orders
       WHERE orders.contact_id=crm.id AND orders.status='completed') AS lifetime_value,
-    (SELECT COUNT(*) FROM crm_tasks tasks WHERE tasks.contact_id=crm.id AND tasks.status='open') AS open_task_count,
-    EXISTS(SELECT 1 FROM google_contact_links google_link WHERE google_link.contact_id=crm.id) AS google_linked
+    (SELECT COUNT(*) FROM crm_tasks tasks WHERE tasks.contact_id=crm.id AND tasks.status='open') AS open_task_count
   FROM crm_contacts crm
   JOIN crm_pipeline_stages stage ON stage.id=crm.stage_id
   LEFT JOIN contact_identities identity ON identity.identity_id=crm.identity_id
   LEFT JOIN chats ON chats.id=crm.chat_id`
-
-export interface GoogleContactLink {
-  resourceName: string
-  etag?: string
-  accountEmail?: string
-  lastSyncedAt: number
-}
 
 export class ContactRestrictedError extends Error {
   constructor(name: string, reasons: string[]) {
@@ -541,32 +532,6 @@ export class CrmRepository {
       .all(contactId, limit) as Row[]).map(mapActivity)
   }
 
-  contactDraft(contactId: string): GoogleContactDraft {
-    const contact = this.getContact({ contactId })
-    if (!contact.phoneNumber) throw new Error('This contact has no resolved phone number')
-    return { name: contact.name, phoneNumber: contact.phoneNumber, email: contact.email, company: contact.company }
-  }
-
-  googleLink(contactId: string): GoogleContactLink | undefined {
-    const row = this.#database.db.prepare('SELECT * FROM google_contact_links WHERE contact_id=?').get(contactId) as Row | undefined
-    return row ? { resourceName: String(row.resource_name), etag: textValue(row.etag), accountEmail: textValue(row.account_email),
-      lastSyncedAt: numberValue(row.last_synced_at) } : undefined
-  }
-
-  markGoogleLinked(contactId: string, resourceName: string, etag: string | undefined, accountEmail: string | undefined): CrmContactDetailsDto {
-    const contact = this.getContact({ contactId })
-    const now = Date.now()
-    this.#database.transaction(() => {
-      this.#database.db.prepare(`INSERT INTO google_contact_links(contact_id, resource_name, etag, account_email, last_synced_at)
-        VALUES (?, ?, ?, ?, ?) ON CONFLICT(contact_id) DO UPDATE SET resource_name=excluded.resource_name,
-        etag=excluded.etag, account_email=excluded.account_email, last_synced_at=excluded.last_synced_at`)
-        .run(contactId, resourceName, etag ?? null, accountEmail ?? null, now)
-      this.#addActivity(contactId, 'google-saved', 'Saved to Google Contacts', { resourceName })
-    })
-    this.#changed({ contactId, chatId: contact.chatId, scope: 'contact' })
-    return this.getContact({ contactId })
-  }
-
   #messageReference(contact: CrmContactDetailsDto, sourceMessageId?: string): CrmMessageReferenceDto | undefined {
     const messageId = cleanText(sourceMessageId, 300)
     if (!messageId) return undefined
@@ -676,7 +641,7 @@ function mapContactSummary(row: Row, tags: CrmTagDto[]): CrmContactSummaryDto {
     phoneNumber: phone, avatarUrl: avatarToken ? `warish-media://avatars/${encodeURIComponent(avatarToken)}` : undefined,
     company: textValue(row.company), source: String(row.source), tags, createdAt: numberValue(row.created_at),
     lastActivityAt: numberValue(row.last_activity_at), orderCount: numberValue(row.order_count),
-    lifetimeValue: numberValue(row.lifetime_value), openTaskCount: numberValue(row.open_task_count), googleLinked: Boolean(row.google_linked)
+    lifetimeValue: numberValue(row.lifetime_value), openTaskCount: numberValue(row.open_task_count)
   }
 }
 

@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AppSettings, ChatSummary, CommunitySummary, ContactDetails, ContactSyncState, CoreEventEnvelope, CrmActivityDto,
   CrmCatalogItemDto, CrmContactDetailsDto, CrmContactSummaryDto, CrmDashboardDto, CrmNoteDto, CrmOrderDto,
-  CrmStageDto, CrmTaskDto, DiagnosticsDto, DraftDto, GoogleConnectionStatus, GoogleContactPreview, LogEntryDto,
+  CrmStageDto, CrmTaskDto, DiagnosticsDto, DraftDto, LogEntryDto,
   MessageContextDto, MessageDto, OlderHistoryResult, Page, PickedAttachment, SessionState, WarishApi
 } from '../shared/contracts'
 
@@ -21,11 +21,13 @@ const api: WarishApi = {
   chats: {
     list: (input = {}) => invoke<Page<ChatSummary>>('chat.list', input),
     get: (chatId) => invoke<ChatSummary>('chat.get', { chatId }),
+    getMany: (chatIds) => invoke<ChatSummary[]>('chat.getMany', { chatIds }),
     update: (chatId, patch) => invoke<void>('chat.update', { chatId, patch }),
     markRead: (chatId) => invoke<void>('chat.markRead', { chatId })
   },
   contacts: {
     get: (chatId) => invoke<ContactDetails>('contacts.get', { chatId }),
+    save: (chatId, input) => invoke<ContactDetails>('contacts.save', { chatId, input }),
     hydrate: (chatIds) => invoke<void>('contacts.hydrate', { chatIds }),
     refresh: () => invoke<ContactSyncState>('contacts.refresh'),
     getSyncState: () => invoke<ContactSyncState>('contacts.getSyncState')
@@ -90,14 +92,6 @@ const api: WarishApi = {
       delete: (orderId) => invoke<void>('crm.orders.delete', { orderId })
     },
     activity: (contactId, limit) => invoke<CrmActivityDto[]>('crm.activity.list', { contactId, limit })
-  },
-  google: {
-    status: () => invoke<GoogleConnectionStatus>('google.status'),
-    configure: (clientId) => invoke<GoogleConnectionStatus>('google.configure', { clientId }),
-    connect: () => ipcRenderer.invoke('warish:google-connect') as Promise<GoogleConnectionStatus>,
-    disconnect: () => invoke<GoogleConnectionStatus>('google.disconnect'),
-    previewContact: (contactId) => invoke<GoogleContactPreview>('google.contact.preview', { contactId }),
-    saveContact: (contactId, draft, resourceName) => invoke<CrmContactDetailsDto>('google.contact.save', { contactId, draft, resourceName })
   },
   search: { messages: (query, chatId, cursor) => invoke<Page<MessageDto>>('search.messages', { query, chatId, cursor }) },
   settings: {

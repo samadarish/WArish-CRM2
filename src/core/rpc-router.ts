@@ -5,7 +5,6 @@ import type {
 } from '../shared/contracts'
 import { WarishDatabase } from './database'
 import { ContactRestrictedError, CrmRepository } from './crm-repository'
-import { GoogleContactsService } from './google-contacts'
 import { flushCoreLogger, readErrorLogs } from './logger'
 import { MediaManager } from './media-manager'
 import { WhatsAppClient } from './whatsapp-client'
@@ -17,7 +16,6 @@ export class RpcRouter {
   readonly #whatsapp: WhatsAppClient
   readonly #media: MediaManager
   readonly #crm: CrmRepository
-  readonly #google: GoogleContactsService
   readonly #emit: EmitEvent
   readonly #runtime: { appVersion: string; electronVersion: string; nodeVersion: string; logDirectory: string }
   readonly #logger: Logger
@@ -27,7 +25,6 @@ export class RpcRouter {
     whatsapp: WhatsAppClient,
     media: MediaManager,
     crm: CrmRepository,
-    google: GoogleContactsService,
     emit: EmitEvent,
     logger: Logger,
     runtime: { appVersion: string; electronVersion: string; nodeVersion: string; logDirectory: string }
@@ -36,7 +33,6 @@ export class RpcRouter {
     this.#whatsapp = whatsapp
     this.#media = media
     this.#crm = crm
-    this.#google = google
     this.#emit = emit
     this.#logger = logger
     this.#runtime = runtime
@@ -62,6 +58,7 @@ export class RpcRouter {
         query: optionalString(params.query), category: chatCategory(params.category)
       })
       case 'chat.get': return this.#whatsapp.getChat(requiredString(params, 'chatId'))
+      case 'chat.getMany': return this.#database.getChats(stringArray(params.chatIds))
       case 'chat.update': {
         const patch = objectValue(params.patch)
         const chatId = requiredString(params, 'chatId')
@@ -73,6 +70,8 @@ export class RpcRouter {
       }
       case 'chat.markRead': return this.#whatsapp.markRead(requiredString(params, 'chatId'))
       case 'contacts.get': return this.#whatsapp.getContact(requiredString(params, 'chatId'))
+      case 'contacts.save': return this.#whatsapp.saveContact(requiredString(params, 'chatId'),
+        requiredString(objectValue(params.input), 'fullName'))
       case 'contacts.hydrate': return this.#whatsapp.hydrateContacts(stringArray(params.chatIds))
       case 'contacts.refresh': return this.#whatsapp.refreshContacts()
       case 'contacts.getSyncState': return this.#whatsapp.contactSyncState
@@ -158,15 +157,6 @@ export class RpcRouter {
       case 'crm.orders.save': return this.#crm.saveOrder(crmOrderInput(objectValue(params.input)))
       case 'crm.orders.delete': this.#crm.deleteOrder(requiredString(params, 'orderId')); return undefined
       case 'crm.activity.list': return this.#crm.activity(requiredString(params, 'contactId'), optionalNumber(params.limit))
-      case 'google.status': return this.#google.status()
-      case 'google.configure': return this.#google.configure(requiredString(params, 'clientId'))
-      case 'google.beginAuth': return this.#google.beginAuth(requiredString(params, 'redirectUri'))
-      case 'google.completeAuth': return this.#google.completeAuth(requiredString(params, 'code'), requiredString(params, 'state'),
-        requiredString(params, 'redirectUri'))
-      case 'google.disconnect': return this.#google.disconnect()
-      case 'google.contact.preview': return this.#google.previewContact(requiredString(params, 'contactId'))
-      case 'google.contact.save': return this.#google.saveContact(requiredString(params, 'contactId'),
-        googleContactDraft(objectValue(params.draft)), optionalString(params.resourceName))
       case 'search.messages': return this.#database.searchMessages(requiredString(params, 'query'), optionalString(params.chatId), optionalString(params.cursor))
       case 'draft.get': return this.#database.getDraft(requiredString(params, 'chatId'))
       case 'draft.save': {
@@ -260,10 +250,10 @@ function attachmentKind(value: unknown): 'image' | 'video' | 'document' | 'audio
 }
 function deleteMode(value: unknown): 'for-me' | 'for-everyone' { return value === 'for-everyone' ? value : 'for-me' }
 function themeValue(value: unknown): AppSettings['theme'] | undefined {
-  return ['system', 'light', 'dark', 'black'].includes(String(value)) ? value as AppSettings['theme'] : undefined
+  return ['system', 'light', 'dark', 'black', 'salesforce-black'].includes(String(value)) ? value as AppSettings['theme'] : undefined
 }
 function densityValue(value: unknown): AppSettings['density'] | undefined {
-  return value === 'comfortable' || value === 'compact' ? value : undefined
+  return value === 'comfortable' || value === 'compact' || value === 'dense' || value === 'ultra-dense' ? value : undefined
 }
 function navigationModeValue(value: unknown): AppSettings['navigationMode'] | undefined {
   return value === 'auto' || value === 'expanded' || value === 'collapsed' ? value : undefined
@@ -384,8 +374,4 @@ function optionalTags(value: unknown): Array<{ name: string; color?: string }> |
     const input = objectValue(entry)
     return { name: requiredString(input, 'name'), color: optionalString(input.color) }
   })
-}
-function googleContactDraft(input: Record<string, unknown>): { name: string; phoneNumber: string; email?: string; company?: string } {
-  return { name: requiredString(input, 'name'), phoneNumber: requiredString(input, 'phoneNumber'),
-    email: optionalString(input.email), company: optionalString(input.company) }
 }

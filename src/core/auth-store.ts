@@ -14,6 +14,22 @@ export interface PersistentAuthState {
   resetAppStateSyncVersion(collection: 'critical_unblock_low'): void
 }
 
+// Baileys QR pairing can persist the signed account identity before setting registered.
+export function hasLinkedAuth(creds: AuthenticationCreds): boolean {
+  return creds.registered || Boolean(creds.me?.id && creds.account)
+}
+
+export function mergeAuthCreds(creds: AuthenticationCreds, update: Partial<AuthenticationCreds>): boolean {
+  Object.assign(creds, update)
+  return repairCompletedPairing(creds)
+}
+
+function repairCompletedPairing(creds: AuthenticationCreds): boolean {
+  if (creds.registered || !creds.me?.id || !creds.account) return false
+  creds.registered = true
+  return true
+}
+
 export function createPersistentAuthState(database: WarishDatabase): PersistentAuthState {
   const stored = database.getAuth('creds', 'primary')
   const creds = stored
@@ -56,12 +72,14 @@ export function createPersistentAuthState(database: WarishDatabase): PersistentA
       }
     }
   }
+  const saveCreds = (): void => {
+    database.setAuth('creds', 'primary', Buffer.from(JSON.stringify(state.creds, BufferJSON.replacer), 'utf8'))
+  }
+  if (repairCompletedPairing(state.creds)) saveCreds()
 
   return {
     state,
-    saveCreds: () => {
-      database.setAuth('creds', 'primary', Buffer.from(JSON.stringify(state.creds, BufferJSON.replacer), 'utf8'))
-    },
+    saveCreds,
     resetAppStateSyncVersion: (collection) => database.setAuth('app-state-sync-version', collection)
   }
 }

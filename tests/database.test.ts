@@ -5,7 +5,8 @@ import { DatabaseSync } from 'node:sqlite'
 import pino from 'pino'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WarishDatabase } from '../src/core/database'
-import { createPersistentAuthState } from '../src/core/auth-store'
+import { CrmRepository } from '../src/core/crm-repository'
+import { createPersistentAuthState, mergeAuthCreds } from '../src/core/auth-store'
 import { DEFAULT_SETTINGS } from '../src/shared/contracts'
 
 const directories: string[] = []
@@ -67,7 +68,7 @@ describe('WarishDatabase', () => {
     const migrated = new WarishDatabase(path, Buffer.alloc(32, 7), pino({ enabled: false }))
     expect(migrated.getChat(lid)).toMatchObject({ title: 'Migrated name', savedName: 'Migrated name',
       whatsappName: 'Migrated profile', phoneNumber: '+33612345678' })
-    expect((migrated.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as { version: number }).version).toBe(10)
+    expect((migrated.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as { version: number }).version).toBe(11)
     migrated.close()
   })
 
@@ -129,6 +130,40 @@ describe('WarishDatabase', () => {
     migrated.close()
   })
 
+  it('purges retired Google credentials, links, and activity in v11', () => {
+    const { database, directory } = createDatabase()
+    const path = join(directory, 'warish.sqlite')
+    const chatId = '15550001111@s.whatsapp.net'
+    database.upsertContact({ id: chatId, phoneNumber: '15550001111', pushName: 'Migration Contact' })
+    database.upsertChat({ id: chatId, title: 'Migration Contact', kind: 'direct' })
+    const contact = new CrmRepository(database, () => undefined).ensureContact(chatId)
+    database.close()
+
+    const legacy = new DatabaseSync(path)
+    legacy.exec(`
+      CREATE TABLE google_contact_links(contact_id TEXT PRIMARY KEY, resource_name TEXT NOT NULL);
+      INSERT INTO google_contact_links(contact_id, resource_name) VALUES ('${contact.id}', 'people/old');
+      INSERT INTO auth_store(account_id, category, key_id, value, updated_at)
+        VALUES ('primary', 'google', 'oauth', X'01', 1), ('primary', 'baileys-test', 'marker', X'02', 1);
+      INSERT INTO crm_activity(id, contact_id, type, summary, created_at)
+        VALUES ('google-activity', '${contact.id}', 'google-saved', 'Saved to Google Contacts', 1),
+               ('kept-activity', '${contact.id}', 'note-added', 'Keep this activity', 2);
+      DELETE FROM schema_migrations WHERE version>=11;
+    `)
+    legacy.close()
+
+    const migrated = new WarishDatabase(path, Buffer.alloc(32, 7), pino({ enabled: false }))
+    const categories = migrated.db.prepare('SELECT category FROM auth_store ORDER BY category').all() as Array<{ category: string }>
+    const activityTypes = migrated.db.prepare('SELECT type FROM crm_activity ORDER BY type').all() as Array<{ type: string }>
+    const retiredTable = migrated.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='google_contact_links'").get()
+    expect(categories.map((row) => row.category)).toEqual(['baileys-test'])
+    expect(activityTypes.map((row) => row.type)).toEqual(expect.arrayContaining(['lead-created', 'note-added']))
+    expect(activityTypes.map((row) => row.type)).not.toContain('google-saved')
+    expect(retiredTable).toBeUndefined()
+    expect((migrated.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as { version: number }).version).toBe(11)
+    migrated.close()
+  })
+
   it('stores encrypted auth state and isolates its context', () => {
     const { database } = createDatabase()
     database.setAuth('creds', 'primary', Buffer.from('registered session'))
@@ -173,6 +208,50 @@ describe('WarishDatabase', () => {
     reopened.close()
   })
 
+  it('repairs a completed QR session persisted without the Baileys registered flag', () => {
+    const { database, directory } = createDatabase()
+    const auth = createPersistentAuthState(database)
+    auth.state.creds.me = { id: '15550001111:1@s.whatsapp.net', name: 'Restart test' }
+    auth.state.creds.account = {}
+    auth.state.creds.registered = false
+    auth.saveCreds()
+    database.close()
+
+    const reopened = new WarishDatabase(join(directory, 'warish.sqlite'), Buffer.alloc(32, 7), pino({ enabled: false }))
+    const recovered = createPersistentAuthState(reopened)
+    expect(recovered.state.creds.registered).toBe(true)
+    expect(reopened.getAuth('creds', 'primary')?.toString()).toContain('"registered":true')
+    reopened.close()
+  })
+
+  it('does not treat an unfinished phone-number pairing identity as linked', () => {
+    const { database, directory } = createDatabase()
+    const auth = createPersistentAuthState(database)
+    auth.state.creds.me = { id: '15550001111@s.whatsapp.net', name: '~' }
+    auth.state.creds.registered = false
+    auth.saveCreds()
+    database.close()
+
+    const reopened = new WarishDatabase(join(directory, 'warish.sqlite'), Buffer.alloc(32, 7), pino({ enabled: false }))
+    expect(createPersistentAuthState(reopened).state.creds.registered).toBe(false)
+    reopened.close()
+  })
+
+  it('marks a pair-success credential update as registered before persistence', () => {
+    const { database } = createDatabase()
+    const auth = createPersistentAuthState(database)
+    const repaired = mergeAuthCreds(auth.state.creds, {
+      me: { id: '15550001111:1@s.whatsapp.net', name: 'Pair success' },
+      account: {}
+    })
+    auth.saveCreds()
+
+    expect(repaired).toBe(true)
+    expect(auth.state.creds.registered).toBe(true)
+    expect(database.getAuth('creds', 'primary')?.toString()).toContain('"registered":true')
+    database.close()
+  })
+
   it('creates a chat before its first message and increments unread only once', () => {
     const { database } = createDatabase()
     const message = { id: 'message-1', chatId: '15550001111@s.whatsapp.net', fromMe: false,
@@ -211,16 +290,16 @@ describe('WarishDatabase', () => {
   it('does not reset unrelated settings when one value changes', () => {
     const { database } = createDatabase()
     database.updateSettings({ notificationPreview: false })
-    database.updateSettings({ theme: 'black', density: 'compact', navigationMode: 'expanded', notificationPreview: undefined })
+    database.updateSettings({ theme: 'salesforce-black', density: 'dense', navigationMode: 'expanded', notificationPreview: undefined })
 
-    expect(database.getSettings()).toMatchObject({ theme: 'black', density: 'compact', navigationMode: 'expanded', notificationPreview: false })
+    expect(database.getSettings()).toMatchObject({ theme: 'salesforce-black', density: 'dense', navigationMode: 'expanded', notificationPreview: false })
     database.close()
   })
 
-  it('uses professional compact defaults and fills new preferences in older settings records', () => {
+  it('uses dense defaults and fills new preferences in older settings records', () => {
     const { database } = createDatabase()
     expect(database.getSettings()).toMatchObject({
-      density: 'compact', enterToSend: true, showChatPreviews: true, reduceMotion: false, conversationBackground: 'subtle'
+      density: 'dense', enterToSend: true, showChatPreviews: true, reduceMotion: false, conversationBackground: 'subtle'
     })
 
     database.db.prepare("INSERT INTO settings(key, value, updated_at) VALUES ('application', ?, ?)")
@@ -238,10 +317,11 @@ describe('WarishDatabase', () => {
 
   it('persists the messaging and workspace appearance preferences together', () => {
     const { database } = createDatabase()
-    database.updateSettings({ enterToSend: false, showChatPreviews: false, reduceMotion: true, conversationBackground: 'grid' })
+    database.updateSettings({ density: 'ultra-dense', enterToSend: false, showChatPreviews: false,
+      reduceMotion: true, conversationBackground: 'grid' })
 
     expect(database.getSettings()).toMatchObject({
-      enterToSend: false, showChatPreviews: false, reduceMotion: true, conversationBackground: 'grid'
+      density: 'ultra-dense', enterToSend: false, showChatPreviews: false, reduceMotion: true, conversationBackground: 'grid'
     })
     database.close()
   })

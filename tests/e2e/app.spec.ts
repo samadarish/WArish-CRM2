@@ -9,7 +9,7 @@ let page: Page
 let userDataPath: string
 
 interface BrowserElement {
-  ownerDocument: { defaultView: { getComputedStyle(target: unknown): { fontSize: string } } }
+  ownerDocument: { defaultView: { getComputedStyle(target: unknown): { fontSize: string; transitionDuration: string } } }
 }
 
 interface BrowserBoxElement {
@@ -48,18 +48,28 @@ test('starts at the supported desktop width and exposes settings diagnostics', a
 
   await page.getByRole('button', { name: 'Settings' }).click()
   await expect(page.getByRole('dialog', { name: 'Appearance' })).toBeVisible()
-  await page.getByRole('button', { name: 'black' }).click()
-  await expect.poll(() => page.locator('html').getAttribute('data-theme')).toBe('black')
+  await expect.poll(() => page.locator('html').getAttribute('data-density')).toBe('dense')
+  await page.getByRole('button', { name: 'Salesforce black' }).click()
+  await expect.poll(() => page.locator('html').getAttribute('data-theme')).toBe('salesforce-black')
   await page.getByRole('button', { name: 'comfortable' }).click()
   await expect.poll(() => page.locator('html').getAttribute('data-density')).toBe('comfortable')
   const readableFontSize = await bodyFontSize(page)
-  await page.getByRole('button', { name: 'compact' }).click()
-  await expect.poll(() => page.locator('html').getAttribute('data-density')).toBe('compact')
+  await page.getByRole('button', { name: 'dense', exact: true }).click()
+  await expect.poll(() => page.locator('html').getAttribute('data-density')).toBe('dense')
+  expect(await bodyFontSize(page)).toBe(readableFontSize)
+  await page.getByRole('button', { name: 'Ultra dense' }).click()
+  await expect.poll(() => page.locator('html').getAttribute('data-density-mode')).toBe('ultra-dense')
+  await expect.poll(() => page.locator('html').getAttribute('data-density')).toBe('dense')
   expect(await bodyFontSize(page)).toBe(readableFontSize)
   await page.getByRole('button', { name: 'grid' }).click()
   await expect.poll(() => page.locator('html').getAttribute('data-conversation-background')).toBe('grid')
-  await page.getByRole('checkbox', { name: /Reduce animations/i }).click()
+  await page.getByRole('checkbox', { name: /Disable animations/i }).click()
   await expect.poll(() => page.locator('html').getAttribute('data-motion')).toBe('reduced')
+  const transitionDuration = await page.locator('.option-grid button').first().evaluate((element: unknown) => {
+    const target = element as BrowserElement
+    return target.ownerDocument.defaultView.getComputedStyle(target).transitionDuration
+  })
+  expect(transitionDuration).toBe('0s')
   await page.getByRole('button', { name: 'collapsed' }).click()
   await expect.poll(() => page.locator('html').getAttribute('data-navigation')).toBe('collapsed')
   await page.getByRole('button', { name: 'auto' }).click()
@@ -135,27 +145,88 @@ test('keeps local history in the workspace when an existing account needs relink
   const conversationHeader = page.locator('.conversation-header')
   await expect(conversationHeader.getByText('+15550001111')).toHaveCount(0)
   await expect(conversationHeader.locator('.whatsapp-profile-pill')).toHaveText('Saved Profile')
-  await conversationHeader.locator('.conversation-identity').click()
   const details = page.getByRole('complementary', { name: 'CRM contact record' })
-  await expect(details.getByText('Phone number')).toBeVisible()
-  await expect(details.getByText('+15550001111').first()).toBeVisible()
-  const [drawerBounds, conversationBounds] = await Promise.all([details.boundingBox(), page.locator('.conversation-panel').boundingBox()])
-  if (!drawerBounds || !conversationBounds) throw new Error('The in-chat CRM drawer has no visible bounds')
+  await expect(details).toBeVisible()
+  await expect(details.getByRole('button', { name: 'Close customer details' })).toBeHidden()
+  const lifecycle = page.getByRole('region', { name: 'Sales lifecycle' })
+  await expect(lifecycle).toBeVisible()
+  await expect(lifecycle.getByRole('button', { name: 'Set sales stage to New enquiry' })).not.toHaveAttribute('aria-current')
+  await expect(details.getByText('Pipeline stage')).toHaveCount(0)
+  await lifecycle.getByRole('button', { name: 'Set sales stage to Qualified' }).click()
+  await expect(lifecycle.getByRole('button', { name: 'Set sales stage to Qualified' })).toHaveAttribute('aria-current', 'step')
+  await expect(details.getByText('Phone number')).toHaveCount(0)
+  await expect(details.getByText('+15550001111')).toHaveCount(1)
+  const [drawerBounds, conversationBounds, messageBounds, composerBounds, chatListBounds, avatarBounds] = await Promise.all([
+    details.boundingBox(), page.locator('.conversation-panel').boundingBox(), page.locator('.message-scroller').boundingBox(),
+    page.locator('.composer').boundingBox(), page.locator('.chat-list-panel').boundingBox(), details.locator('.crm-contact-hero .avatar.large').boundingBox()
+  ])
+  if (!drawerBounds || !conversationBounds || !messageBounds || !composerBounds || !chatListBounds || !avatarBounds) {
+    throw new Error('The persistent customer workspace has missing geometry')
+  }
+  expect(drawerBounds.width).toBeGreaterThanOrEqual(359)
   expect(drawerBounds.width).toBeLessThanOrEqual(441)
   expect(drawerBounds.x).toBeGreaterThanOrEqual(conversationBounds.x)
-  expect(drawerBounds.x + drawerBounds.width).toBeLessThanOrEqual(conversationBounds.x + conversationBounds.width + 1)
-  await details.getByRole('button', { name: 'Close customer details' }).click()
+  expect(Math.abs(drawerBounds.x + drawerBounds.width - (conversationBounds.x + conversationBounds.width))).toBeLessThanOrEqual(3)
+  expect(Math.abs(messageBounds.x + messageBounds.width - drawerBounds.x)).toBeLessThanOrEqual(3)
+  expect(Math.abs(composerBounds.x + composerBounds.width - drawerBounds.x)).toBeLessThanOrEqual(3)
+  expect(chatListBounds.width).toBeGreaterThanOrEqual(229)
+  expect(chatListBounds.width).toBeLessThanOrEqual(291)
+  expect(Math.abs(avatarBounds.width - avatarBounds.height)).toBeLessThanOrEqual(1)
+  const lifecycleBounds = await lifecycle.boundingBox()
+  if (!lifecycleBounds) throw new Error('The sales lifecycle path has no visible bounds')
+  expect(drawerBounds.y).toBeGreaterThanOrEqual(lifecycleBounds.y + lifecycleBounds.height - 1)
   const unsavedContact = chatList.getByRole('button', { name: /\+15550002222/ })
   await expect(unsavedContact.getByText('+15550002222')).toHaveCount(1)
   await expect(unsavedContact.locator('.whatsapp-profile-pill')).toHaveText('Profile Only')
   await unsavedContact.click()
-  await conversationHeader.locator('.conversation-identity').click()
+  await expect(conversationHeader.getByText('Not tracked in CRM')).toBeVisible()
   await expect(details.getByRole('button', { name: /Add to CRM/ })).toBeVisible()
   await details.getByRole('button', { name: /Add to CRM/ }).click()
   const crmRecord = page.getByRole('complementary', { name: 'CRM contact record' })
   await expect(crmRecord).toBeVisible()
   await expect(crmRecord.getByText('Profile Only', { exact: true }).first()).toBeVisible()
-  await expect(crmRecord.getByRole('button', { name: 'Google' })).toBeVisible()
+  await expect(crmRecord.getByRole('button', { name: 'Save contact' })).toBeVisible()
+  await expect(conversationHeader.getByText('Orders')).toBeVisible()
+  await expect(conversationHeader.getByText('Lifetime value')).toBeVisible()
+  await expect(conversationHeader.getByText('Open tasks')).toBeVisible()
+
+  const visualDirectory = resolve('test-results', 'visual')
+  mkdirSync(visualDirectory, { recursive: true })
+  await page.setViewportSize({ width: 1920, height: 1080 })
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await page.getByRole('button', { name: 'Salesforce black' }).click()
+  await page.getByRole('button', { name: 'Ultra dense' }).click()
+  await page.getByRole('button', { name: 'Close settings' }).click()
+  await expect.poll(() => page.locator('html').getAttribute('data-theme')).toBe('salesforce-black')
+  await expect.poll(() => page.locator('html').getAttribute('data-density-mode')).toBe('ultra-dense')
+  await page.screenshot({ path: join(visualDirectory, 'warish-salesforce-black-1920x1080.png'), animations: 'disabled' })
+
+  await page.setViewportSize({ width: 1366, height: 768 })
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await page.getByRole('button', { name: 'Black', exact: true }).click()
+  await page.getByRole('button', { name: 'Close settings' }).click()
+  await expect.poll(() => page.locator('html').getAttribute('data-theme')).toBe('black')
+  await page.screenshot({ path: join(visualDirectory, 'warish-black-1366x768.png'), animations: 'disabled' })
+
+  await page.getByRole('button', { name: 'Conversation menu' }).click()
+  const conversationMenu = page.getByRole('menu')
+  await expect(conversationMenu).toBeVisible()
+  for (const name of ['Pin chat', 'Mark as read', 'Archive chat']) {
+    const menuItem = conversationMenu.getByRole('menuitem', { name })
+    await expect(menuItem).toBeVisible()
+    await menuItem.click({ trial: true })
+  }
+  await page.screenshot({ path: join(visualDirectory, 'warish-black-menu-1366x768.png'), animations: 'disabled' })
+  await page.getByRole('button', { name: 'Close menu' }).click()
+
+  await page.setViewportSize({ width: 900, height: 620 })
+  await expect(crmRecord).toBeHidden()
+  await page.screenshot({ path: join(visualDirectory, 'warish-black-900x620.png'), animations: 'disabled' })
+  await conversationHeader.locator('.conversation-identity').click()
+  await expect(crmRecord).toBeVisible()
+  await expect(crmRecord.getByRole('button', { name: 'Close customer details' })).toBeVisible()
+  await crmRecord.getByRole('button', { name: 'Close customer details' }).click()
+  await expect(crmRecord).toBeHidden()
   await page.getByRole('button', { name: 'Chats', exact: true }).click()
 
   await page.getByRole('button', { name: 'Relink account' }).click()
@@ -185,7 +256,8 @@ test('keeps grouped replies and remote/downloaded media visually stable', async 
     INSERT INTO messages(id, account_id, chat_id, sender_id, sender_name, from_me, kind, text, timestamp, status, updated_at)
       VALUES ('group-first', 'primary', '${chatId}', '${chatId}', 'Media Review', 0, 'text', 'First grouped message with a deliberately long quoted preview', 1784390000000, 'read', 1),
              ('remote-media', 'primary', '${chatId}', '${chatId}', 'Media Review', 0, 'image', NULL, 1784390060000, 'read', 1),
-             ('cached-media', 'primary', '${chatId}', '${chatId}', 'Media Review', 0, 'image', NULL, 1784390120000, 'read', 1);
+             ('cached-media', 'primary', '${chatId}', '${chatId}', 'Media Review', 0, 'image', NULL, 1784390120000, 'read', 1),
+             ('later-single', 'primary', '${chatId}', '${chatId}', 'Media Review', 0, 'text', 'Standalone follow-up', 1784390600000, 'read', 1);
     INSERT INTO messages(id, account_id, chat_id, sender_id, sender_name, from_me, kind, text, timestamp, status,
       quoted_message_id, quoted_sender_name, quoted_from_me, quoted_kind, quoted_text, updated_at)
       VALUES ('reply-message', 'primary', '${chatId}', '${chatId}', 'Media Review', 0, 'text', 'Compact reply', 1784390180000, 'read',
@@ -209,12 +281,30 @@ test('keeps grouped replies and remote/downloaded media visually stable', async 
     const box = (element as BrowserBoxElement).getBoundingClientRect()
     return { width: Math.round(box.width), height: Math.round(box.height) }
   }))
-  expect(sizes).toEqual([{ width: 320, height: 213 }, { width: 320, height: 213 }])
+  expect(sizes).toHaveLength(2)
+  expect(sizes[0]).toEqual(sizes[1])
+  for (const size of sizes) {
+    expect(size.width).toBeGreaterThanOrEqual(280)
+    expect(size.width).toBeLessThanOrEqual(320)
+    expect(Math.abs(size.width / size.height - 1.5)).toBeLessThan(0.02)
+  }
   await expect(page.getByRole('button', { name: 'Download Photo' })).toBeVisible()
   await expect(frames.nth(1).locator('.message-image')).toBeVisible()
   await expect(page.locator('.message-item.group-first')).toHaveCount(1)
   await expect(page.locator('.message-item.group-middle')).toHaveCount(2)
   await expect(page.locator('.message-item.group-last')).toHaveCount(1)
+  await expect(page.locator('.message-item.group-single')).toHaveCount(1)
+  const groupedMiddleBox = await page.locator('.message-item.group-middle').last().locator('.message-bubble').boundingBox()
+  const groupedLastBox = await page.locator('.message-item.group-last .message-bubble').boundingBox()
+  const standaloneBox = await page.locator('.message-item.group-single .message-bubble').boundingBox()
+  if (!groupedMiddleBox || !groupedLastBox || !standaloneBox) {
+    throw new Error('The grouped message spacing test has missing geometry')
+  }
+  const withinGroupGap = groupedLastBox.y - (groupedMiddleBox.y + groupedMiddleBox.height)
+  const standaloneGap = standaloneBox.y - (groupedLastBox.y + groupedLastBox.height)
+  expect(withinGroupGap).toBeGreaterThanOrEqual(0)
+  expect(standaloneGap).toBeGreaterThanOrEqual(0)
+  expect(Math.abs(withinGroupGap - standaloneGap)).toBeLessThanOrEqual(1)
   const quote = page.locator('.quoted-message')
   await expect(quote).toContainText('First grouped message with a deliberately long quoted preview')
   await expect(quote.locator('span')).toHaveCSS('white-space', 'nowrap')

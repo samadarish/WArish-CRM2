@@ -1,19 +1,24 @@
+import { memo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Archive, ArchiveRestore, BellOff, BellRing, BriefcaseBusiness, Info, LoaderCircle, MessageCircle, Network, Pin, PinOff,
+  Archive, ArchiveRestore, BellOff, BellRing, BriefcaseBusiness, ContactRound, Info, LoaderCircle, MessageCircle, Network, Pin, PinOff,
   Radio, UserRound, UsersRound, X
 } from 'lucide-react'
 import type { ChatSummary, ContactDetails } from '../../../shared/contracts'
 import { useUiStore } from '../store'
 import { Avatar } from './Avatar'
 import { CrmContactPanel } from './CrmShell'
+import { WhatsAppContactDialog } from './WhatsAppContactDialog'
 
-export function ContactDrawer({ chat, onClose, onArchived, onJumpToMessage }: {
+export const ContactDrawer = memo(function ContactDrawer({ chat, onClose, onArchived, onJumpToMessage, persistent = false, overlayOpen = false }: {
   chat: ChatSummary
   onClose(): void
   onArchived(): void
   onJumpToMessage?(messageId: string): void
+  persistent?: boolean
+  overlayOpen?: boolean
 }): React.JSX.Element {
+  const [contactSaveOpen, setContactSaveOpen] = useState(false)
   const pushNotice = useUiStore((state) => state.pushNotice)
   const queryClient = useQueryClient()
   const detailsQuery = useQuery({
@@ -26,10 +31,14 @@ export function ContactDrawer({ chat, onClose, onArchived, onJumpToMessage }: {
     queryFn: () => window.warish.crm.contacts.get({ chatId: chat.id }), enabled: details.kind === 'direct', retry: false })
   const stagesQuery = useQuery({ queryKey: ['crm', 'pipeline'], queryFn: () => window.warish.crm.pipeline(),
     enabled: details.kind === 'direct' })
+  const sessionQuery = useQuery({ queryKey: ['session'], queryFn: () => window.warish.session.getState(), staleTime: 30_000 })
   const ensureCrm = useMutation({ mutationFn: () => window.warish.crm.contacts.ensure(chat.id), onSuccess: (contact) => {
     queryClient.setQueryData(['crm', 'contact', contact.id], contact)
     queryClient.setQueryData(['crm', 'contact', 'chat', chat.id], contact)
-    void queryClient.invalidateQueries({ queryKey: ['crm'] })
+    void Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['crm', 'contacts'] }),
+      queryClient.invalidateQueries({ queryKey: ['crm', 'dashboard'] })
+    ])
   }, onError: (error) => pushNotice(error instanceof Error ? error.message : 'Could not add this contact to CRM') })
   const action = useMutation({
     mutationFn: (patch: Partial<Pick<ChatSummary, 'archived' | 'pinned' | 'mutedUntil'>>) =>
@@ -48,30 +57,34 @@ export function ContactDrawer({ chat, onClose, onArchived, onJumpToMessage }: {
   const muted = Boolean(details.mutedUntil && details.mutedUntil > Date.now())
   const conversationOverview = <ConversationOverview details={details} muted={muted} pending={action.isPending}
     onUpdate={(patch) => action.mutate(patch)} />
+  const persistentClasses = `${persistent ? 'persistent-contact-panel' : ''} ${overlayOpen ? 'details-overlay-open' : ''}`
 
   if (details.kind === 'direct' && crmQuery.data) return <CrmContactPanel contactId={crmQuery.data.id}
     stages={stagesQuery.data ?? []} onClose={onClose} inConversation overviewPrefix={conversationOverview}
-    onJumpToMessage={onJumpToMessage} />
+    onJumpToMessage={onJumpToMessage} persistent={persistent} overlayOpen={overlayOpen} />
 
-  if (details.kind === 'direct' && crmQuery.isFetching && !crmQuery.isError) return <aside className="crm-contact-panel in-conversation"
+  if (details.kind === 'direct' && crmQuery.isFetching && !crmQuery.isError) return <aside className={`crm-contact-panel in-conversation ${persistentClasses}`}
     aria-label="CRM contact record"><header><div><span>Customer details</span><strong>{details.title}</strong></div>
-      <button className="icon-button" aria-label="Close customer details" onClick={onClose}><X /></button></header>
+      <button className="icon-button contact-panel-close" aria-label="Close customer details" onClick={onClose}><X /></button></header>
     <div className="crm-state"><LoaderCircle className="spin" /><span>Loading customer details…</span></div></aside>
 
-  if (details.kind === 'direct') return <aside className="crm-contact-panel in-conversation crm-untracked-contact" aria-label="CRM contact record">
-    <header><div><span>Customer details</span><strong>{details.title}</strong></div><button className="icon-button" aria-label="Close customer details" onClick={onClose}><X /></button></header>
-    <div className="crm-contact-hero"><Avatar title={details.title} src={details.avatarUrl} large /><div><h2>{details.title}</h2>
+  if (details.kind === 'direct') return <><aside className={`crm-contact-panel in-conversation crm-untracked-contact ${persistentClasses}`} aria-label="CRM contact record">
+    <header><div><span>WhatsApp contact</span><strong>Customer workspace</strong></div><button className="icon-button contact-panel-close" aria-label="Close customer details" onClick={onClose}><X /></button></header>
+    <div className="crm-contact-hero"><Avatar title={details.title} src={details.avatarUrl} large /><div className="crm-contact-copy"><h2>{details.title}</h2>
       {details.whatsappName && details.whatsappName !== details.title && <span className="whatsapp-profile-pill">{details.whatsappName}</span>}
-      {details.phoneNumber && <p>{details.phoneNumber}</p>}<div><span className="stage-pill" style={{ '--stage-color': '#0ea5a4' } as React.CSSProperties}><i />New enquiry</span></div></div></div>
+      {details.phoneNumber && <p>{details.phoneNumber}</p>}</div></div>
     <div className="crm-contact-actions"><button onClick={onClose}><MessageCircle />Message</button>
       <button disabled={ensureCrm.isPending} onClick={() => ensureCrm.mutate()}><BriefcaseBusiness />Track</button>
-      <button disabled><Archive />Order</button><button disabled><UserRound />Google</button></div>
-    <label className="crm-stage-select"><span>Pipeline stage</span><select disabled value="stage-new"><option value="stage-new">New enquiry</option></select></label>
+      <button disabled><Archive />Order</button><button disabled={sessionQuery.data?.phase !== 'connected'}
+        title={sessionQuery.data?.phase === 'connected' ? undefined : 'Connect WhatsApp to save this contact'}
+        onClick={() => setContactSaveOpen(true)}><ContactRound />{details.savedName ? 'Edit contact' : 'Save contact'}</button></div>
     <nav className="crm-contact-tabs"><button className="active">Overview</button><button disabled>Notes</button><button disabled>Tasks</button><button disabled>Orders</button><button disabled>Activity</button></nav>
     <div className="crm-contact-body"><div className="crm-profile-section">{conversationOverview}<section className="crm-start-tracking"><BriefcaseBusiness />
       <strong>Not tracked in CRM</strong><button className="primary-button" disabled={ensureCrm.isPending} onClick={() => ensureCrm.mutate()}>
         {ensureCrm.isPending ? <LoaderCircle className="spin" /> : <BriefcaseBusiness />}Add to CRM</button></section></div></div>
-  </aside>
+  </aside>{contactSaveOpen && <WhatsAppContactDialog chatId={chat.id}
+    initialName={details.savedName ?? details.whatsappName ?? details.title} phoneNumber={details.phoneNumber}
+    saved={Boolean(details.savedName)} onClose={() => setContactSaveOpen(false)} />}</>
 
   return <aside className="contact-drawer" aria-label="Conversation details">
     <header><strong>Conversation info</strong><button className="icon-button" aria-label="Close conversation info" onClick={onClose}><X /></button></header>
@@ -92,7 +105,7 @@ export function ContactDrawer({ chat, onClose, onArchived, onJumpToMessage }: {
       </section>
     </>}
   </aside>
-}
+})
 
 function ConversationOverview({ details, muted, pending, onUpdate }: {
   details: ContactDetails
@@ -100,14 +113,10 @@ function ConversationOverview({ details, muted, pending, onUpdate }: {
   pending: boolean
   onUpdate(patch: Partial<Pick<ChatSummary, 'archived' | 'pinned' | 'mutedUntil'>>): void
 }): React.JSX.Element {
-  return <section className="conversation-overview"><header><strong>Conversation</strong></header><div className="contact-actions">
+  return <section className="conversation-overview"><header><strong>WhatsApp conversation</strong></header><div className="contact-actions">
     <button disabled={pending} onClick={() => onUpdate({ pinned: !details.pinned })}>{details.pinned ? <PinOff /> : <Pin />}<span>{details.pinned ? 'Unpin' : 'Pin'}</span></button>
     <button disabled={pending} onClick={() => onUpdate({ mutedUntil: muted ? 0 : Number.MAX_SAFE_INTEGER })}>{muted ? <BellRing /> : <BellOff />}<span>{muted ? 'Unmute' : 'Mute'}</span></button>
     <button disabled={pending} onClick={() => onUpdate({ archived: !details.archived })}>{details.archived ? <ArchiveRestore /> : <Archive />}<span>{details.archived ? 'Restore' : 'Archive'}</span></button>
-  </div><div className="contact-detail-list">
-    {details.savedName && <Detail icon={<UserRound />} label="Saved contact name" value={details.savedName} />}
-    {details.whatsappName && <Detail icon={<MessageCircle />} label="WhatsApp profile name" value={details.whatsappName} />}
-    {details.phoneNumber && <Detail icon={<Info />} label="Phone number" value={details.phoneNumber} />}
   </div></section>
 }
 

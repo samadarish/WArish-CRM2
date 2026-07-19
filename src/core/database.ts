@@ -287,7 +287,6 @@ export class WarishDatabase {
         DELETE FROM crm_notes;
         DELETE FROM crm_contact_tags;
         DELETE FROM crm_tags;
-        DELETE FROM google_contact_links;
         DELETE FROM crm_contacts;
         DELETE FROM crm_catalog_items;
         DELETE FROM reactions;
@@ -442,6 +441,20 @@ export class WarishDatabase {
     return mapChat(row)
   }
 
+  getChats(chatIds: string[]): ChatSummary[] {
+    const resolvedIds = [...new Set(chatIds.map((chatId) => this.resolveChatId(chatId)))].slice(0, 100)
+    if (!resolvedIds.length) return []
+    const placeholders = resolvedIds.map(() => '?').join(', ')
+    const rows = this.db.prepare(
+      `SELECT ${SQL_RESOLVED_CHAT_COLUMNS} ${SQL_RESOLVED_CHAT_FROM} WHERE chats.id IN (${placeholders})`
+    ).all(...resolvedIds) as Record<string, unknown>[]
+    const chats = new Map(rows.map((row) => [String(row.id), mapChat(row)]))
+    return resolvedIds.flatMap((id) => {
+      const chat = chats.get(id)
+      return chat ? [chat] : []
+    })
+  }
+
   listChats(input: { cursor?: string; limit?: number; archived?: boolean; query?: string; category?: ChatCategory }): Page<ChatSummary> {
     const limit = Math.min(Math.max(input.limit ?? 50, 1), 100)
     const cursor = decodeChatCursor(input.cursor)
@@ -562,6 +575,20 @@ export class WarishDatabase {
        WHERE identity_alias.alias_id=?`
     ).get(resolved) as { phone_jid?: string; lid?: string } | undefined
     return row?.phone_jid ?? row?.lid ?? resolved
+  }
+
+  contactAddressing(chatId: string): { chatId: string; phoneJid?: string; lidJid?: string } {
+    const resolved = this.resolveChatId(chatId)
+    const row = this.db.prepare(
+      `SELECT identity.phone_jid, identity.lid FROM contact_identity_aliases identity_alias
+       JOIN contact_identities identity ON identity.identity_id=identity_alias.identity_id
+       WHERE identity_alias.alias_id=?`
+    ).get(resolved) as { phone_jid?: string; lid?: string } | undefined
+    return {
+      chatId: resolved,
+      phoneJid: row?.phone_jid ?? (resolved.endsWith('@s.whatsapp.net') ? resolved : undefined),
+      lidJid: row?.lid ?? (resolved.endsWith('@lid') || resolved.endsWith('@hosted.lid') ? resolved : undefined)
+    }
   }
 
   shouldRefreshContactAvatar(chatId: string, force = false, now = Date.now()): boolean {
@@ -1239,17 +1266,6 @@ export class WarishDatabase {
       this.db.prepare(`UPDATE ${table} SET contact_id=? WHERE contact_id=?`).run(targetContactId, sourceContactId)
     }
 
-    const sourceGoogle = this.db.prepare('SELECT * FROM google_contact_links WHERE contact_id=?').get(sourceContactId) as Record<string, unknown> | undefined
-    const targetGoogle = this.db.prepare('SELECT * FROM google_contact_links WHERE contact_id=?').get(targetContactId) as Record<string, unknown> | undefined
-    if (sourceGoogle && !targetGoogle) this.db.prepare('UPDATE google_contact_links SET contact_id=? WHERE contact_id=?')
-      .run(targetContactId, sourceContactId)
-    else if (sourceGoogle && targetGoogle && Number(sourceGoogle.last_synced_at) > Number(targetGoogle.last_synced_at)) {
-      this.db.prepare(`UPDATE google_contact_links SET resource_name=?, etag=?, account_email=?, last_synced_at=? WHERE contact_id=?`)
-        .run(String(sourceGoogle.resource_name), nullableString(sourceGoogle.etag) ?? null,
-          nullableString(sourceGoogle.account_email) ?? null, Number(sourceGoogle.last_synced_at), targetContactId)
-      this.db.prepare('DELETE FROM google_contact_links WHERE contact_id=?').run(sourceContactId)
-    } else if (sourceGoogle) this.db.prepare('DELETE FROM google_contact_links WHERE contact_id=?').run(sourceContactId)
-
     const lifecycleRank: Record<string, number> = { spam: 0, ignored: 1, lead: 2, customer: 3 }
     const lifecycle = (lifecycleRank[String(source.lifecycle)] ?? -1) > (lifecycleRank[String(target.lifecycle)] ?? -1)
       ? String(source.lifecycle) : String(target.lifecycle)
@@ -1687,6 +1703,16 @@ export class WarishDatabase {
           (10, CAST(strftime('%s','now') AS INTEGER) * 1000);
       `))
     }
+    if (version.version < 11) {
+      this.#logger.info({ version: 11 }, 'retiring Google Contacts authorization data')
+      this.transaction(() => this.db.exec(`
+        DELETE FROM auth_store WHERE category='google';
+        DELETE FROM crm_activity WHERE type='google-saved';
+        DROP TABLE IF EXISTS google_contact_links;
+        INSERT INTO schema_migrations(version, applied_at) VALUES
+          (11, CAST(strftime('%s','now') AS INTEGER) * 1000);
+      `))
+    }
   }
 }
 
@@ -1763,10 +1789,12 @@ function attachmentKindValue(value: unknown): DraftDto['attachmentKind'] {
     : undefined
 }
 function sanitizeSettings(value: Partial<AppSettings>): AppSettings {
-  const theme = value.theme === 'system' || value.theme === 'light' || value.theme === 'dark' || value.theme === 'black'
+  const theme = value.theme === 'system' || value.theme === 'light' || value.theme === 'dark' || value.theme === 'black' || value.theme === 'salesforce-black'
     ? value.theme
     : DEFAULT_SETTINGS.theme
-  const density = value.density === 'comfortable' || value.density === 'compact' ? value.density : DEFAULT_SETTINGS.density
+  const density = value.density === 'comfortable' || value.density === 'compact' || value.density === 'dense' || value.density === 'ultra-dense'
+    ? value.density
+    : DEFAULT_SETTINGS.density
   const cacheLimit = Number(value.cacheLimitBytes)
   const historyDays = Number(value.historySyncDays)
   const navigationMode = value.navigationMode === 'expanded' || value.navigationMode === 'collapsed' || value.navigationMode === 'auto'

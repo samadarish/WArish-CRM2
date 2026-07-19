@@ -1,20 +1,19 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 import {
-  ArrowLeft, Bell, BookOpen, Check, Circle, ClipboardCopy, Database, ExternalLink, HardDrive, Keyboard, LayoutList, LoaderCircle,
+  ArrowLeft, Bell, Check, Circle, ClipboardCopy, Database, HardDrive, Keyboard, LayoutList, LoaderCircle,
   LogOut, Maximize2, MessageSquare, Minimize2, Moon, Palette, RefreshCw, RotateCcw, ScrollText, Sun,
   Trash2, TriangleAlert, X
 } from 'lucide-react'
 import type { AppSettings, ContactSyncState, DiagnosticsDto, LogEntryDto } from '../../../shared/contracts'
 import { useUiStore } from '../store'
 
-type SettingsSection = 'appearance' | 'messaging' | 'notifications' | 'google' | 'storage' | 'diagnostics' | 'account'
+type SettingsSection = 'appearance' | 'messaging' | 'notifications' | 'storage' | 'diagnostics' | 'account'
 
 const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; icon: ReactNode }> = [
   { id: 'appearance', label: 'Appearance', icon: <Palette /> },
   { id: 'messaging', label: 'Messaging', icon: <MessageSquare /> },
   { id: 'notifications', label: 'Notifications', icon: <Bell /> },
-  { id: 'google', label: 'Google Contacts', icon: <BookOpen /> },
   { id: 'storage', label: 'Storage & contacts', icon: <HardDrive /> },
   { id: 'diagnostics', label: 'Diagnostics', icon: <ScrollText /> },
   { id: 'account', label: 'Account', icon: <LogOut /> }
@@ -113,7 +112,6 @@ export function SettingsPanel(): React.JSX.Element {
                 {activeSection === 'appearance' && <AppearanceSettings settings={settings} pending={update.isPending} update={(patch) => update.mutate(patch)} />}
                 {activeSection === 'messaging' && <MessagingSettings settings={settings} update={(patch) => update.mutate(patch)} />}
                 {activeSection === 'notifications' && <NotificationSettings settings={settings} update={(patch) => update.mutate(patch)} />}
-                {activeSection === 'google' && <GoogleContactsSettings />}
                 {activeSection === 'storage' && <StorageSettings settings={settings} contactSync={contactSyncQuery.data}
                   contactRefreshAvailable={contactRefreshAvailable} refreshPending={refreshContacts.isPending}
                   onRefresh={() => refreshContacts.mutate()} onUpdate={(patch) => update.mutate(patch)}
@@ -135,17 +133,25 @@ export function SettingsPanel(): React.JSX.Element {
 }
 
 function AppearanceSettings({ settings, pending, update }: { settings: AppSettings; pending: boolean; update(patch: Partial<AppSettings>): void }): React.JSX.Element {
+  const themes: Array<{ id: AppSettings['theme']; label: string; icon: ReactNode }> = [
+    { id: 'system', label: 'System', icon: <RotateCcw /> },
+    { id: 'light', label: 'Light', icon: <Sun /> },
+    { id: 'dark', label: 'Dark', icon: <Moon /> },
+    { id: 'black', label: 'Black', icon: <Circle className="black-theme-icon" /> },
+    { id: 'salesforce-black', label: 'Salesforce black', icon: <Palette /> }
+  ]
   return <>
     <SettingsHeading title="Appearance" description="Choose how your workspace looks and how much information it shows." />
     <SettingGroup title="Theme">
-      <div className="option-grid theme-options">{(['system', 'light', 'dark', 'black'] as const).map((theme) =>
-        <OptionButton key={theme} active={settings.theme === theme} disabled={pending} label={theme} onClick={() => update({ theme })}
-          icon={theme === 'light' ? <Sun /> : theme === 'dark' ? <Moon /> : theme === 'black' ? <Circle className="black-theme-icon" /> : <RotateCcw />} />)}</div>
+      <div className="option-grid theme-options">{themes.map((theme) =>
+        <OptionButton key={theme.id} active={settings.theme === theme.id} disabled={pending} label={theme.label}
+          onClick={() => update({ theme: theme.id })} icon={theme.icon} />)}</div>
     </SettingGroup>
-    <SettingGroup title="Layout density" description="Compact reduces whitespace and control size while keeping text fully readable.">
-      <div className="option-grid density-options">{(['compact', 'comfortable'] as const).map((density) =>
-        <OptionButton key={density} active={settings.density === density} disabled={pending} label={density} onClick={() => update({ density })}
-          icon={density === 'compact' ? <Minimize2 /> : <Maximize2 />} />)}</div>
+    <SettingGroup title="Layout density" description="Choose how tightly the workspace organizes information without shrinking message text.">
+      <div className="option-grid density-options">{(['ultra-dense', 'dense', 'compact', 'comfortable'] as const).map((density) =>
+        <OptionButton key={density} active={settings.density === density} disabled={pending}
+          label={density === 'ultra-dense' ? 'Ultra dense' : density} onClick={() => update({ density })}
+          icon={density === 'ultra-dense' || density === 'dense' ? <LayoutList /> : density === 'compact' ? <Minimize2 /> : <Maximize2 />} />)}</div>
     </SettingGroup>
     <SettingGroup title="Navigation rail" description="Auto adapts the rail to the available window width.">
       <div className="option-grid navigation-options">{(['auto', 'expanded', 'collapsed'] as const).map((navigationMode) =>
@@ -159,7 +165,7 @@ function AppearanceSettings({ settings, pending, update }: { settings: AppSettin
           <span className="background-swatch">{settings.conversationBackground === conversationBackground && <Check />}</span><strong>{conversationBackground}</strong>
         </button>)}</div>
     </SettingGroup>
-    <SettingToggle label="Reduce animations" description="Limit transitions and motion throughout the interface." checked={settings.reduceMotion} onChange={(reduceMotion) => update({ reduceMotion })} />
+    <SettingToggle label="Disable animations" description="Turn off interface motion, loading animation, and smooth transitions." checked={settings.reduceMotion} onChange={(reduceMotion) => update({ reduceMotion })} />
   </>
 }
 
@@ -181,40 +187,6 @@ function NotificationSettings({ settings, update }: { settings: AppSettings; upd
       <SettingToggle icon={<MessageSquare />} label="Show message previews" description="Include the sender and message text in Windows notifications." checked={settings.notificationPreview} onChange={(notificationPreview) => update({ notificationPreview })} />
       <SettingToggle icon={<RotateCcw />} label="Start with Windows" description="Launch WArish in the tray after signing in." checked={settings.launchAtLogin} onChange={(launchAtLogin) => update({ launchAtLogin })} />
     </div>
-  </>
-}
-
-function GoogleContactsSettings(): React.JSX.Element {
-  const [clientId, setClientId] = useState('')
-  const queryClient = useQueryClient()
-  const pushNotice = useUiStore((state) => state.pushNotice)
-  const statusQuery = useQuery({ queryKey: ['google', 'status'], queryFn: () => window.warish.google.status() })
-  const configure = useMutation({ mutationFn: () => window.warish.google.configure(clientId), onSuccess: (status) => {
-    queryClient.setQueryData(['google', 'status'], status); setClientId(''); pushNotice('Google OAuth client saved', 'info')
-  }, onError: (error) => pushNotice(error instanceof Error ? error.message : 'Could not save Google configuration') })
-  const connect = useMutation({ mutationFn: () => window.warish.google.connect(), onSuccess: (status) => {
-    queryClient.setQueryData(['google', 'status'], status); pushNotice('Google Contacts connected', 'info')
-  }, onError: (error) => pushNotice(error instanceof Error ? error.message : 'Could not connect Google Contacts') })
-  const disconnect = useMutation({ mutationFn: () => window.warish.google.disconnect(), onSuccess: (status) => {
-    queryClient.setQueryData(['google', 'status'], status); pushNotice('Google Contacts disconnected', 'info')
-  }, onError: (error) => pushNotice(error instanceof Error ? error.message : 'Could not disconnect Google Contacts') })
-  const status = statusQuery.data
-  return <>
-    <SettingsHeading title="Google Contacts" description="Create or update phone contacts from a CRM record with duplicate-phone detection and an editable confirmation." />
-    <SettingGroup title="OAuth desktop client" description="Use a Desktop app client from Google Cloud. The client secret is not required or stored.">
-      <form className="google-client-form settings-card" onSubmit={(event) => { event.preventDefault(); if (clientId.trim()) configure.mutate() }}>
-        <label><span><strong>{status?.configured ? 'OAuth client configured' : 'Google OAuth client ID'}</strong><small>{status?.configured ? 'Enter a new client ID only when you need to replace the current configuration.' : 'Paste the client ID ending in apps.googleusercontent.com.'}</small></span>
-          <input value={clientId} onChange={(event) => setClientId(event.target.value)} placeholder={status?.configured ? 'Replace existing client ID' : '000000000000-…apps.googleusercontent.com'} /></label>
-        <button className="secondary-button" disabled={!clientId.trim() || configure.isPending}>{configure.isPending ? 'Saving…' : status?.configured ? 'Replace client' : 'Save client'}</button>
-      </form>
-    </SettingGroup>
-    <SettingGroup title="Google account">
-      <div className="settings-card google-account-card"><span className={status?.connected ? 'connected' : ''}><BookOpen /></span><div><strong>{status?.connected ? status.accountEmail ?? 'Google Contacts connected' : 'Not connected'}</strong>
-        <small>{status?.connected ? 'Contacts can now be created or updated from any CRM contact record.' : status?.configured ? 'Sign in through your browser to grant Contacts access.' : 'Save an OAuth client ID above before connecting.'}</small></div>
-        {status?.connected ? <button className="secondary-button" disabled={disconnect.isPending} onClick={() => disconnect.mutate()}>{disconnect.isPending ? 'Disconnecting…' : 'Disconnect'}</button>
-          : <button className="primary-button" disabled={!status?.configured || connect.isPending} onClick={() => connect.mutate()}>{connect.isPending ? <LoaderCircle className="spin" /> : <ExternalLink />}{connect.isPending ? 'Waiting for Google…' : 'Connect Google'}</button>}</div>
-    </SettingGroup>
-    <div className="settings-note"><BookOpen /><div><strong>Private by design</strong><span>Sign-in uses PKCE and a temporary 127.0.0.1 callback. Tokens are encrypted in the background core and are never exposed to the UI.</span></div></div>
   </>
 }
 

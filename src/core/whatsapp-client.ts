@@ -21,7 +21,7 @@ import type {
   OlderHistoryResult,
   SessionState
 } from '../shared/contracts'
-import { createPersistentAuthState, type PersistentAuthState } from './auth-store'
+import { createPersistentAuthState, hasLinkedAuth, mergeAuthCreds, type PersistentAuthState } from './auth-store'
 import { CrmRepository } from './crm-repository'
 import { WarishDatabase } from './database'
 import { MediaManager } from './media-manager'
@@ -79,9 +79,10 @@ export class WhatsAppClient {
     this.media = media
     this.#emit = emit
     this.#auth = createPersistentAuthState(database)
+    const hasStoredSession = hasLinkedAuth(this.#auth.state.creds)
     this.#state = {
-      phase: this.#auth.state.creds.registered ? 'starting' : 'unlinked',
-      accountState: this.#auth.state.creds.registered ? 'linked' : database.hasLinkedAccount() ? 'relink-required' : 'never-linked',
+      phase: hasStoredSession ? 'starting' : 'unlinked',
+      accountState: hasStoredSession ? 'linked' : database.hasLinkedAccount() ? 'relink-required' : 'never-linked',
       historySync: { state: 'idle', progress: 0 }
     }
     this.#logger.info({ accountState: this.#state.accountState, credentialsRegistered: this.#auth.state.creds.registered },
@@ -97,7 +98,7 @@ export class WhatsAppClient {
   async initialize(): Promise<void> {
     const interrupted = this.#database.markInterruptedSendsFailed()
     if (interrupted) this.#logger.warn({ interrupted }, 'interrupted outgoing messages marked for explicit retry')
-    if (this.#auth.state.creds.registered) await this.connect()
+    if (hasLinkedAuth(this.#auth.state.creds)) await this.connect()
     else await Promise.resolve()
     this.#repairStoredMessageContent()
   }
@@ -110,7 +111,7 @@ export class WhatsAppClient {
     const historyDays = this.#database.getSettings().historySyncDays
     this.#initialHistoryCutoff = Date.now() - historyDays * 24 * 60 * 60 * 1000
     this.#historyBoundaryTypes.clear()
-    this.#setState({ phase: this.#auth.state.creds.registered ? 'connecting' : 'pairing', message: undefined,
+    this.#setState({ phase: hasLinkedAuth(this.#auth.state.creds) ? 'connecting' : 'pairing', message: undefined,
       historySync: { state: 'idle', progress: 0 } })
     const previousSocket = this.#socket
     this.#socket = undefined
@@ -139,7 +140,7 @@ export class WhatsAppClient {
   }
 
   async requestPairingCode(phoneNumber: string): Promise<SessionState> {
-    if (this.#auth.state.creds.registered) throw new Error('This account is already linked')
+    if (hasLinkedAuth(this.#auth.state.creds)) throw new Error('This account is already linked')
     const normalized = phoneNumber.replace(/\D/g, '')
     if (normalized.length < 7 || normalized.length > 15) throw new Error('Enter a valid international phone number')
     if (!this.#socket) await this.connect()
@@ -340,6 +341,29 @@ export class WhatsAppClient {
     return this.#database.getContactDetails(resolved)
   }
 
+  async saveContact(chatId: string, fullNameInput: string): Promise<ContactDetails> {
+    const fullName = fullNameInput.trim().replace(/\s+/g, ' ').slice(0, 160)
+    if (!fullName) throw new Error('Contact name cannot be empty')
+    const address = this.#database.contactAddressing(chatId)
+    const chat = this.#database.getChat(address.chatId)
+    if (chat.kind !== 'direct') throw new Error('Only direct WhatsApp contacts can be saved')
+    const targetJid = address.phoneJid ?? address.lidJid ?? address.chatId
+    if (!targetJid.endsWith('@s.whatsapp.net') && !targetJid.endsWith('@lid') && !targetJid.endsWith('@hosted.lid')) {
+      throw new Error('This contact has no usable WhatsApp address')
+    }
+    await addOrEditWhatsAppContact(this.#requireSocket(), targetJid, fullName, address)
+    const phoneNumber = address.phoneJid?.split('@')[0]
+    this.#database.upsertContact({
+      id: address.phoneJid ?? targetJid,
+      lid: address.lidJid,
+      phoneNumber,
+      name: fullName
+    })
+    this.#emit({ type: 'contact.changed', payload: { chatIds: [address.chatId] } })
+    this.#emit({ type: 'chat.changed', payload: { chatId: address.chatId } })
+    return this.#database.getContactDetails(address.chatId)
+  }
+
   async hydrateContacts(chatIds: string[]): Promise<void> {
     const socket = this.#socket
     if (!socket) return
@@ -382,17 +406,18 @@ export class WhatsAppClient {
 
   #bindEvents(socket: WASocket, generation: number): void {
     const isActive = (): boolean => this.#socket === socket && this.#socketGeneration === generation
-    socket.ev.on('creds.update', () => {
+    socket.ev.on('creds.update', (update) => {
       if (!isActive()) return
+      mergeAuthCreds(this.#auth.state.creds, update)
       this.#auth.saveCreds()
-      if (this.#auth.state.creds.registered && this.#state.accountState !== 'linked') {
+      if (hasLinkedAuth(this.#auth.state.creds) && this.#state.accountState !== 'linked') {
         this.#setState({ accountState: 'linked', message: undefined })
       }
     })
     socket.ev.on('connection.update', async (update) => {
       if (!isActive()) return
       if (update.qr) {
-        if (this.#auth.state.creds.registered || this.#state.accountState === 'linked') {
+        if (hasLinkedAuth(this.#auth.state.creds) || this.#state.accountState === 'linked') {
           this.#logger.warn('ignored an unexpected pairing QR because registered credentials are present')
         } else {
           const qrDataUrl = await QRCode.toDataURL(update.qr, { margin: 1, width: 280, errorCorrectionLevel: 'M' })
@@ -402,6 +427,10 @@ export class WhatsAppClient {
       }
       if (update.connection === 'open') {
         this.#reconnectAttempt = 0
+        if (!this.#auth.state.creds.registered) {
+          this.#auth.state.creds.registered = true
+          this.#auth.saveCreds()
+        }
         const user = socket.user
         this.#database.setAccount(user?.id?.split(':')[0], user?.name)
         this.#setState({ phase: 'connected', accountState: 'linked', qrDataUrl: undefined, pairingCode: undefined,
@@ -967,6 +996,17 @@ export class WhatsAppClient {
     }
     this.#historyRequests.clear()
   }
+}
+
+export async function addOrEditWhatsAppContact(socket: Pick<WASocket, 'addOrEditContact'>, targetJid: string,
+  fullName: string, address: { phoneJid?: string; lidJid?: string }): Promise<void> {
+  await socket.addOrEditContact(targetJid, {
+    fullName,
+    firstName: fullName.split(' ')[0],
+    pnJid: address.phoneJid,
+    lidJid: address.lidJid,
+    saveOnPrimaryAddressbook: true
+  })
 }
 
 export function isConfirmedAvatarMissing(error: unknown): boolean {

@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { memo, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { format } from 'date-fns'
 import { Check, CheckCheck, Clock3, Copy, Download, File, Forward, Heart, Images, List, ListTodo, MessageSquareText, NotebookPen, Package, Pencil, RefreshCw, Reply, Trash2, Vote, X } from 'lucide-react'
 import type { MessageDto } from '../../../shared/contracts'
 import type { MessageGroupPosition } from '../message-grouping'
 
-export function MessageBubble({ message, groupPosition = 'single', readOnly = false, showSender, onReply, onForward, onAddNote, onAddTask, onOpenQuote, onResize, onRetry, onError }: {
+export const MessageBubble = memo(function MessageBubble({ message, groupPosition = 'single', readOnly = false, showSender, onReply, onForward, onAddNote, onAddTask, onOpenQuote, onResize, onRetry, onError }: {
   message: MessageDto
   groupPosition?: MessageGroupPosition
   readOnly?: boolean
@@ -102,7 +102,7 @@ export function MessageBubble({ message, groupPosition = 'single', readOnly = fa
       </ActionDialog>}
     </article>
   )
-}
+})
 
 function RichMessageCard({ message }: { message: MessageDto }): React.JSX.Element {
   const rich = message.rich!

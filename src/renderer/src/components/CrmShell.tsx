@@ -1,17 +1,17 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useMutation, useQuery, useQueryClient, type QueryClient, type QueryKey } from '@tanstack/react-query'
 import {
-  BadgeIndianRupee, BookOpen, BriefcaseBusiness, CalendarClock, Check, ChevronRight, CircleDollarSign,
+  BadgeIndianRupee, BriefcaseBusiness, CalendarClock, Check, ChevronRight, CircleDollarSign, ContactRound,
   ExternalLink, FileText, LayoutDashboard, ListTodo, LoaderCircle, MessageCircle, NotebookPen,
-  Package, Pencil, Plus, RefreshCw, Search, ShoppingBag, Tags, Trash2, UserRound, UsersRound, X
+  Package, Pencil, Plus, RefreshCw, Search, ShoppingBag, Trash2, UserRound, UsersRound, X
 } from 'lucide-react'
 import type {
   CrmCatalogItemDto, CrmContactDetailsDto, CrmContactSummaryDto, CrmDashboardDto,
-  CrmMessageReferenceDto, CrmNoteDto, CrmOrderDto, CrmOrderInput, CrmStageDto, CrmTaskDto,
-  GoogleContactDraft, GoogleContactPreview
+  CrmMessageReferenceDto, CrmNoteDto, CrmOrderDto, CrmOrderInput, CrmStageDto, CrmTaskDto
 } from '../../../shared/contracts'
 import { useUiStore } from '../store'
 import { Avatar } from './Avatar'
+import { WhatsAppContactDialog } from './WhatsAppContactDialog'
 
 type CrmView = 'overview' | 'leads' | 'customers' | 'orders' | 'tasks' | 'catalog'
 type ContactTab = 'overview' | 'notes' | 'tasks' | 'orders' | 'activity'
@@ -36,6 +36,7 @@ export function CrmShell(): React.JSX.Element {
   const selectedContactId = useUiStore((state) => state.selectedCrmContactId)
   const openCrmContact = useUiStore((state) => state.openCrmContact)
   const pushNotice = useUiStore((state) => state.pushNotice)
+  const queryClient = useQueryClient()
   const dashboardQuery = useQuery({ queryKey: ['crm', 'dashboard'], queryFn: () => window.warish.crm.dashboard() })
   const stagesQuery = useQuery({ queryKey: ['crm', 'pipeline'], queryFn: () => window.warish.crm.pipeline() })
   const contactsQuery = useQuery({
@@ -52,9 +53,31 @@ export function CrmShell(): React.JSX.Element {
   const catalogQuery = useQuery({ queryKey: ['crm', 'catalog'], queryFn: () => window.warish.crm.catalog.list(undefined, true),
     enabled: view === 'catalog' || Boolean(orderDialogContactId) })
 
-  const changeView = (next: CrmView): void => {
+  const prefetchView = useCallback((next: CrmView): void => {
+    if (next === 'overview') {
+      void queryClient.prefetchQuery({ queryKey: ['crm', 'dashboard'], queryFn: () => window.warish.crm.dashboard(), staleTime: 15_000 })
+      return
+    }
+    if (next === 'leads' || next === 'customers') {
+      void queryClient.prefetchQuery({
+        queryKey: ['crm', 'contacts', next, '', ''],
+        queryFn: () => window.warish.crm.contacts.list({ lifecycle: next === 'customers' ? 'customer' : 'lead', limit: 500 }),
+        staleTime: 15_000
+      })
+      return
+    }
+    void queryClient.prefetchQuery({
+      queryKey: ['crm', 'contacts', 'active'],
+      queryFn: () => window.warish.crm.contacts.list({ lifecycle: 'active', limit: 500 }),
+      staleTime: 15_000
+    })
+    if (next === 'orders') void queryClient.prefetchQuery({ queryKey: ['crm', 'orders'], queryFn: () => window.warish.crm.orders.list(), staleTime: 15_000 })
+    if (next === 'tasks') void queryClient.prefetchQuery({ queryKey: ['crm', 'tasks'], queryFn: () => window.warish.crm.tasks.list(), staleTime: 15_000 })
+    if (next === 'catalog') void queryClient.prefetchQuery({ queryKey: ['crm', 'catalog'], queryFn: () => window.warish.crm.catalog.list(undefined, true), staleTime: 15_000 })
+  }, [queryClient])
+  const changeView = useCallback((next: CrmView): void => {
     setView(next); setQuery(''); setStageId('')
-  }
+  }, [])
 
   return <main className="crm-workspace">
     <header className="crm-topbar"><div><span>Customer workspace</span><h1>{CRM_VIEWS.find((item) => item.id === view)?.label}</h1></div>
@@ -68,7 +91,8 @@ export function CrmShell(): React.JSX.Element {
     </header>
     <div className="crm-layout">
       <nav className="crm-section-nav" aria-label="CRM sections">{CRM_VIEWS.map((item) => <button key={item.id}
-        className={view === item.id ? 'active' : ''} aria-current={view === item.id ? 'page' : undefined} onClick={() => changeView(item.id)}>
+        className={view === item.id ? 'active' : ''} aria-current={view === item.id ? 'page' : undefined}
+        onMouseEnter={() => prefetchView(item.id)} onFocus={() => prefetchView(item.id)} onClick={() => changeView(item.id)}>
         {item.icon}<span>{item.label}</span>{item.id === 'leads' && dashboardQuery.data?.openLeads ? <b>{dashboardQuery.data.openLeads}</b> : null}
       </button>)}</nav>
       <section className="crm-content">
@@ -169,7 +193,8 @@ function TasksView({ tasks, contacts, loading, onContact }: { tasks?: CrmTaskDto
   const pushNotice = useUiStore((state) => state.pushNotice)
   const names = useMemo(() => new Map(contacts.map((contact) => [contact.id, contact.name])), [contacts])
   const complete = useMutation({ mutationFn: (task: CrmTaskDto) => window.warish.crm.tasks.save({ ...task, status: 'completed' }),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['crm'] }),
+    onSuccess: (_result, task) => invalidateCrmQueries(queryClient, ['crm', 'tasks'], ['crm', 'contacts'], ['crm', 'dashboard'],
+      ['crm', 'contact', task.contactId], ['crm', 'activity', task.contactId]),
     onError: (error) => pushNotice(errorMessage(error)) })
   if (loading) return <CrmLoading label="Loading follow-ups…" />
   if (!tasks?.length) return <CrmEmpty icon={<ListTodo />} title="No follow-ups yet" description="Create tasks to make sure every enquiry gets a timely response." />
@@ -193,49 +218,72 @@ function CatalogView({ items, loading, onEdit, onError }: { items?: CrmCatalogIt
       onClick={() => archive.mutate(item.id)}><Trash2 />Archive</button> : <span>Archived</span>}</footer></article>)}</div>
 }
 
-export function CrmContactPanel({ contactId, stages, onClose, inConversation = false, overviewPrefix, onJumpToMessage }: {
+export function CrmContactPanel({ contactId, stages, onClose, inConversation = false, overviewPrefix, onJumpToMessage,
+  persistent = false, overlayOpen = false }: {
   contactId: string
   stages: CrmStageDto[]
   onClose(): void
   inConversation?: boolean
   overviewPrefix?: ReactNode
   onJumpToMessage?(messageId: string): void
+  persistent?: boolean
+  overlayOpen?: boolean
 }): React.JSX.Element {
   const [tab, setTab] = useState<ContactTab>('overview')
   const [editing, setEditing] = useState(false)
-  const [googleOpen, setGoogleOpen] = useState(false)
+  const [contactSaveOpen, setContactSaveOpen] = useState(false)
   const [taskEditor, setTaskEditor] = useState<CrmTaskDto | null>()
   const [orderEditor, setOrderEditor] = useState<CrmOrderDto | null>()
   const queryClient = useQueryClient()
   const pushNotice = useUiStore((state) => state.pushNotice)
   const openChat = useUiStore((state) => state.openChat)
   const contactQuery = useQuery({ queryKey: ['crm', 'contact', contactId], queryFn: () => window.warish.crm.contacts.get({ contactId }) })
+  const contact = contactQuery.data
+  const whatsappDetailsQuery = useQuery({ queryKey: ['contact', contact?.chatId],
+    queryFn: () => window.warish.contacts.get(contact!.chatId), enabled: Boolean(contact?.chatId) })
+  const sessionQuery = useQuery({ queryKey: ['session'], queryFn: () => window.warish.session.getState(), staleTime: 30_000 })
   const catalogQuery = useQuery({ queryKey: ['crm', 'catalog'], queryFn: () => window.warish.crm.catalog.list(undefined, false),
     enabled: orderEditor !== undefined })
   const stage = useMutation({ mutationFn: (stageId: string) => window.warish.crm.contacts.setStage(contactId, stageId),
     onSuccess: (contact) => {
       queryClient.setQueryData(['crm', 'contact', contactId], contact)
       queryClient.setQueryData(['crm', 'contact', 'chat', contact.chatId], contact)
-      void queryClient.invalidateQueries({ queryKey: ['crm'] })
+      invalidateCrmQueries(queryClient, ['crm', 'contacts'], ['crm', 'dashboard'], ['crm', 'pipeline'])
     },
     onError: (error) => pushNotice(errorMessage(error)) })
+  const prefetchTab = useCallback((next: ContactTab): void => {
+    if (next === 'notes') void queryClient.prefetchQuery({
+      queryKey: ['crm', 'notes', contactId], queryFn: () => window.warish.crm.notes.list(contactId), staleTime: 15_000
+    })
+    if (next === 'tasks') void queryClient.prefetchQuery({
+      queryKey: ['crm', 'tasks', contactId], queryFn: () => window.warish.crm.tasks.list({ contactId }), staleTime: 15_000
+    })
+    if (next === 'orders') void queryClient.prefetchQuery({
+      queryKey: ['crm', 'orders', contactId], queryFn: () => window.warish.crm.orders.list(contactId), staleTime: 15_000
+    })
+    if (next === 'activity') void queryClient.prefetchQuery({
+      queryKey: ['crm', 'activity', contactId], queryFn: () => window.warish.crm.activity(contactId, 100), staleTime: 15_000
+    })
+  }, [contactId, queryClient])
   useEffect(() => {
-    setTab('overview'); setEditing(false); setGoogleOpen(false); setTaskEditor(undefined); setOrderEditor(undefined)
+    setTab('overview'); setEditing(false); setContactSaveOpen(false); setTaskEditor(undefined); setOrderEditor(undefined)
   }, [contactId])
-  const contact = contactQuery.data
-  return <><aside className={`crm-contact-panel ${inConversation ? 'in-conversation' : ''}`} aria-label="CRM contact record"><header><div><span>Customer details</span><strong>{contact?.name ?? 'Loading…'}</strong></div>
-    <button className="icon-button" aria-label="Close customer details" onClick={onClose}><X /></button></header>
+  return <><aside className={`crm-contact-panel ${inConversation ? 'in-conversation' : ''} ${persistent ? 'persistent-contact-panel' : ''} ${overlayOpen ? 'details-overlay-open' : ''}`} aria-label="CRM contact record"><header><div><span>{inConversation ? 'CRM customer' : 'Contact record'}</span><strong>{inConversation ? 'Customer workspace' : contact?.name ?? 'Loading…'}</strong></div>
+    <button className="icon-button contact-panel-close" aria-label="Close customer details" onClick={onClose}><X /></button></header>
     {contactQuery.isError ? <CrmError label="Could not load this customer" onRetry={() => void contactQuery.refetch()} /> : !contact ? <CrmLoading label="Loading contact…" /> : <>
-      <div className="crm-contact-hero"><Avatar title={contact.name} src={contact.avatarUrl} large /><div><h2>{contact.name}</h2>
+      <div className="crm-contact-hero"><Avatar title={contact.name} src={contact.avatarUrl} large /><div className="crm-contact-copy"><h2>{contact.name}</h2>
         {contact.whatsappName && contact.whatsappName !== contact.name && <span className="whatsapp-profile-pill">{contact.whatsappName}</span>}
-        {contact.phoneNumber && <p>{contact.phoneNumber}</p>}<div><StagePill contact={contact} />{contact.googleLinked && <span className="google-linked">Google linked</span>}</div></div></div>
+        {contact.phoneNumber && <p>{contact.phoneNumber}</p>}</div></div>
       <div className="crm-contact-actions"><button onClick={() => inConversation ? onClose() : openChat(contact.chatId, 'direct')}><MessageCircle />Message</button>
         <button onClick={() => setTaskEditor(null)}><CalendarClock />Task</button><button onClick={() => setOrderEditor(null)}><ShoppingBag />Order</button>
-        <button onClick={() => setGoogleOpen(true)}><BookOpen />Google</button></div>
-      <label className="crm-stage-select"><span>Pipeline stage</span><select value={contact.stageId} disabled={stage.isPending}
+        <button disabled={sessionQuery.data?.phase !== 'connected'} title={sessionQuery.data?.phase === 'connected' ? undefined : 'Connect WhatsApp to save this contact'}
+          onClick={() => setContactSaveOpen(true)}><ContactRound />{whatsappDetailsQuery.data?.savedName ? 'Edit contact' : 'Save contact'}</button></div>
+      {!inConversation && <label className="crm-stage-select"><span>Pipeline stage</span><select value={contact.stageId} disabled={stage.isPending}
         onChange={(event) => stage.mutate(event.target.value)}>{stages.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+      }
       <nav className="crm-contact-tabs">{(['overview', 'notes', 'tasks', 'orders', 'activity'] as const).map((item) => <button key={item}
-        className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}</button>)}</nav>
+        className={tab === item ? 'active' : ''} onMouseEnter={() => prefetchTab(item)} onFocus={() => prefetchTab(item)}
+        onClick={() => setTab(item)}>{item}</button>)}</nav>
       <div className="crm-contact-body">
         {tab === 'overview' && (editing ? <ContactEditForm contact={contact} onDone={() => setEditing(false)} />
           : <ContactProfile contact={contact} onEdit={() => setEditing(true)} prefix={overviewPrefix} />)}
@@ -246,7 +294,9 @@ export function CrmContactPanel({ contactId, stages, onClose, inConversation = f
           onEdit={(order) => setOrderEditor(order)} />}
         {tab === 'activity' && <ContactActivity contactId={contactId} />}
       </div>
-      {googleOpen && <GoogleContactDialog contact={contact} onClose={() => setGoogleOpen(false)} />}
+      {contactSaveOpen && <WhatsAppContactDialog chatId={contact.chatId}
+        initialName={whatsappDetailsQuery.data?.savedName ?? contact.name} phoneNumber={contact.phoneNumber}
+        saved={Boolean(whatsappDetailsQuery.data?.savedName)} onClose={() => setContactSaveOpen(false)} />}
     </>}
   </aside>
     {contact && taskEditor !== undefined && <TaskDialog key={taskEditor?.id ?? 'new-task'} initialContactId={contact.id} contacts={[contact]}
@@ -257,14 +307,13 @@ export function CrmContactPanel({ contactId, stages, onClose, inConversation = f
 }
 
 function ContactProfile({ contact, onEdit, prefix }: { contact: CrmContactDetailsDto; onEdit(): void; prefix?: ReactNode }): React.JSX.Element {
-  return <div className="crm-profile-section">{prefix}<header><strong>Business details</strong><button className="secondary-button" onClick={onEdit}><Pencil />Edit</button></header>
+  return <div className="crm-profile-section"><header><strong>Business details</strong><button className="secondary-button" onClick={onEdit}><Pencil />Edit</button></header>
     <dl><ProfileField label="Email" value={contact.email} /><ProfileField label="Company" value={contact.company} />
       <ProfileField label="Address" value={contact.address} /><ProfileField label="Tax ID / GST" value={contact.taxId} />
       <ProfileField label="Birthday" value={contact.birthday} /><ProfileField label="Lead source" value={contact.source} />
       <ProfileField label="Consent" value={contact.consentStatus} /><ProfileField label="Contact preference" value={contact.doNotContact ? 'Do not contact' : contact.preferences} /></dl>
     {contact.tags.length > 0 && <section><small>Tags</small><div className="crm-tags large"><TagList contact={contact} /></div></section>}
-    <div className="crm-mini-stats"><span><strong>{contact.orderCount}</strong>orders</span><span><strong>{money(contact.lifetimeValue)}</strong>lifetime value</span>
-      <span><strong>{contact.openTaskCount}</strong>open tasks</span></div>
+    {prefix}
   </div>
 }
 
@@ -277,7 +326,12 @@ function ContactEditForm({ contact, onDone }: { contact: CrmContactDetailsDto; o
   const pushNotice = useUiStore((state) => state.pushNotice)
   const save = useMutation({ mutationFn: () => window.warish.crm.contacts.update(contact.id, { ...form,
     tags: form.tags.split(',').map((name) => ({ name: name.trim() })).filter((tag) => tag.name) }),
-    onSuccess: (value) => { queryClient.setQueryData(['crm', 'contact', contact.id], value); void queryClient.invalidateQueries({ queryKey: ['crm'] }); onDone() },
+    onSuccess: (value) => {
+      queryClient.setQueryData(['crm', 'contact', contact.id], value)
+      queryClient.setQueryData(['crm', 'contact', 'chat', value.chatId], value)
+      invalidateCrmQueries(queryClient, ['crm', 'contacts'], ['crm', 'dashboard'], ['crm', 'activity', contact.id])
+      onDone()
+    },
     onError: (error) => pushNotice(errorMessage(error)) })
   return <form className="crm-form contact-edit-form" onSubmit={(event) => { event.preventDefault(); save.mutate() }}>
     <div className="form-grid"><FormField label="Display name"><input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required /></FormField>
@@ -304,10 +358,12 @@ function ContactNotes({ contactId, onJumpToMessage }: { contactId: string; onJum
   const query = useQuery({ queryKey: ['crm', 'notes', contactId], queryFn: () => window.warish.crm.notes.list(contactId) })
   const save = useMutation({ mutationFn: () => window.warish.crm.notes.save({ id: editing?.id, contactId, body,
     sourceMessageId: editing?.sourceMessageId }), onSuccess: () => {
-    setBody(''); setEditing(undefined); void queryClient.invalidateQueries({ queryKey: ['crm', 'notes', contactId] }); void queryClient.invalidateQueries({ queryKey: ['crm'] })
+    setBody(''); setEditing(undefined); invalidateCrmQueries(queryClient, ['crm', 'notes', contactId], ['crm', 'activity', contactId],
+      ['crm', 'contact', contactId], ['crm', 'contacts'], ['crm', 'dashboard'])
   }, onError: (error) => pushNotice(errorMessage(error)) })
   const remove = useMutation({ mutationFn: (noteId: string) => window.warish.crm.notes.delete(noteId), onSuccess: () => {
-    void queryClient.invalidateQueries({ queryKey: ['crm', 'notes', contactId] }); void queryClient.invalidateQueries({ queryKey: ['crm'] })
+    invalidateCrmQueries(queryClient, ['crm', 'notes', contactId], ['crm', 'activity', contactId],
+      ['crm', 'contact', contactId], ['crm', 'contacts'], ['crm', 'dashboard'])
   }, onError: (error) => pushNotice(errorMessage(error)) })
   const edit = (note: CrmNoteDto): void => { setEditing(note); setBody(note.body) }
   return <div className="crm-note-section"><form onSubmit={(event) => { event.preventDefault(); if (body.trim()) save.mutate() }}><textarea value={body}
@@ -334,10 +390,12 @@ function ContactTasks({ contactId, onNew, onEdit, onJumpToMessage }: { contactId
   const query = useQuery({ queryKey: ['crm', 'tasks', contactId], queryFn: () => window.warish.crm.tasks.list({ contactId }) })
   const complete = useMutation({ mutationFn: (task: CrmTaskDto) => window.warish.crm.tasks.save({ ...task,
     status: task.status === 'completed' ? 'open' : 'completed' }), onSuccess: () => {
-    void queryClient.invalidateQueries({ queryKey: ['crm', 'tasks', contactId] }); void queryClient.invalidateQueries({ queryKey: ['crm'] })
+    invalidateCrmQueries(queryClient, ['crm', 'tasks'], ['crm', 'activity', contactId],
+      ['crm', 'contact', contactId], ['crm', 'contacts'], ['crm', 'dashboard'])
   }, onError: (error) => pushNotice(errorMessage(error)) })
   const remove = useMutation({ mutationFn: (taskId: string) => window.warish.crm.tasks.delete(taskId), onSuccess: () => {
-    void queryClient.invalidateQueries({ queryKey: ['crm', 'tasks', contactId] }); void queryClient.invalidateQueries({ queryKey: ['crm'] })
+    invalidateCrmQueries(queryClient, ['crm', 'tasks'], ['crm', 'activity', contactId],
+      ['crm', 'contact', contactId], ['crm', 'contacts'], ['crm', 'dashboard'])
   }, onError: (error) => pushNotice(errorMessage(error)) })
   return <div><button className="primary-button contact-tab-action" onClick={onNew}><Plus />New task</button>{query.data?.map((task) => <article className="contact-task" key={task.id}>
     <button className={task.status === 'completed' ? 'checked' : ''} aria-label={task.status === 'completed' ? 'Reopen task' : 'Complete task'}
@@ -370,10 +428,14 @@ function TaskDialog({ initialContactId, contacts, task, onClose }: { initialCont
   const queryClient = useQueryClient()
   const pushNotice = useUiStore((state) => state.pushNotice)
   const save = useMutation({ mutationFn: () => window.warish.crm.tasks.save({ id: task?.id, contactId, title, description,
-    dueAt: due ? new Date(due).getTime() : undefined, priority, status, sourceMessageId: task?.sourceMessageId }), onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ['crm'] }); onClose() },
+    dueAt: due ? new Date(due).getTime() : undefined, priority, status, sourceMessageId: task?.sourceMessageId }), onSuccess: () => {
+    invalidateCrmQueries(queryClient, ['crm', 'tasks'], ['crm', 'activity', contactId], ['crm', 'contact', contactId],
+      ['crm', 'contacts'], ['crm', 'dashboard']); onClose()
+  },
     onError: (error) => pushNotice(errorMessage(error)) })
   const remove = useMutation({ mutationFn: () => window.warish.crm.tasks.delete(task!.id), onSuccess: () => {
-    void queryClient.invalidateQueries({ queryKey: ['crm'] }); onClose()
+    invalidateCrmQueries(queryClient, ['crm', 'tasks'], ['crm', 'activity', contactId], ['crm', 'contact', contactId],
+      ['crm', 'contacts'], ['crm', 'dashboard']); onClose()
   }, onError: (error) => pushNotice(errorMessage(error)) })
   return <CrmDialog title={task ? 'Edit follow-up' : 'New follow-up'} eyebrow="Task" onClose={onClose}><form className="crm-form" onSubmit={(event) => { event.preventDefault(); save.mutate() }}>
     <FormField label="Contact"><select value={contactId} disabled={Boolean(task)} onChange={(event) => setContactId(event.target.value)} required>{contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.name}{contact.phoneNumber ? ` · ${contact.phoneNumber}` : ''}</option>)}</select></FormField>
@@ -402,9 +464,13 @@ function OrderDialog({ initialContactId, contacts, catalog, order, onClose }: { 
   const save = useMutation({ mutationFn: () => window.warish.crm.orders.save({ id: order?.id, contactId, status, currency: 'INR',
     internalNote, items: lines, payments: order && paidAmount === order.paidAmount ? undefined
       : paidAmount > 0 ? [{ amount: paidAmount, paidAt: Date.now(), method: 'manual' }] : [] }),
-    onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ['crm'] }); onClose() }, onError: (error) => pushNotice(errorMessage(error)) })
+    onSuccess: () => {
+      invalidateCrmQueries(queryClient, ['crm', 'orders'], ['crm', 'activity', contactId], ['crm', 'contact', contactId],
+        ['crm', 'contacts'], ['crm', 'dashboard']); onClose()
+    }, onError: (error) => pushNotice(errorMessage(error)) })
   const remove = useMutation({ mutationFn: () => window.warish.crm.orders.delete(order!.id), onSuccess: () => {
-    void queryClient.invalidateQueries({ queryKey: ['crm'] }); onClose()
+    invalidateCrmQueries(queryClient, ['crm', 'orders'], ['crm', 'activity', contactId], ['crm', 'contact', contactId],
+      ['crm', 'contacts'], ['crm', 'dashboard']); onClose()
   }, onError: (error) => pushNotice(errorMessage(error)) })
   const updateLine = (index: number, patch: Partial<OrderLine>): void => setLines((current) => current.map((line, position) => position === index ? { ...line, ...patch } : line))
   const chooseCatalog = (index: number, id: string): void => {
@@ -443,7 +509,7 @@ function CatalogDialog({ item, onClose }: { item?: CrmCatalogItemDto; onClose():
   const queryClient = useQueryClient()
   const pushNotice = useUiStore((state) => state.pushNotice)
   const save = useMutation({ mutationFn: () => window.warish.crm.catalog.save({ id: item?.id, type, name, sku, description,
-    unitPrice, currency: 'INR', active }), onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ['crm'] }); onClose() },
+    unitPrice, currency: 'INR', active }), onSuccess: () => { invalidateCrmQueries(queryClient, ['crm', 'catalog']); onClose() },
     onError: (error) => pushNotice(errorMessage(error)) })
   return <CrmDialog title={item ? 'Edit catalog item' : 'Add catalog item'} eyebrow="Catalog" onClose={onClose}><form className="crm-form" onSubmit={(event) => { event.preventDefault(); save.mutate() }}>
     <div className="form-grid"><FormField label="Type"><select value={type} onChange={(event) => setType(event.target.value as typeof type)}><option value="product">Product</option><option value="service">Service</option></select></FormField>
@@ -454,48 +520,6 @@ function CatalogDialog({ item, onClose }: { item?: CrmCatalogItemDto; onClose():
       <label className="checkbox-field"><input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} />Available for new orders</label></div>
     <footer><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={save.isPending}>{save.isPending ? 'Saving…' : 'Save item'}</button></footer>
   </form></CrmDialog>
-}
-
-function GoogleContactDialog({ contact, onClose }: { contact: CrmContactDetailsDto; onClose(): void }): React.JSX.Element {
-  const statusQuery = useQuery({ queryKey: ['google', 'status'], queryFn: () => window.warish.google.status() })
-  const previewQuery = useQuery({ queryKey: ['google', 'preview', contact.id], queryFn: () => window.warish.google.previewContact(contact.id),
-    enabled: Boolean(statusQuery.data?.connected) })
-  const [draft, setDraft] = useState<GoogleContactDraft>(() => ({ name: contact.name, phoneNumber: contact.phoneNumber ?? '', email: contact.email, company: contact.company }))
-  const [selected, setSelected] = useState<string>()
-  const queryClient = useQueryClient()
-  const pushNotice = useUiStore((state) => state.pushNotice)
-  useEffect(() => { if (previewQuery.data) { setDraft(previewQuery.data.draft); setSelected(previewQuery.data.selectedResourceName) } }, [previewQuery.data])
-  const connect = useMutation({ mutationFn: () => window.warish.google.connect(), onSuccess: (status) => {
-    queryClient.setQueryData(['google', 'status'], status); void previewQuery.refetch()
-  }, onError: (error) => pushNotice(errorMessage(error)) })
-  const save = useMutation({ mutationFn: () => window.warish.google.saveContact(contact.id, draft, selected), onSuccess: (value) => {
-    queryClient.setQueryData(['crm', 'contact', contact.id], value); void queryClient.invalidateQueries({ queryKey: ['crm'] }); pushNotice('Saved to Google Contacts', 'info'); onClose()
-  }, onError: (error) => pushNotice(errorMessage(error)) })
-  return <CrmDialog title="Save to Google Contacts" eyebrow="Google" onClose={onClose}>
-    {!statusQuery.data ? <CrmLoading label="Checking Google connection…" /> : !statusQuery.data.configured ? <div className="google-connect-state"><BookOpen /><h3>Google Contacts needs setup</h3>
-      <p>Add your Google OAuth desktop client ID in Settings, then return here to connect.</p></div>
-      : !statusQuery.data.connected ? <div className="google-connect-state"><BookOpen /><h3>Connect Google Contacts</h3><p>WArish will open Google in your browser. Your refresh token stays encrypted in the local core.</p>
-        <button className="primary-button" disabled={connect.isPending} onClick={() => connect.mutate()}>{connect.isPending ? <LoaderCircle className="spin" /> : <ExternalLink />}{connect.isPending ? 'Waiting for Google…' : 'Connect Google'}</button></div>
-        : previewQuery.isLoading ? <CrmLoading label="Checking for duplicate phone numbers…" /> : <form className="crm-form google-contact-form" onSubmit={(event) => { event.preventDefault(); save.mutate() }}>
-          <div className="google-account-row"><BookOpen /><span><small>Connected account</small><strong>{statusQuery.data.accountEmail ?? 'Google Contacts'}</strong></span></div>
-          {previewQuery.data && <DuplicateMatches preview={previewQuery.data} selected={selected} onSelect={setSelected} />}
-          <div className="form-grid"><FormField label="Name"><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} required /></FormField>
-            <FormField label="Phone"><input value={draft.phoneNumber} onChange={(event) => setDraft({ ...draft, phoneNumber: event.target.value })} required /></FormField>
-            <FormField label="Email"><input type="email" value={draft.email ?? ''} onChange={(event) => setDraft({ ...draft, email: event.target.value })} /></FormField>
-            <FormField label="Company"><input value={draft.company ?? ''} onChange={(event) => setDraft({ ...draft, company: event.target.value })} /></FormField></div>
-          <footer><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={save.isPending || previewQuery.data?.mode === 'choose' && !selected}>{save.isPending ? 'Saving…' : selected && selected !== '__create__' ? 'Update contact' : 'Create contact'}</button></footer>
-        </form>}
-  </CrmDialog>
-}
-
-function DuplicateMatches({ preview, selected, onSelect }: { preview: GoogleContactPreview; selected?: string; onSelect(value: string | undefined): void }): React.JSX.Element | null {
-  if (!preview.matches.length) return <div className="duplicate-status clear"><Check /><span><strong>No duplicate phone number found</strong><small>A new Google contact will be created.</small></span></div>
-  return <div className="duplicate-matches"><header><Tags /><span><strong>{preview.matches.length === 1 ? 'Matching Google contact found' : 'Choose the correct Google contact'}</strong>
-    <small>{preview.matches.length === 1 ? 'Saving will update this record instead of creating a duplicate.' : 'Multiple contacts use this phone number.'}</small></span></header>
-    {preview.matches.map((match) => <label key={match.resourceName}><input type="radio" name="google-match" checked={selected === match.resourceName}
-      onChange={() => onSelect(match.resourceName)} /><span><strong>{match.name}</strong><small>{match.phoneNumbers.join(' · ')}{match.email ? ` · ${match.email}` : ''}</small></span></label>)}
-    {preview.mode === 'choose' && <label><input type="radio" name="google-match" checked={selected === '__create__'} onChange={() => onSelect('__create__')} /><span><strong>Create a new contact anyway</strong><small>Keep it separate from the matches above.</small></span></label>}
-  </div>
 }
 
 function CrmDialog({ title, eyebrow, wide, onClose, children }: { title: string; eyebrow: string; wide?: boolean; onClose(): void; children: ReactNode }): React.JSX.Element {
@@ -542,6 +566,9 @@ function relativeDate(value: number): string {
 }
 function formatDateTime(value: number): string { return new Date(value).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) }
 function isOverdue(task: CrmTaskDto): boolean { return task.status === 'open' && Boolean(task.dueAt && task.dueAt < Date.now()) }
+function invalidateCrmQueries(queryClient: QueryClient, ...queryKeys: QueryKey[]): void {
+  void Promise.all(queryKeys.map((queryKey) => queryClient.invalidateQueries({ queryKey })))
+}
 function toLocalInput(value: number): string {
   const date = new Date(value - new Date(value).getTimezoneOffset() * 60_000)
   return date.toISOString().slice(0, 16)

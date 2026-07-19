@@ -1,11 +1,11 @@
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { format, isSameDay, isToday, isYesterday } from 'date-fns'
 import {
-  Archive, ArchiveRestore, ArrowDown, ArrowUp, Check, CheckCheck, ChevronDown, ChevronRight,
+  Archive, ArchiveRestore, ArrowDown, ArrowUp, BadgeIndianRupee, BriefcaseBusiness, Check, CheckCheck, ChevronDown, ChevronRight,
   CalendarClock, CircleAlert, Link2, ListTodo, LoaderCircle, Menu, MessageCircle, Mic, NotebookPen, Paperclip,
-  Pin, PinOff, Radio, RefreshCw, Search, Send, Settings, Smile, Square, WifiOff, X
+  Pin, PinOff, Radio, RefreshCw, Search, Send, Settings, ShoppingBag, Smile, Square, WifiOff, X
 } from 'lucide-react'
 import type { AppSettings, ChatCategory, ChatSummary, CommunitySummary, CrmChatIndicatorDto, CrmContactDetailsDto, CrmTaskDto, DraftDto, MessageDto, Page, PickedAttachment, SessionState } from '../../../shared/contracts'
 import { useUiStore } from '../store'
@@ -15,6 +15,7 @@ import { messageGroupPositions } from '../message-grouping'
 import { Avatar } from './Avatar'
 import { MessageBubble } from './MessageBubble'
 import { NavigationRail, type SidebarDestination } from './NavigationRail'
+import { SalesLifecyclePath } from './SalesLifecyclePath'
 
 const ContactDrawer = lazy(async () => {
   const module = await import('./ContactDrawer')
@@ -49,10 +50,12 @@ function ConversationShell({ session }: { session: SessionState }): React.JSX.El
   const showArchived = destination === 'archived'
   const category: ChatCategory = showArchived || destination === 'crm' ? 'all' : destination
   const chatListRef = useRef<HTMLDivElement>(null)
+  const hydratedContactIdsRef = useRef<Set<string>>(new Set())
   const queryClient = useQueryClient()
   const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: () => window.warish.settings.get() })
   const showChatPreviews = settingsQuery.data?.showChatPreviews ?? true
   const enterToSend = settingsQuery.data?.enterToSend ?? true
+  const density = settingsQuery.data?.density ?? 'dense'
   const reconnectMutation = useMutation({
     mutationFn: () => window.warish.session.reconnect(),
     onSuccess: (state) => queryClient.setQueryData(['session'], state),
@@ -116,7 +119,17 @@ function ConversationShell({ session }: { session: SessionState }): React.JSX.El
     estimateSize: (index) => {
       const item = sidebarItems[index]
       const crmExtra = item?.type === 'chat' && item.chat.crm ? 18 : 0
-      if (document.documentElement.dataset.density === 'compact') {
+      if (density === 'ultra-dense') {
+        if (item?.type === 'community') return 50
+        const hasMetadata = item?.type === 'chat' && (contactIdentityPresentation(item.chat).hasSecondary || Boolean(item.chat.crm))
+        return showChatPreviews ? (hasMetadata ? 56 : 48) : (hasMetadata ? 50 : 44)
+      }
+      if (density === 'dense') {
+        if (item?.type === 'community') return 58
+        const hasMetadata = item?.type === 'chat' && (contactIdentityPresentation(item.chat).hasSecondary || Boolean(item.chat.crm))
+        return showChatPreviews ? (hasMetadata ? 66 : 56) : (hasMetadata ? 56 : 50)
+      }
+      if (density === 'compact') {
         const hasIdentity = item?.type === 'chat' ? contactIdentityPresentation(item.chat).hasSecondary : false
         if (item?.type === 'community') return 68
         return (showChatPreviews ? (hasIdentity ? 76 : 64) : (hasIdentity ? 64 : 58)) + crmExtra
@@ -131,10 +144,10 @@ function ConversationShell({ session }: { session: SessionState }): React.JSX.El
       return item?.type === 'community' ? `community:${item.community.id}`
         : item?.type === 'chat' ? `chat:${item.chat.id}` : 'chat-loader'
     },
-    overscan: 8
+    overscan: 6
   })
   const virtualSidebarItems = sidebarVirtualizer.getVirtualItems()
-  useEffect(() => sidebarVirtualizer.measure(), [showChatPreviews, sidebarVirtualizer])
+  useEffect(() => sidebarVirtualizer.measure(), [density, showChatPreviews, sidebarVirtualizer])
   const lastVirtualItemIndex = virtualSidebarItems.at(-1)?.index
   useEffect(() => {
     if (lastVirtualItemIndex === undefined || lastVirtualItemIndex < sidebarItems.length - 5 || !listHasNextPage || listIsFetchingNextPage) return
@@ -154,15 +167,20 @@ function ConversationShell({ session }: { session: SessionState }): React.JSX.El
   const hydrationKey = `${session.phase}:${[...visibleContactIds, selectedChatId ?? ''].join('|')}`
   useEffect(() => {
     const ids = [...new Set([...visibleContactIds, ...(selectedChatId ? [selectedChatId] : [])])]
+      .filter((id) => !hydratedContactIdsRef.current.has(id))
     if (!ids.length) return
+    for (const id of ids) hydratedContactIdsRef.current.add(id)
     const timer = window.setTimeout(() => {
-      void window.warish.contacts.hydrate(ids).catch(() => undefined)
+      void window.warish.contacts.hydrate(ids).catch(() => {
+        for (const id of ids) hydratedContactIdsRef.current.delete(id)
+      })
     }, 80)
     return () => window.clearTimeout(timer)
   // The stable key prevents a new request when the virtualizer returns equivalent item objects.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrationKey])
-  const markRead = (chatId: string): void => {
+  useEffect(() => { hydratedContactIdsRef.current.clear() }, [session.accountState])
+  const markRead = useCallback((chatId: string): void => {
     void window.warish.chats.markRead(chatId).catch((error) => pushNotice(errorMessage(error)))
     queryClient.setQueryData<ChatSummary>(['chat', chatId], (current) => current ? { ...current, unreadCount: 0 } : current)
     queryClient.setQueriesData<InfiniteData<Page<ChatSummary>, string | undefined>>({ queryKey: ['chats'] }, (current) => current ? ({
@@ -176,18 +194,48 @@ function ConversationShell({ session }: { session: SessionState }): React.JSX.El
           children: community.children.map((child) => child.id === chatId ? { ...child, unreadCount: 0 } : child) } : community
       }) }))
     }) : current)
-  }
-  const changeDestination = (next: SidebarDestination): void => {
+  }, [pushNotice, queryClient])
+  const selectChatRow = useCallback((chatId: string): void => {
+    selectChat(chatId)
+    markRead(chatId)
+  }, [markRead, selectChat])
+  const changeDestination = useCallback((next: SidebarDestination): void => {
     navigate(next)
     setSidebarMenuOpen(false)
     setChatQuery('')
-  }
-  const toggleCommunity = (communityId: string): void => setExpandedCommunities((current) => {
+  }, [navigate])
+  const toggleCommunity = useCallback((communityId: string): void => setExpandedCommunities((current) => {
     const next = new Set(current)
     if (next.has(communityId)) next.delete(communityId)
     else next.add(communityId)
     return next
-  })
+  }), [])
+  const prefetchChat = useCallback((chat: ChatSummary): void => {
+    const requests: Array<Promise<unknown>> = [
+      queryClient.prefetchQuery({ queryKey: ['chat', chat.id], queryFn: () => window.warish.chats.get(chat.id), staleTime: 15_000 }),
+      queryClient.prefetchInfiniteQuery({
+        queryKey: ['messages', chat.id],
+        queryFn: ({ pageParam }) => window.warish.messages.list(chat.id, pageParam, 80),
+        initialPageParam: undefined as string | undefined,
+        getNextPageParam: (page) => page.nextCursor,
+        staleTime: 15_000,
+        pages: 1
+      })
+    ]
+    if (chat.kind === 'direct') {
+      requests.push(queryClient.prefetchQuery({
+        queryKey: ['contact', chat.id], queryFn: () => window.warish.contacts.get(chat.id), staleTime: 15_000
+      }))
+      if (chat.crm?.contactId) requests.push(queryClient.prefetchQuery({
+        queryKey: ['crm', 'contact', chat.crm.contactId],
+        queryFn: () => window.warish.crm.contacts.get({ contactId: chat.crm!.contactId }),
+        staleTime: 30_000
+      }))
+      void import('./ContactDrawer')
+    }
+    void Promise.all(requests)
+  }, [queryClient])
+  const clearSelectedChat = useCallback((): void => selectChat(), [selectChat])
   useEffect(() => {
     if (chatListRef.current) chatListRef.current.scrollTop = 0
   }, [destination])
@@ -222,22 +270,24 @@ function ConversationShell({ session }: { session: SessionState }): React.JSX.El
                 className="virtual-chat-row" style={{ transform: `translateY(${virtualItem.start}px)` }}>
                 {item?.type === 'community' ? <CommunityParentRow community={item.community}
                   expanded={Boolean(debouncedChatQuery.trim()) || expandedCommunities.has(item.community.id)}
-                  onToggle={() => toggleCommunity(item.community.id)} />
+                  onToggle={toggleCommunity} />
                   : item?.type === 'chat' ? <ChatRow chat={item.chat} nested={item.nested}
-                    active={item.chat.id === selectedChatId} showPreview={showChatPreviews} onClick={() => { selectChat(item.chat.id); markRead(item.chat.id) }} />
+                    active={item.chat.id === selectedChatId} showPreview={showChatPreviews} onSelect={selectChatRow}
+                    onPrefetch={prefetchChat} />
                     : <LoadingRow label={destination === 'community' ? 'Loading more communities…' : 'Loading more conversations…'} />}
               </div>
             })}
           </div>}
         </div>
       </aside>
-      <main className="conversation-panel">
+      <main className={`conversation-panel ${selectedChat?.kind === 'direct' ? 'has-sales-lifecycle has-persistent-details' : ''}`}>
         {session.phase !== 'connected' && <SessionBanner session={session} retryPending={reconnectMutation.isPending}
           onRetry={() => reconnectMutation.mutate()} onRelink={() => setRelinkOpen(true)} onSettings={() => setSettingsOpen(true)} />}
         {session.phase === 'connected' && session.historySync?.state === 'running' &&
           <div className="connection-banner history-sync-banner"><LoaderCircle className="spin" />Syncing recent history — {Math.round(session.historySync.progress)}%</div>}
         {selectedChatQuery.isError ? <QueryError label="Could not open this conversation" onRetry={() => void selectedChatQuery.refetch()} />
-          : selectedChat ? <Conversation key={selectedChat.id} chat={selectedChat} session={session} enterToSend={enterToSend} onForward={setForwardMessage} onChatHidden={() => selectChat()} /> : <WelcomePanel />}
+          : selectedChat ? <Conversation key={selectedChat.id} chat={selectedChat} session={session} enterToSend={enterToSend}
+            onForward={setForwardMessage} onChatHidden={clearSelectedChat} /> : <WelcomePanel />}
       </main>
       {forwardMessage && <ForwardDialog message={forwardMessage} onClose={() => setForwardMessage(undefined)} />}
       {relinkOpen && <RelinkDialog session={session} onClose={() => setRelinkOpen(false)} />}
@@ -304,28 +354,34 @@ function EmptyChatList({ destination }: { destination: SidebarDestination }): Re
     <span>{archived ? 'Archived conversations will appear here.' : 'Items will appear as WhatsApp history and metadata arrive.'}</span></div>
 }
 
-function CommunityParentRow({ community, expanded, onToggle }: {
+const CommunityParentRow = memo(function CommunityParentRow({ community, expanded, onToggle }: {
   community: CommunitySummary
   expanded: boolean
-  onToggle(): void
+  onToggle(communityId: string): void
 }): React.JSX.Element {
-  return <button className="community-parent" aria-expanded={expanded} onClick={onToggle}>
+  return <button className="community-parent" aria-expanded={expanded} onClick={() => onToggle(community.id)}>
       {expanded ? <ChevronDown /> : <ChevronRight />}
       <Avatar title={community.title} src={community.avatarUrl} />
       <span className="community-copy"><span><strong>{community.title}</strong>{community.lastMessageAt && <time>{chatTime(community.lastMessageAt)}</time>}</span>
         <span>{community.children.length} {community.children.length === 1 ? 'group' : 'groups'}{community.unreadCount > 0 && <b>{community.unreadCount > 99 ? '99+' : community.unreadCount}</b>}</span></span>
     </button>
-}
+})
 
-function ChatRow({ chat, active, showPreview, nested = false, onClick }: { chat: ChatSummary; active: boolean; showPreview: boolean; nested?: boolean; onClick(): void }): React.JSX.Element {
+const ChatRow = memo(function ChatRow({ chat, active, showPreview, nested = false, onSelect, onPrefetch }: {
+  chat: ChatSummary; active: boolean; showPreview: boolean; nested?: boolean
+  onSelect(chatId: string): void; onPrefetch(chat: ChatSummary): void
+}): React.JSX.Element {
   const identity = contactIdentityPresentation(chat)
-  return <button className={`chat-row ${chat.kind === 'direct' ? 'direct' : ''} ${identity.hasSecondary ? 'has-identity' : ''} ${chat.crm ? 'has-crm' : ''} ${nested ? 'nested' : ''} ${active ? 'active' : ''}`} onClick={onClick}>
+  return <button className={`chat-row ${chat.kind === 'direct' ? 'direct' : ''} ${identity.hasSecondary ? 'has-identity' : ''} ${chat.crm ? 'has-crm' : ''} ${nested ? 'nested' : ''} ${active ? 'active' : ''}`}
+    onMouseEnter={() => onPrefetch(chat)} onFocus={() => onPrefetch(chat)} onClick={() => onSelect(chat.id)}>
     <Avatar title={identity.primary} src={chat.avatarUrl} /><span className="chat-row-copy"><span className="chat-row-top"><strong title={identity.primary}>{identity.primary}</strong>{chat.lastMessageAt && <time>{chatTime(chat.lastMessageAt)}</time>}{!showPreview && chat.unreadCount > 0 && <b>{chat.unreadCount > 99 ? '99+' : chat.unreadCount}</b>}</span>
-      {identity.hasSecondary && <ContactIdentityDetails identity={identity} />}
-      {chat.crm && <ChatCrmSignal crm={chat.crm} />}
+      {(identity.hasSecondary || chat.crm) && <span className="chat-row-metadata">
+        {identity.hasSecondary && <ContactIdentityDetails identity={identity} />}
+        {chat.crm && <ChatCrmSignal crm={chat.crm} />}
+      </span>}
       {showPreview && <span className="chat-row-bottom"><span>{chat.typing ? 'typing…' : chat.lastMessage ?? 'No messages yet'}</span>{chat.unreadCount > 0 && <b>{chat.unreadCount > 99 ? '99+' : chat.unreadCount}</b>}</span>}</span>
   </button>
-}
+})
 
 function ChatCrmSignal({ crm }: { crm: CrmChatIndicatorDto }): React.JSX.Element {
   return <span className="chat-crm-signal"><span style={{ '--stage-color': crm.stageColor } as React.CSSProperties}><i />{crm.stageName}</span>
@@ -336,6 +392,48 @@ function ContactIdentityDetails({ identity, header = false }: { identity: Contac
   return <span className={`${header ? 'conversation-contact-identity' : 'chat-row-identity'} contact-identity-details`}>
     {identity.profileName && <span className="whatsapp-profile-pill" title={identity.profileName}>{identity.profileName}</span>}
   </span>
+}
+
+const CustomerSummaryStrip = memo(function CustomerSummaryStrip({ chat, onOpenDetails }: { chat: ChatSummary; onOpenDetails(): void }): React.JSX.Element {
+  const queryClient = useQueryClient()
+  const pushNotice = useUiStore((state) => state.pushNotice)
+  const contactQuery = useQuery({
+    queryKey: ['crm', 'contact', chat.crm?.contactId],
+    queryFn: () => window.warish.crm.contacts.get({ contactId: chat.crm!.contactId }),
+    enabled: Boolean(chat.crm?.contactId),
+    staleTime: 30_000
+  })
+  const ensure = useMutation({
+    mutationFn: () => window.warish.crm.contacts.ensure(chat.id),
+    onSuccess: async (contact) => {
+      queryClient.setQueryData(['crm', 'contact', contact.id], contact)
+      queryClient.setQueryData(['crm', 'contact', 'chat', chat.id], contact)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['chat', chat.id] }),
+        queryClient.invalidateQueries({ queryKey: ['chats'] })
+      ])
+    },
+    onError: (error) => pushNotice(errorMessage(error))
+  })
+  if (!chat.crm) return <div className="customer-summary customer-summary-untracked">
+    <button disabled={ensure.isPending} onClick={() => ensure.mutate()}><BriefcaseBusiness /><span><strong>Not tracked in CRM</strong>
+      <small>{ensure.isPending ? 'Adding customer…' : 'Add customer'}</small></span></button>
+  </div>
+  const contact = contactQuery.data
+  const nextTask = chat.crm.nextTask
+  return <div className="customer-summary" role="group" aria-label="Customer CRM summary">
+    <span className="customer-summary-item"><ShoppingBag /><span><strong>{contact?.orderCount ?? '—'}</strong><small>Orders</small></span></span>
+    <span className="customer-summary-item customer-summary-value"><BadgeIndianRupee /><span><strong>{contact ? formatHeaderMoney(contact.lifetimeValue) : '—'}</strong><small>Lifetime value</small></span></span>
+    <span className="customer-summary-item"><ListTodo /><span><strong>{contact?.openTaskCount ?? chat.crm.openTaskCount}</strong><small>Open tasks</small></span></span>
+    <span className="customer-summary-item customer-summary-next"><CalendarClock /><span><strong>{nextTask?.title ?? 'No follow-up'}</strong>
+      <small>{nextTask?.dueAt ? compactTaskDate(nextTask.dueAt) : 'Next task'}</small></span></span>
+    <button className="customer-summary-compact" aria-label="Open customer CRM summary" onClick={onOpenDetails}><BriefcaseBusiness />
+      <span>CRM</span><b>{contact?.openTaskCount ?? chat.crm.openTaskCount}</b></button>
+  </div>
+})
+
+function formatHeaderMoney(value: number): string {
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(value)
 }
 
 function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
@@ -359,6 +457,7 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
   const [searchOpen, setSearchOpen] = useState(false)
   const [messageSearch, setMessageSearch] = useState('')
   const [focusedMessageId, setFocusedMessageId] = useState<string>()
+  const [enteringMessageIds, setEnteringMessageIds] = useState<Set<string>>(() => new Set())
   const [replyTo, setReplyTo] = useState<MessageDto>()
   const [crmCapture, setCrmCapture] = useState<{ kind: 'note' | 'task'; message: MessageDto }>()
   const [attachment, setAttachment] = useState<PickedAttachment>()
@@ -375,6 +474,7 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
   const scrollFrameRef = useRef<number | undefined>(undefined)
   const scrollStateFrameRef = useRef<number | undefined>(undefined)
   const rowResizeFrameRef = useRef<number | undefined>(undefined)
+  const messageEnterTimersRef = useRef<Map<string, number>>(new Map())
   const activeRef = useRef(true)
   const draftReadyRef = useRef(false)
   const pushNotice = useUiStore((state) => state.pushNotice)
@@ -439,7 +539,7 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
     estimateSize: (index) => index === 0 ? 52 : timeline[index - 1]?.type === 'date' ? 38 : 76,
     getItemKey: (index) => index === 0 ? `history-controls:${chat.id}` : timeline[index - 1]?.key ?? `message:${index}`,
     useAnimationFrameWithResizeObserver: true,
-    overscan: 12
+    overscan: 8
   })
   const virtualMessageHeight = virtualizer.getTotalSize()
   const virtualMessageOffset = Math.max(0, messageViewportHeight - virtualMessageHeight)
@@ -454,12 +554,9 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
     const timelineItem = item ? timeline[item.index - 1] : undefined
     const message = timelineItem?.type === 'message' ? timelineItem.message : undefined
     if (item && message) {
-      const row = element.querySelector<HTMLElement>(`[data-index="${item.index}"]`)
       anchorRef.current = {
         id: message.id,
-        viewportOffset: row
-          ? row.getBoundingClientRect().top - element.getBoundingClientRect().top
-          : item.start + virtualMessageOffset - element.scrollTop
+        viewportOffset: item.start + virtualMessageOffset - element.scrollTop
       }
     }
   }, [timeline, virtualMessageOffset, virtualizer])
@@ -576,6 +673,9 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
     setSearchOpen(false)
     setMessageSearch('')
     setFocusedMessageId(undefined)
+    setEnteringMessageIds(new Set())
+    for (const timer of messageEnterTimersRef.current.values()) window.clearTimeout(timer)
+    messageEnterTimersRef.current.clear()
     setCrmCapture(undefined)
     if (recorder.current?.state === 'recording') {
       recorder.current.ondataavailable = null
@@ -651,6 +751,24 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
     const newerCount = previousNewest
       ? added.filter((message) => compareMessages(message, previousNewest) > 0).length
       : added.length
+    const entering = previousNewest ? added.filter((message) => compareMessages(message, previousNewest) > 0) : []
+    if (entering.length) {
+      setEnteringMessageIds((current) => new Set([...current, ...entering.map((message) => message.id)]))
+      for (const message of entering) {
+        const existingTimer = messageEnterTimersRef.current.get(message.id)
+        if (existingTimer !== undefined) window.clearTimeout(existingTimer)
+        const timer = window.setTimeout(() => {
+          messageEnterTimersRef.current.delete(message.id)
+          setEnteringMessageIds((current) => {
+            if (!current.has(message.id)) return current
+            const next = new Set(current)
+            next.delete(message.id)
+            return next
+          })
+        }, 260)
+        messageEnterTimersRef.current.set(message.id, timer)
+      }
+    }
     const shouldFollow = nearBottomRef.current || pendingOwnSendRef.current
 
     if (added.length && shouldFollow) {
@@ -666,12 +784,15 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
 
   useEffect(() => {
     activeRef.current = true
+    const messageEnterTimers = messageEnterTimersRef.current
     return () => {
       activeRef.current = false
       if (scrollFrameRef.current !== undefined) cancelAnimationFrame(scrollFrameRef.current)
       if (rowResizeFrameRef.current !== undefined) cancelAnimationFrame(rowResizeFrameRef.current)
       if (focusTimerRef.current !== undefined) window.clearTimeout(focusTimerRef.current)
       if (recordingTimer.current !== undefined) window.clearInterval(recordingTimer.current)
+      for (const timer of messageEnterTimers.values()) window.clearTimeout(timer)
+      messageEnterTimers.clear()
       if (recorder.current?.state === 'recording') {
         recorder.current.ondataavailable = null
         recorder.current.onstop = null
@@ -751,7 +872,7 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
       pushNotice(errorMessage(error))
     }
   }
-  const revealMessage = async (messageId: string): Promise<void> => {
+  const revealMessage = useCallback(async (messageId: string): Promise<void> => {
     try {
       if (!messages.some((message) => message.id === messageId)) {
         const context = await window.warish.messages.context(chat.id, messageId, 20)
@@ -761,11 +882,11 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
       if (focusTimerRef.current !== undefined) window.clearTimeout(focusTimerRef.current)
       focusTimerRef.current = window.setTimeout(() => setFocusedMessageId((current) => current === messageId ? undefined : current), 2_500)
     } catch (error) { pushNotice(errorMessage(error)) }
-  }
-  const selectSearchResult = (message: MessageDto): void => {
+  }, [chat.id, messages, pushNotice])
+  const selectSearchResult = useCallback((message: MessageDto): void => {
     void revealMessage(message.id)
     setSearchOpen(false)
-  }
+  }, [revealMessage])
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent): void => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
@@ -784,13 +905,36 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
   }, [])
 
   const conversationIdentity = contactIdentityPresentation(chat)
+  const openContactDetails = useCallback((): void => {
+    setSearchOpen(false)
+    setConversationMenuOpen(false)
+    setContactDrawerOpen(true)
+  }, [])
+  const closeContactDetails = useCallback((): void => {
+    setContactDrawerOpen(false)
+    requestAnimationFrame(() => composerRef.current?.focus())
+  }, [])
+  const handleContactArchived = useCallback((): void => {
+    setContactDrawerOpen(false)
+    onChatHidden()
+  }, [onChatHidden])
+  const handleJumpToMessage = useCallback((messageId: string): void => {
+    setContactDrawerOpen(false)
+    void revealMessage(messageId)
+  }, [revealMessage])
+  const handleAddNote = useCallback((source: MessageDto): void => setCrmCapture({ kind: 'note', message: source }), [])
+  const handleAddTask = useCallback((source: MessageDto): void => setCrmCapture({ kind: 'task', message: source }), [])
+  const handleOpenQuote = useCallback((messageId: string): void => { void revealMessage(messageId) }, [revealMessage])
+  const handleRetryMessage = useCallback((messageId: string): void => {
+    void window.warish.messages.retry(messageId).catch((error) => pushNotice(errorMessage(error)))
+  }, [pushNotice])
+  const handleMessageError = useCallback((error: unknown): void => pushNotice(errorMessage(error)), [pushNotice])
   return <>
-    <header className="conversation-header"><button className="conversation-identity" title={chat.kind === 'direct' ? 'Open customer details' : 'Open conversation info'} onClick={() => { setSearchOpen(false); setConversationMenuOpen(false); setContactDrawerOpen(true) }}><Avatar title={conversationIdentity.primary} src={chat.avatarUrl} /><span title={chat.description}><strong>{conversationIdentity.primary}</strong>{chat.kind === 'direct'
+    <header className={`conversation-header ${conversationMenuOpen ? 'menu-open' : ''}`}><button className="conversation-identity" title={chat.kind === 'direct' ? 'Open customer details' : 'Open conversation info'} onClick={openContactDetails}><Avatar title={conversationIdentity.primary} src={chat.avatarUrl} /><span title={chat.description}><strong>{conversationIdentity.primary}</strong>{chat.kind === 'direct'
       ? <span className="conversation-crm-line">{chat.crm?.name && chat.crm.name !== conversationIdentity.primary && <span className="conversation-crm-alias">CRM: {chat.crm.name}</span>}
-        {conversationIdentity.profileName && <span className="whatsapp-profile-pill">{conversationIdentity.profileName}</span>}
-        {chat.crm && <><span className="conversation-stage" style={{ '--stage-color': chat.crm.stageColor } as React.CSSProperties}><i />{chat.crm.stageName}</span>
-          {chat.crm.nextTask && <span className="conversation-next-task"><CalendarClock />{chat.crm.nextTask.title}</span>}</>}</span>
+        {conversationIdentity.profileName && <span className="whatsapp-profile-pill">{conversationIdentity.profileName}</span>}</span>
       : <span>{chatSubtitle(chat)}</span>}</span></button>
+      {chat.kind === 'direct' && <CustomerSummaryStrip chat={chat} onOpenDetails={openContactDetails} />}
       <button className={`icon-button ${searchOpen ? 'active' : ''}`} title="Search this conversation" aria-label="Search this conversation" aria-expanded={searchOpen} onClick={() => { setConversationMenuOpen(false); setContactDrawerOpen(false); setSearchOpen((open) => !open) }}><Search /></button>
       <button className="icon-button" title="Conversation menu" aria-label="Conversation menu" aria-haspopup="menu" aria-expanded={conversationMenuOpen} onClick={() => { setSearchOpen(false); setContactDrawerOpen(false); setConversationMenuOpen((open) => !open) }}><Menu /></button>
       {conversationMenuOpen && <><button className="menu-dismiss" aria-label="Close menu" onClick={() => setConversationMenuOpen(false)} /><div className="header-menu conversation-header-menu" role="menu">
@@ -799,6 +943,7 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
         <button role="menuitem" disabled={chatAction.isPending} onClick={() => chatAction.mutate({ patch: { archived: !chat.archived }, hide: true })}>{chat.archived ? <ArchiveRestore /> : <Archive />}{chat.archived ? 'Unarchive chat' : 'Archive chat'}</button>
       </div></>}
     </header>
+    {chat.kind === 'direct' && <SalesLifecyclePath chat={chat} />}
     <div className="message-scroller" ref={parentRef}>
       {messageQuery.isError && <QueryError label="Could not load messages" onRetry={() => void messageQuery.refetch()} />}
       <div className="virtual-message-list" style={{ height: Math.max(virtualMessageHeight, messageViewportHeight) }}>
@@ -816,13 +961,12 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
           const message = timelineItem.message
           const groupPosition = groupPositionById.get(message.id) ?? 'single'
           return <div key={String(item.key)} ref={virtualizer.measureElement} data-index={item.index} data-message-id={message.id}
-            className={`virtual-message message-item group-${groupPosition} ${message.id === focusedMessageId ? 'search-target' : ''}`} style={{ transform: `translateY(${item.start + virtualMessageOffset}px)` }}>
+            className={`virtual-message message-item group-${groupPosition} ${message.id === focusedMessageId ? 'search-target' : ''} ${enteringMessageIds.has(message.id) ? 'message-enter' : ''}`} style={{ transform: `translateY(${item.start + virtualMessageOffset}px)` }}>
             <MessageBubble message={message} groupPosition={groupPosition} readOnly={chat.readOnly} showSender={showSenderById.get(message.id) ?? false} onReply={setReplyTo} onForward={onForward}
-              onAddNote={chat.kind === 'direct' ? (source) => setCrmCapture({ kind: 'note', message: source }) : undefined}
-              onAddTask={chat.kind === 'direct' ? (source) => setCrmCapture({ kind: 'task', message: source }) : undefined}
-              onOpenQuote={(messageId) => void revealMessage(messageId)} onResize={handleRowResize}
-              onRetry={(messageId) => void window.warish.messages.retry(messageId).catch((error) => pushNotice(errorMessage(error)))}
-              onError={(error) => pushNotice(errorMessage(error))} />
+              onAddNote={chat.kind === 'direct' ? handleAddNote : undefined}
+              onAddTask={chat.kind === 'direct' ? handleAddTask : undefined}
+              onOpenQuote={handleOpenQuote} onResize={handleRowResize}
+              onRetry={handleRetryMessage} onError={handleMessageError} />
           </div>
         })}
       </div>
@@ -842,10 +986,9 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
         {messageSearchQuery.isFetchingNextPage && <LoadingRow label="Loading more matches…" />}
       </div>
     </aside>}
-    {contactDrawerOpen && <Suspense fallback={<aside className="contact-drawer"><LoadingRow label="Loading customer details…" /></aside>}><ContactDrawer chat={chat} onClose={() => setContactDrawerOpen(false)} onArchived={() => {
-      setContactDrawerOpen(false)
-      onChatHidden()
-    }} onJumpToMessage={(messageId) => { setContactDrawerOpen(false); void revealMessage(messageId) }} /></Suspense>}
+    {(chat.kind === 'direct' || contactDrawerOpen) && <Suspense fallback={<aside className={`${chat.kind === 'direct' ? 'crm-contact-panel in-conversation persistent-contact-panel' : 'contact-drawer'} ${contactDrawerOpen ? 'details-overlay-open' : ''}`}><LoadingRow label="Loading customer details…" /></aside>}><ContactDrawer chat={chat}
+      persistent={chat.kind === 'direct'} overlayOpen={contactDrawerOpen} onClose={closeContactDetails}
+      onArchived={handleContactArchived} onJumpToMessage={handleJumpToMessage} /></Suspense>}
     {crmCapture && <CrmCaptureDialog chat={chat} capture={crmCapture} onClose={() => setCrmCapture(undefined)} />}
     {newMessageCount > 0 && <button className="new-messages-button" onClick={() => scrollToNewest()}><ArrowDown />{newMessageCount} new {newMessageCount === 1 ? 'message' : 'messages'}</button>}
     {!chat.readOnly && (replyTo || attachment) && <div className="composer-context">
@@ -896,8 +1039,17 @@ function CrmCaptureDialog({ chat, capture, onClose }: {
     if (capture.kind === 'note') return window.warish.crm.notes.save({ contactId, body, sourceMessageId: capture.message.id })
     return window.warish.crm.tasks.save({ contactId, title, description, dueAt: due ? new Date(due).getTime() : undefined,
       priority, sourceMessageId: capture.message.id })
-  }, onSuccess: () => {
-    void queryClient.invalidateQueries({ queryKey: ['crm'] })
+  }, onSuccess: (result) => {
+    const crmRefreshes = [
+      queryClient.invalidateQueries({ queryKey: ['crm', 'contact', result.contactId] }),
+      queryClient.invalidateQueries({ queryKey: ['crm', 'activity', result.contactId] }),
+      queryClient.invalidateQueries({ queryKey: ['crm', 'contacts'] }),
+      queryClient.invalidateQueries({ queryKey: ['crm', 'dashboard'] })
+    ]
+    crmRefreshes.push(queryClient.invalidateQueries({
+      queryKey: capture.kind === 'note' ? ['crm', 'notes', result.contactId] : ['crm', 'tasks']
+    }))
+    void Promise.all(crmRefreshes)
     void queryClient.invalidateQueries({ queryKey: ['chats'] })
     pushNotice(capture.kind === 'note' ? 'Message added to CRM notes' : 'Follow-up task created', 'info')
     onClose()

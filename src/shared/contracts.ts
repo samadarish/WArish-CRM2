@@ -9,9 +9,11 @@ export const RPC_METHODS = [
   'session.logout',
   'chat.list',
   'chat.get',
+  'chat.getMany',
   'chat.update',
   'chat.markRead',
   'contacts.get',
+  'contacts.save',
   'contacts.hydrate',
   'contacts.refresh',
   'contacts.getSyncState',
@@ -53,13 +55,6 @@ export const RPC_METHODS = [
   'crm.orders.save',
   'crm.orders.delete',
   'crm.activity.list',
-  'google.status',
-  'google.configure',
-  'google.beginAuth',
-  'google.completeAuth',
-  'google.disconnect',
-  'google.contact.preview',
-  'google.contact.save',
   'search.messages',
   'draft.get',
   'draft.save',
@@ -110,7 +105,6 @@ export interface CoreEventPayloadMap {
   'navigation.openCrm': { contactId: string }
   'crm.changed': { contactId?: string; chatId?: string; scope: 'contact' | 'pipeline' | 'order' | 'task' | 'catalog' | 'all' }
   'crm.taskDue': { taskId: string; contactId: string; title: string; dueAt: number }
-  'google.statusChanged': GoogleConnectionStatus
 }
 
 export type CoreEventType = keyof CoreEventPayloadMap
@@ -374,7 +368,6 @@ export interface CrmContactSummaryDto {
   orderCount: number
   lifetimeValue: number
   openTaskCount: number
-  googleLinked: boolean
 }
 
 export interface CrmContactDetailsDto extends CrmContactSummaryDto {
@@ -524,32 +517,10 @@ export interface CrmOrderDto {
 export interface CrmActivityDto {
   id: string
   contactId: string
-  type: 'lead-created' | 'stage-changed' | 'lifecycle-changed' | 'note-added' | 'note-updated' | 'task-created' | 'task-updated' | 'task-completed' | 'order-created' | 'order-updated' | 'google-saved'
+  type: 'lead-created' | 'stage-changed' | 'lifecycle-changed' | 'note-added' | 'note-updated' | 'task-created' | 'task-updated' | 'task-completed' | 'order-created' | 'order-updated'
   summary: string
   metadata?: Record<string, unknown>
   createdAt: number
-}
-
-export interface GoogleConnectionStatus {
-  configured: boolean
-  connected: boolean
-  accountEmail?: string
-  connectedAt?: number
-  message?: string
-}
-
-export interface GoogleContactDraft {
-  name: string
-  phoneNumber: string
-  email?: string
-  company?: string
-}
-
-export interface GoogleContactPreview {
-  mode: 'create' | 'update' | 'choose'
-  draft: GoogleContactDraft
-  matches: Array<{ resourceName: string; name: string; phoneNumbers: string[]; email?: string }>
-  selectedResourceName?: string
 }
 
 export interface CrmContactPatch {
@@ -582,8 +553,8 @@ export interface CrmOrderInput {
 }
 
 export interface AppSettings {
-  theme: 'system' | 'light' | 'dark' | 'black'
-  density: 'comfortable' | 'compact'
+  theme: 'system' | 'light' | 'dark' | 'black' | 'salesforce-black'
+  density: 'comfortable' | 'compact' | 'dense' | 'ultra-dense'
   notificationPreview: boolean
   enterToSend: boolean
   showChatPreviews: boolean
@@ -651,11 +622,13 @@ export interface WarishApi {
   chats: {
     list(input?: { cursor?: string; limit?: number; archived?: boolean; query?: string; category?: ChatCategory }): Promise<Page<ChatSummary>>
     get(chatId: string): Promise<ChatSummary>
+    getMany(chatIds: string[]): Promise<ChatSummary[]>
     update(chatId: string, patch: Partial<Pick<ChatSummary, 'archived' | 'pinned' | 'mutedUntil'>>): Promise<void>
     markRead(chatId: string): Promise<void>
   }
   contacts: {
     get(chatId: string): Promise<ContactDetails>
+    save(chatId: string, input: { fullName: string }): Promise<ContactDetails>
     hydrate(chatIds: string[]): Promise<void>
     refresh(): Promise<ContactSyncState>
     getSyncState(): Promise<ContactSyncState>
@@ -727,14 +700,6 @@ export interface WarishApi {
     }
     activity(contactId: string, limit?: number): Promise<CrmActivityDto[]>
   }
-  google: {
-    status(): Promise<GoogleConnectionStatus>
-    configure(clientId: string): Promise<GoogleConnectionStatus>
-    connect(): Promise<GoogleConnectionStatus>
-    disconnect(): Promise<GoogleConnectionStatus>
-    previewContact(contactId: string): Promise<GoogleContactPreview>
-    saveContact(contactId: string, draft: GoogleContactDraft, resourceName?: string): Promise<CrmContactDetailsDto>
-  }
   search: {
     messages(query: string, chatId?: string, cursor?: string): Promise<Page<MessageDto>>
   }
@@ -760,7 +725,7 @@ export interface WarishApi {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   theme: 'system',
-  density: 'compact',
+  density: 'dense',
   notificationPreview: true,
   enterToSend: true,
   showChatPreviews: true,

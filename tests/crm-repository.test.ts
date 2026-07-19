@@ -76,7 +76,7 @@ describe('CrmRepository', () => {
     database.close()
   })
 
-  it('preserves all CRM children and the Google link when WhatsApp merges phone and LID identities', () => {
+  it('preserves all CRM children when WhatsApp merges phone and LID identities', () => {
     const { database, crm } = setup()
     const lid = directContact(database, '88345678901234', { lid: true, whatsappName: 'LID Profile' })
     const phone = directContact(database, '919877776666', { whatsappName: 'Phone Profile' })
@@ -86,18 +86,15 @@ describe('CrmRepository', () => {
     crm.saveTask({ contactId: phoneContact.id, title: 'Phone-side task' })
     crm.saveOrder({ contactId: phoneContact.id, status: 'confirmed', items: [{ type: 'service', name: 'Consultation',
       quantity: 1, unitPrice: 500, discount: 0, taxRate: 0 }] })
-    crm.markGoogleLinked(phoneContact.id, 'people/c123', 'etag-1', 'owner@example.com')
-
     database.linkContactLid(lid, phone)
 
     const contacts = crm.listContacts({ lifecycle: 'active' })
     expect(contacts).toHaveLength(1)
     const merged = crm.getContact({ chatId: lid })
-    expect(merged).toMatchObject({ chatId: lid, lifecycle: 'customer', googleLinked: true, orderCount: 1, lifetimeValue: 0 })
+    expect(merged).toMatchObject({ chatId: lid, lifecycle: 'customer', orderCount: 1, lifetimeValue: 0 })
     expect(crm.listNotes(merged.id).map((note) => note.body)).toContain('LID-side note')
     expect(crm.listTasks({ contactId: merged.id }).map((task) => task.title)).toContain('Phone-side task')
     expect(crm.listOrders(merged.id)).toHaveLength(1)
-    expect(crm.googleLink(merged.id)).toMatchObject({ resourceName: 'people/c123', accountEmail: 'owner@example.com' })
     database.close()
   })
 
@@ -147,7 +144,7 @@ describe('CrmRepository', () => {
 
     const legacy = new DatabaseSync(path)
     legacy.exec(`
-      DROP TABLE google_contact_links; DROP TABLE crm_activity; DROP TABLE crm_payments; DROP TABLE crm_order_items;
+      DROP TABLE IF EXISTS google_contact_links; DROP TABLE crm_activity; DROP TABLE crm_payments; DROP TABLE crm_order_items;
       DROP TABLE crm_tasks; DROP TABLE crm_orders; DROP TABLE crm_notes; DROP TABLE crm_contact_tags; DROP TABLE crm_tags;
       DROP TABLE crm_catalog_items; DROP TABLE crm_contacts; DROP TABLE crm_pipeline_stages;
       DELETE FROM schema_migrations WHERE version>=9;
