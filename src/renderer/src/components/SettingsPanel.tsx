@@ -98,7 +98,7 @@ export function SettingsPanel(): React.JSX.Element {
     <aside className="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <header>
         {logsOpen && <button className="icon-button settings-back-button" onClick={() => setLogsOpen(false)} aria-label="Back to settings"><ArrowLeft /></button>}
-        <div><span className="settings-eyebrow">Workspace preferences</span><h2 id="settings-title">{logsOpen ? 'Error logs' : sectionLabel}</h2></div>
+        <div><span className="settings-eyebrow">Settings</span><h2 id="settings-title">{logsOpen ? 'Error logs' : sectionLabel}</h2></div>
         <button className="icon-button" onClick={() => close(false)} aria-label="Close settings"><X /></button>
       </header>
       {logsOpen ? <LogViewer query={logsQuery} copyStatus={copyStatus} onCopy={() => void copyLogs()} />
@@ -141,48 +141,47 @@ function AppearanceSettings({ settings, pending, update }: { settings: AppSettin
     { id: 'salesforce-black', label: 'Salesforce black', icon: <Palette /> }
   ]
   return <>
-    <SettingsHeading title="Appearance" description="Choose how your workspace looks and how much information it shows." />
+    <SettingsHeading title="Appearance" />
     <SettingGroup title="Theme">
       <div className="option-grid theme-options">{themes.map((theme) =>
         <OptionButton key={theme.id} active={settings.theme === theme.id} disabled={pending} label={theme.label}
           onClick={() => update({ theme: theme.id })} icon={theme.icon} />)}</div>
     </SettingGroup>
-    <SettingGroup title="Layout density" description="Choose how tightly the workspace organizes information without shrinking message text.">
+    <SettingGroup title="Layout density">
       <div className="option-grid density-options">{(['ultra-dense', 'dense', 'compact', 'comfortable'] as const).map((density) =>
         <OptionButton key={density} active={settings.density === density} disabled={pending}
           label={density === 'ultra-dense' ? 'Ultra dense' : density} onClick={() => update({ density })}
           icon={density === 'ultra-dense' || density === 'dense' ? <LayoutList /> : density === 'compact' ? <Minimize2 /> : <Maximize2 />} />)}</div>
     </SettingGroup>
-    <SettingGroup title="Navigation rail" description="Auto adapts the rail to the available window width.">
+    <SettingGroup title="Navigation rail">
       <div className="option-grid navigation-options">{(['auto', 'expanded', 'collapsed'] as const).map((navigationMode) =>
         <OptionButton key={navigationMode} active={settings.navigationMode === navigationMode} disabled={pending} label={navigationMode}
           onClick={() => update({ navigationMode })} icon={navigationMode === 'auto' ? <RotateCcw /> : navigationMode === 'expanded' ? <Maximize2 /> : <Minimize2 />} />)}</div>
     </SettingGroup>
-    <SettingGroup title="Conversation canvas" description="Select a restrained backdrop that works across every theme.">
+    <SettingGroup title="Conversation canvas">
       <div className="background-options">{(['subtle', 'plain', 'grid'] as const).map((conversationBackground) =>
         <button key={conversationBackground} className={`background-option ${conversationBackground} ${settings.conversationBackground === conversationBackground ? 'active' : ''}`}
           aria-pressed={settings.conversationBackground === conversationBackground} onClick={() => update({ conversationBackground })}>
           <span className="background-swatch">{settings.conversationBackground === conversationBackground && <Check />}</span><strong>{conversationBackground}</strong>
         </button>)}</div>
     </SettingGroup>
-    <SettingToggle label="Disable animations" description="Turn off interface motion, loading animation, and smooth transitions." checked={settings.reduceMotion} onChange={(reduceMotion) => update({ reduceMotion })} />
+    <SettingToggle label="Disable animations" description="Open menus and panels without motion." checked={settings.reduceMotion} onChange={(reduceMotion) => update({ reduceMotion })} />
   </>
 }
 
 function MessagingSettings({ settings, update }: { settings: AppSettings; update(patch: Partial<AppSettings>): void }): React.JSX.Element {
   return <>
-    <SettingsHeading title="Messaging" description="Control how conversations are displayed and how messages are sent." />
+    <SettingsHeading title="Messaging" />
     <div className="settings-card">
-      <SettingToggle icon={<Keyboard />} label="Enter to send" description="Press Enter to send. Shift+Enter always starts a new line." checked={settings.enterToSend} onChange={(enterToSend) => update({ enterToSend })} />
-      <SettingToggle icon={<LayoutList />} label="Show chat previews" description="Display the latest message under each conversation name." checked={settings.showChatPreviews} onChange={(showChatPreviews) => update({ showChatPreviews })} />
+      <SettingToggle icon={<Keyboard />} label="Enter to send" description="Send messages with Enter." checked={settings.enterToSend} onChange={(enterToSend) => update({ enterToSend })} />
+      <SettingToggle icon={<LayoutList />} label="Show chat previews" description="Show the latest message in the chat list." checked={settings.showChatPreviews} onChange={(showChatPreviews) => update({ showChatPreviews })} />
     </div>
-    <div className="settings-note"><Keyboard /><div><strong>Keyboard tip</strong><span>{settings.enterToSend ? 'Use Shift+Enter for a new line, or turn this off to make Enter insert a line break.' : 'Use Ctrl+Enter or Cmd+Enter whenever you want to send.'}</span></div></div>
   </>
 }
 
 function NotificationSettings({ settings, update }: { settings: AppSettings; update(patch: Partial<AppSettings>): void }): React.JSX.Element {
   return <>
-    <SettingsHeading title="Notifications" description="Manage what WArish shows when you are working elsewhere." />
+    <SettingsHeading title="Notifications" />
     <div className="settings-card">
       <SettingToggle icon={<MessageSquare />} label="Show message previews" description="Include the sender and message text in Windows notifications." checked={settings.notificationPreview} onChange={(notificationPreview) => update({ notificationPreview })} />
       <SettingToggle icon={<RotateCcw />} label="Start with Windows" description="Launch WArish in the tray after signing in." checked={settings.launchAtLogin} onChange={(launchAtLogin) => update({ launchAtLogin })} />
@@ -196,7 +195,7 @@ function StorageSettings({ settings, contactSync, contactRefreshAvailable, refre
 }): React.JSX.Element {
   const running = contactSync?.state === 'running'
   return <>
-    <SettingsHeading title="Storage & contacts" description="Manage downloaded files and keep conversation identities current." />
+    <SettingsHeading title="Storage & contacts" />
     <SettingGroup title="Media storage">
       <label className="select-setting settings-card"><span><strong>Media cache limit</strong><small>Older downloaded media is removed automatically.</small></span><select value={settings.cacheLimitBytes} onChange={(event) => onUpdate({ cacheLimitBytes: Number(event.target.value) })}><option value={1024 ** 3}>1 GB</option><option value={5 * 1024 ** 3}>5 GB</option><option value={10 * 1024 ** 3}>10 GB</option></select></label>
       <button className="secondary-button" onClick={onClearCache}><Trash2 />Clear downloaded media</button>
@@ -210,7 +209,7 @@ function StorageSettings({ settings, contactSync, contactRefreshAvailable, refre
 
 function DiagnosticsSettings({ diagnostics, onOpenLogs }: { diagnostics: DiagnosticsDto | undefined; onOpenLogs(): void }): React.JSX.Element {
   return <>
-    <SettingsHeading title="Diagnostics" description="Review local app health and information useful for troubleshooting." />
+    <SettingsHeading title="Diagnostics" />
     {!diagnostics ? <div className="loading-row"><LoaderCircle className="spin" />Loading diagnostics…</div> : <div className="diagnostic-grid">
       <span><Database />Database <b>{formatBytes(diagnostics.databaseBytes)}</b></span><span><HardDrive />Media <b>{formatBytes(diagnostics.mediaCacheBytes)}</b></span>
       <span>App version <b>v{diagnostics.appVersion}</b></span><span>Session <b>{diagnostics.sessionPhase}</b></span>
@@ -224,7 +223,7 @@ function DiagnosticsSettings({ diagnostics, onOpenLogs }: { diagnostics: Diagnos
 
 function AccountSettings({ onUnlink, onReset }: { onUnlink(): void; onReset(): void }): React.JSX.Element {
   return <>
-    <SettingsHeading title="Account" description="Manage the linked WhatsApp session and local application data." />
+    <SettingsHeading title="Account" />
     <div className="settings-card account-action"><div><strong>Linked WhatsApp account</strong><span>Unlink the session while keeping local history and preferences.</span></div><button className="secondary-button" onClick={onUnlink}><LogOut />Unlink</button></div>
     <div className="settings-card account-action danger"><div><strong>Full fresh reset</strong><span>Erase the account, history, media, logs, drafts, and every preference.</span></div><button className="danger-button" onClick={onReset}><Trash2 />Reset WArish</button></div>
   </>
@@ -242,8 +241,8 @@ function LogViewer({ query, copyStatus, onCopy }: {
   </div>
 }
 
-function SettingsHeading({ title, description }: { title: string; description: string }): React.JSX.Element {
-  return <div className="settings-heading"><h3>{title}</h3><p>{description}</p></div>
+function SettingsHeading({ title, description }: { title: string; description?: string }): React.JSX.Element {
+  return <div className="settings-heading"><h3>{title}</h3>{description && <p>{description}</p>}</div>
 }
 function SettingGroup({ title, description, children }: { title: string; description?: string; children: ReactNode }): React.JSX.Element {
   return <section className="setting-group"><div className="setting-group-heading"><strong>{title}</strong>{description && <span>{description}</span>}</div>{children}</section>

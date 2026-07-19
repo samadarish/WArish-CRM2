@@ -8,11 +8,11 @@ import { SalesLifecyclePath } from '../src/renderer/src/components/SalesLifecycl
 import { useUiStore } from '../src/renderer/src/store'
 
 const stages: CrmStageDto[] = [
-  { id: 'stage-quoted', key: 'quoted', name: 'Quoted', color: '#8b5cf6', position: 2, outcome: 'open' },
-  { id: 'stage-new', key: 'new', name: 'New enquiry', color: '#0ea5a4', position: 0, outcome: 'open' },
-  { id: 'stage-lost', key: 'lost', name: 'Lost', color: '#64748b', position: 4, outcome: 'lost' },
-  { id: 'stage-qualified', key: 'qualified', name: 'Qualified', color: '#3b82f6', position: 1, outcome: 'open' },
-  { id: 'stage-won', key: 'won', name: 'Won', color: '#16a34a', position: 3, outcome: 'won' }
+  { id: 'stage-quoted', key: 'quoted', name: 'Quoted', color: '#8B5CF6', position: 2, outcome: 'open' },
+  { id: 'stage-new', key: 'new', name: 'New enquiry', color: '#F59E0B', position: 0, outcome: 'open' },
+  { id: 'stage-lost', key: 'lost', name: 'Lost', color: '#EF4444', position: 4, outcome: 'lost' },
+  { id: 'stage-qualified', key: 'qualified', name: 'Qualified', color: '#EAB308', position: 1, outcome: 'open' },
+  { id: 'stage-won', key: 'won', name: 'Won', color: '#84CC16', position: 3, outcome: 'won' }
 ]
 
 const baseChat: ChatSummary = {

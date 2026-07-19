@@ -15,11 +15,11 @@ const details: ContactDetails = {
   avatarUrl: chat.avatarUrl, pinned: false, archived: false
 }
 const stages: CrmStageDto[] = [
-  { id: 'stage-new', key: 'new', name: 'New enquiry', color: '#0ea5a4', position: 0, outcome: 'open' }
+  { id: 'stage-new', key: 'new', name: 'New enquiry', color: '#F59E0B', position: 0, outcome: 'open' }
 ]
 const contact: CrmContactDetailsDto = {
   id: 'crm-1', identityId: 'identity-1', chatId: chat.id, lifecycle: 'lead', stageId: 'stage-new', stageKey: 'new',
-  stageName: 'New enquiry', stageColor: '#0ea5a4', name: 'Priya CRM', whatsappName: 'Priya WA',
+  stageName: 'New enquiry', stageColor: '#F59E0B', name: 'Priya CRM', whatsappName: 'Priya WA',
   phoneNumber: '+919876543210', avatarUrl: chat.avatarUrl, source: 'manual', tags: [], createdAt: Date.now(), lastActivityAt: Date.now(),
   orderCount: 0, lifetimeValue: 0, openTaskCount: 0, consentStatus: 'unknown',
   doNotContact: false, customFields: {}

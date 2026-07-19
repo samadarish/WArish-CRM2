@@ -16,6 +16,17 @@ interface BrowserBoxElement {
   getBoundingClientRect(): { width: number; height: number }
 }
 
+interface BrowserScrollElement {
+  scrollTop: number
+  scrollHeight: number
+}
+
+interface BrowserLifecycleElement {
+  getAttribute(name: string): string | null
+  style: { getPropertyValue(name: string): string }
+  ownerDocument: { defaultView: { getComputedStyle(target: unknown): { clipPath: string } } }
+}
+
 async function bodyFontSize(targetPage: Page): Promise<string> {
   return targetPage.locator('body').evaluate((element: unknown) => {
     const target = element as BrowserElement
@@ -48,6 +59,11 @@ test('starts at the supported desktop width and exposes settings diagnostics', a
 
   await page.getByRole('button', { name: 'Settings' }).click()
   await expect(page.getByRole('dialog', { name: 'Appearance' })).toBeVisible()
+  const settingsTransition = await page.locator('.settings-panel').evaluate((element: unknown) => {
+    const target = element as BrowserElement
+    return target.ownerDocument.defaultView.getComputedStyle(target).transitionDuration
+  })
+  expect(settingsTransition).not.toBe('0s')
   await expect.poll(() => page.locator('html').getAttribute('data-density')).toBe('dense')
   await page.getByRole('button', { name: 'Salesforce black' }).click()
   await expect.poll(() => page.locator('html').getAttribute('data-theme')).toBe('salesforce-black')
@@ -106,6 +122,67 @@ test('keeps the offline workspace available and opens the dedicated CRM', async 
   await expect(page.getByText('Customer workspace')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Leads', exact: true })).toBeVisible()
   await expect(page.getByText('No enquiries yet')).toBeVisible()
+  const visualDirectory = resolve('test-results', 'visual')
+  mkdirSync(visualDirectory, { recursive: true })
+  await page.setViewportSize({ width: 1366, height: 768 })
+  await page.screenshot({ path: join(visualDirectory, 'warish-crm-light-1366x768.png'), animations: 'disabled' })
+})
+
+test('virtualizes a full CRM contact list while keeping the final record reachable', async () => {
+  await application.close()
+  const database = new DatabaseSync(join(userDataPath, 'warish.sqlite'))
+  database.prepare("UPDATE accounts SET linked_at=? WHERE id='primary'").run(Date.now())
+  const identity = database.prepare(`INSERT INTO contact_identities(identity_id, phone_jid, phone_number, saved_name, whatsapp_name, avatar_failures, updated_at)
+    VALUES (?, ?, ?, ?, ?, 0, ?)`)
+  const alias = database.prepare('INSERT INTO contact_identity_aliases(alias_id, identity_id, updated_at) VALUES (?, ?, ?)')
+  const chat = database.prepare(`INSERT INTO chats(id, account_id, title, kind, last_message, last_message_at, last_message_id, unread_count, archived, pinned, updated_at)
+    VALUES (?, 'primary', ?, 'direct', 'CRM performance fixture', ?, NULL, 0, 0, 0, ?)`)
+  const crm = database.prepare(`INSERT INTO crm_contacts(id, identity_id, chat_id, lifecycle, stage_id, name, source, created_at, last_activity_at, updated_at)
+    VALUES (?, ?, ?, 'lead', 'stage-new', ?, 'fixture', ?, ?, ?)`)
+  const baseTime = Date.now() - 200_000
+  database.exec('BEGIN')
+  for (let index = 0; index < 120; index += 1) {
+    const sequence = String(index + 1).padStart(3, '0')
+    const identityId = `crm-perf-${sequence}`
+    const phone = `1555100${sequence}`
+    const chatId = `${phone}@s.whatsapp.net`
+    const name = `Lead ${sequence}`
+    const timestamp = baseTime + index
+    identity.run(identityId, chatId, phone, name, name, timestamp)
+    alias.run(chatId, identityId, timestamp)
+    chat.run(chatId, name, timestamp, timestamp)
+    crm.run(`crm-${sequence}`, identityId, chatId, name, timestamp, timestamp, timestamp)
+  }
+  const wonTimestamp = baseTime + 121
+  const wonChatId = '15551999999@s.whatsapp.net'
+  identity.run('crm-perf-won', wonChatId, '15551999999', 'Won E2E', 'Won E2E', wonTimestamp)
+  alias.run(wonChatId, 'crm-perf-won', wonTimestamp)
+  chat.run(wonChatId, 'Won E2E', wonTimestamp, wonTimestamp)
+  database.prepare(`INSERT INTO crm_contacts(id, identity_id, chat_id, lifecycle, stage_id, name, source, created_at, last_activity_at, updated_at)
+    VALUES ('crm-won', 'crm-perf-won', ?, 'customer', 'stage-won', 'Won E2E', 'fixture', ?, ?, ?)`)
+    .run(wonChatId, wonTimestamp, wonTimestamp, wonTimestamp)
+  database.exec('COMMIT')
+  database.close()
+
+  application = await electron.launch({ args: [resolve('.'), `--user-data-dir=${userDataPath}`],
+    env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' } })
+  page = await application.firstWindow()
+  await page.setViewportSize({ width: 1366, height: 768 })
+  await page.getByRole('button', { name: 'CRM' }).click()
+  await page.getByRole('navigation', { name: 'CRM sections' }).getByRole('button', { name: /^Leads/ }).click()
+  const table = page.locator('.crm-virtual-table')
+  await expect(table).toBeVisible()
+  await expect.poll(() => table.locator('tbody tr').count()).toBeLessThan(60)
+  const visualDirectory = resolve('test-results', 'visual')
+  mkdirSync(visualDirectory, { recursive: true })
+  await page.screenshot({ path: join(visualDirectory, 'warish-crm-leads-light-1366x768.png'), animations: 'disabled' })
+  await table.evaluate((element: unknown) => {
+    const target = element as BrowserScrollElement
+    target.scrollTop = target.scrollHeight
+  })
+  await expect(page.getByText('Lead 001')).toBeVisible()
+  await page.getByRole('button', { name: 'Won', exact: true }).click()
+  await expect(page.getByText('Won E2E')).toBeVisible()
 })
 
 test('keeps local history in the workspace when an existing account needs relinking', async () => {
@@ -150,6 +227,22 @@ test('keeps local history in the workspace when an existing account needs relink
   await expect(details.getByRole('button', { name: 'Close customer details' })).toBeHidden()
   const lifecycle = page.getByRole('region', { name: 'Sales lifecycle' })
   await expect(lifecycle).toBeVisible()
+  const lifecyclePresentation = await lifecycle.locator('.sales-lifecycle-path button').evaluateAll((buttons) => buttons.map((button) => {
+    const target = button as unknown as BrowserLifecycleElement
+    return {
+      stage: target.getAttribute('title'),
+      clipPath: target.ownerDocument.defaultView.getComputedStyle(target).clipPath,
+      color: target.style.getPropertyValue('--stage-color').trim().toUpperCase()
+    }
+  }))
+  expect(Object.fromEntries(lifecyclePresentation.map(({ stage, color }) => [stage, color]))).toEqual({
+    'New enquiry': '#F59E0B',
+    Qualified: '#EAB308',
+    Quoted: '#8B5CF6',
+    Won: '#84CC16',
+    Lost: '#EF4444'
+  })
+  for (const stage of lifecyclePresentation) expect(stage.clipPath).toMatch(/^polygon\(/)
   await expect(lifecycle.getByRole('button', { name: 'Set sales stage to New enquiry' })).not.toHaveAttribute('aria-current')
   await expect(details.getByText('Pipeline stage')).toHaveCount(0)
   await lifecycle.getByRole('button', { name: 'Set sales stage to Qualified' }).click()

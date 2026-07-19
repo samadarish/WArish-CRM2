@@ -12,6 +12,8 @@ import { useUiStore } from '../store'
 import { shouldSubmitComposer } from '../composer-keyboard'
 import { contactIdentityPresentation, type ContactIdentityPresentation } from '../contact-identity'
 import { messageGroupPositions } from '../message-grouping'
+import { MotionPresence } from '../motion'
+import { useDebouncedValue } from '../use-debounced-value'
 import { Avatar } from './Avatar'
 import { MessageBubble } from './MessageBubble'
 import { NavigationRail, type SidebarDestination } from './NavigationRail'
@@ -26,13 +28,13 @@ const CrmShell = lazy(async () => {
   return { default: module.CrmShell }
 })
 
-export function ChatShell({ session }: { session: SessionState }): React.JSX.Element {
+export const ChatShell = memo(function ChatShell({ session }: { session: SessionState }): React.JSX.Element {
   const destination = useUiStore((state) => state.destination)
   const navigate = useUiStore((state) => state.navigate)
   if (destination === 'crm') return <div className="crm-shell-frame"><NavigationRail current={destination} onNavigate={navigate} />
     <Suspense fallback={<div className="crm-state"><LoaderCircle className="spin" />Opening CRM…</div>}><CrmShell /></Suspense></div>
   return <ConversationShell session={session} />
-}
+})
 
 function ConversationShell({ session }: { session: SessionState }): React.JSX.Element {
   const [chatQuery, setChatQuery] = useState('')
@@ -252,10 +254,10 @@ function ConversationShell({ session }: { session: SessionState }): React.JSX.El
       <NavigationRail current={destination} onNavigate={changeDestination} />
       <aside className={`chat-list-panel ${showChatPreviews ? '' : 'chat-previews-hidden'}`}>
         <header className="panel-header"><h1>{destinationLabel(destination)}</h1><button className="icon-button" title="Chat list menu" aria-label="Chat list menu" aria-haspopup="menu" aria-expanded={sidebarMenuOpen} onClick={() => setSidebarMenuOpen((open) => !open)}><Menu /></button>
-          {sidebarMenuOpen && <><button className="menu-dismiss" aria-label="Close menu" onClick={() => setSidebarMenuOpen(false)} /><div className="header-menu sidebar-header-menu" role="menu">
+          <MotionPresence show={sidebarMenuOpen}>{sidebarMenuOpen && <><button className="menu-dismiss" aria-label="Close menu" onClick={() => setSidebarMenuOpen(false)} /><div className="header-menu sidebar-header-menu" role="menu">
             <button role="menuitem" onClick={() => changeDestination(showArchived ? 'all' : 'archived')}>{showArchived ? <MessageCircle /> : <Archive />}{showArchived ? 'All conversations' : 'Archived'}</button>
             <button role="menuitem" onClick={() => { setSidebarMenuOpen(false); setSettingsOpen(true) }}><Settings />Settings</button>
-          </div></>}
+          </div></>}</MotionPresence>
         </header>
         <label className="search-box"><Search /><input value={chatQuery} onChange={(event) => setChatQuery(event.target.value)} placeholder={`Search ${destinationLabel(destination).toLowerCase()}`} />{chatQuery && <button aria-label="Clear chat search" onClick={() => setChatQuery('')}><X /></button>}</label>
         <div className="chat-list" ref={chatListRef}>
@@ -289,8 +291,8 @@ function ConversationShell({ session }: { session: SessionState }): React.JSX.El
           : selectedChat ? <Conversation key={selectedChat.id} chat={selectedChat} session={session} enterToSend={enterToSend}
             onForward={setForwardMessage} onChatHidden={clearSelectedChat} /> : <WelcomePanel />}
       </main>
-      {forwardMessage && <ForwardDialog message={forwardMessage} onClose={() => setForwardMessage(undefined)} />}
-      {relinkOpen && <RelinkDialog session={session} onClose={() => setRelinkOpen(false)} />}
+      <MotionPresence show={Boolean(forwardMessage)}>{forwardMessage && <ForwardDialog message={forwardMessage} onClose={() => setForwardMessage(undefined)} />}</MotionPresence>
+      <MotionPresence show={relinkOpen}>{relinkOpen && <RelinkDialog session={session} onClose={() => setRelinkOpen(false)} />}</MotionPresence>
     </div>
   )
 }
@@ -937,11 +939,11 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
       {chat.kind === 'direct' && <CustomerSummaryStrip chat={chat} onOpenDetails={openContactDetails} />}
       <button className={`icon-button ${searchOpen ? 'active' : ''}`} title="Search this conversation" aria-label="Search this conversation" aria-expanded={searchOpen} onClick={() => { setConversationMenuOpen(false); setContactDrawerOpen(false); setSearchOpen((open) => !open) }}><Search /></button>
       <button className="icon-button" title="Conversation menu" aria-label="Conversation menu" aria-haspopup="menu" aria-expanded={conversationMenuOpen} onClick={() => { setSearchOpen(false); setContactDrawerOpen(false); setConversationMenuOpen((open) => !open) }}><Menu /></button>
-      {conversationMenuOpen && <><button className="menu-dismiss" aria-label="Close menu" onClick={() => setConversationMenuOpen(false)} /><div className="header-menu conversation-header-menu" role="menu">
+      <MotionPresence show={conversationMenuOpen}>{conversationMenuOpen && <><button className="menu-dismiss" aria-label="Close menu" onClick={() => setConversationMenuOpen(false)} /><div className="header-menu conversation-header-menu" role="menu">
         <button role="menuitem" disabled={chatAction.isPending} onClick={() => chatAction.mutate({ patch: { pinned: !chat.pinned } })}>{chat.pinned ? <PinOff /> : <Pin />}{chat.pinned ? 'Unpin chat' : 'Pin chat'}</button>
         <button role="menuitem" onClick={() => { void window.warish.chats.markRead(chat.id).catch((error) => pushNotice(errorMessage(error))); setConversationMenuOpen(false) }}><CheckCheck />Mark as read</button>
         <button role="menuitem" disabled={chatAction.isPending} onClick={() => chatAction.mutate({ patch: { archived: !chat.archived }, hide: true })}>{chat.archived ? <ArchiveRestore /> : <Archive />}{chat.archived ? 'Unarchive chat' : 'Archive chat'}</button>
-      </div></>}
+      </div></>}</MotionPresence>
     </header>
     {chat.kind === 'direct' && <SalesLifecyclePath chat={chat} />}
     <div className="message-scroller" ref={parentRef}>
@@ -971,7 +973,7 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
         })}
       </div>
     </div>
-    {searchOpen && <aside className="conversation-search-panel">
+    <MotionPresence show={searchOpen}>{searchOpen && <aside className="conversation-search-panel">
       <header><strong>Search messages</strong><button className="icon-button" title="Close search" onClick={() => setSearchOpen(false)}><X /></button></header>
       <label className="search-box conversation-search-box"><Search /><input autoFocus value={messageSearch} onChange={(event) => setMessageSearch(event.target.value)} placeholder="Search this conversation" />{messageSearch && <button onClick={() => setMessageSearch('')}><X /></button>}</label>
       <div className="conversation-search-results" onScroll={(event) => {
@@ -985,11 +987,11 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
         {messageSearchResults.map((message) => <button key={message.id} className="message-search-result" onClick={() => selectSearchResult(message)}><span><strong>{message.fromMe ? 'You' : message.senderName ?? chat.title}</strong><time>{format(new Date(message.timestamp), 'dd/MM/yy HH:mm')}</time></span><p>{message.text ?? message.kind}</p></button>)}
         {messageSearchQuery.isFetchingNextPage && <LoadingRow label="Loading more matches…" />}
       </div>
-    </aside>}
-    {(chat.kind === 'direct' || contactDrawerOpen) && <Suspense fallback={<aside className={`${chat.kind === 'direct' ? 'crm-contact-panel in-conversation persistent-contact-panel' : 'contact-drawer'} ${contactDrawerOpen ? 'details-overlay-open' : ''}`}><LoadingRow label="Loading customer details…" /></aside>}><ContactDrawer chat={chat}
+    </aside>}</MotionPresence>
+    <MotionPresence show={chat.kind === 'direct' || contactDrawerOpen}>{(chat.kind === 'direct' || contactDrawerOpen) && <Suspense fallback={<aside className={`${chat.kind === 'direct' ? 'crm-contact-panel in-conversation persistent-contact-panel' : 'contact-drawer'} ${contactDrawerOpen ? 'details-overlay-open' : ''}`}><LoadingRow label="Loading customer details…" /></aside>}><ContactDrawer chat={chat}
       persistent={chat.kind === 'direct'} overlayOpen={contactDrawerOpen} onClose={closeContactDetails}
-      onArchived={handleContactArchived} onJumpToMessage={handleJumpToMessage} /></Suspense>}
-    {crmCapture && <CrmCaptureDialog chat={chat} capture={crmCapture} onClose={() => setCrmCapture(undefined)} />}
+      onArchived={handleContactArchived} onJumpToMessage={handleJumpToMessage} /></Suspense>}</MotionPresence>
+    <MotionPresence show={Boolean(crmCapture)}>{crmCapture && <CrmCaptureDialog chat={chat} capture={crmCapture} onClose={() => setCrmCapture(undefined)} />}</MotionPresence>
     {newMessageCount > 0 && <button className="new-messages-button" onClick={() => scrollToNewest()}><ArrowDown />{newMessageCount} new {newMessageCount === 1 ? 'message' : 'messages'}</button>}
     {!chat.readOnly && (replyTo || attachment) && <div className="composer-context">
       <div>{replyTo && <><strong>Replying to {replyTo.senderName ?? (replyTo.fromMe ? 'yourself' : chat.title)}</strong><span>{replyTo.text ?? replyTo.kind}</span></>}{attachment && <><strong>{attachmentKind === 'voice' ? 'Voice message' : attachment.name}</strong><span>{formatBytes(attachment.size)}</span></>}</div>
@@ -1110,7 +1112,7 @@ function ForwardDialog({ message, onClose }: { message: MessageDto; onClose(): v
     </div><footer><button onClick={onClose}>Cancel</button><button className="primary-button" disabled={!selected.length || mutation.isPending} onClick={submitForward}>{mutation.isPending ? 'Forwarding…' : 'Forward'}</button></footer></section></div>
 }
 
-function WelcomePanel(): React.JSX.Element { return <div className="welcome-panel"><div className="brand-mark large">W</div><h2>WArish for Windows</h2><p>Select a conversation to start messaging. Your history and credentials remain on this computer.</p></div> }
+function WelcomePanel(): React.JSX.Element { return <div className="welcome-panel"><MessageCircle /><h2>No conversation selected</h2></div> }
 function LoadingRow({ label }: { label: string }): React.JSX.Element { return <div className="loading-row"><LoaderCircle className="spin" />{label}</div> }
 function SkeletonRows(): React.JSX.Element {
   return <div className="skeleton-list" aria-label="Loading conversations">{Array.from({ length: 8 }, (_, index) =>
@@ -1162,14 +1164,6 @@ function mergeMessages(current: MessageDto[], incoming: MessageDto[]): MessageDt
   const merged = new Map(current.map((message) => [message.id, message]))
   for (const message of incoming) merged.set(message.id, message)
   return [...merged.values()].sort(compareMessages)
-}
-function useDebouncedValue<T>(value: T, delay: number): T {
-  const [debounced, setDebounced] = useState(value)
-  useEffect(() => {
-    const timer = window.setTimeout(() => setDebounced(value), delay)
-    return () => window.clearTimeout(timer)
-  }, [delay, value])
-  return debounced
 }
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : 'Something went wrong' }
 function messagePreview(message: MessageDto): string {

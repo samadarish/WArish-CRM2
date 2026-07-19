@@ -1511,11 +1511,11 @@ export class WarishDatabase {
             outcome TEXT NOT NULL CHECK(outcome IN ('open','won','lost'))
           );
           INSERT OR IGNORE INTO crm_pipeline_stages(id, key, name, color, position, outcome) VALUES
-            ('stage-new', 'new', 'New enquiry', '#0ea5a4', 0, 'open'),
-            ('stage-qualified', 'qualified', 'Qualified', '#3b82f6', 1, 'open'),
-            ('stage-quoted', 'quoted', 'Quoted', '#8b5cf6', 2, 'open'),
-            ('stage-won', 'won', 'Won', '#16a34a', 3, 'won'),
-            ('stage-lost', 'lost', 'Lost', '#64748b', 4, 'lost');
+            ('stage-new', 'new', 'New enquiry', '#F59E0B', 0, 'open'),
+            ('stage-qualified', 'qualified', 'Qualified', '#EAB308', 1, 'open'),
+            ('stage-quoted', 'quoted', 'Quoted', '#8B5CF6', 2, 'open'),
+            ('stage-won', 'won', 'Won', '#84CC16', 3, 'won'),
+            ('stage-lost', 'lost', 'Lost', '#EF4444', 4, 'lost');
 
           CREATE TABLE IF NOT EXISTS crm_contacts(
             id TEXT PRIMARY KEY,
@@ -1711,6 +1711,22 @@ export class WarishDatabase {
         DROP TABLE IF EXISTS google_contact_links;
         INSERT INTO schema_migrations(version, applied_at) VALUES
           (11, CAST(strftime('%s','now') AS INTEGER) * 1000);
+      `))
+    }
+    if (version.version < 12) {
+      this.#logger.info({ version: 12 }, 'updating CRM pipeline colors')
+      this.transaction(() => this.db.exec(`
+        UPDATE crm_pipeline_stages SET color=CASE id
+          WHEN 'stage-new' THEN '#F59E0B'
+          WHEN 'stage-qualified' THEN '#EAB308'
+          WHEN 'stage-quoted' THEN '#8B5CF6'
+          WHEN 'stage-won' THEN '#84CC16'
+          WHEN 'stage-lost' THEN '#EF4444'
+          ELSE color
+        END
+        WHERE id IN ('stage-new', 'stage-qualified', 'stage-quoted', 'stage-won', 'stage-lost');
+        INSERT INTO schema_migrations(version, applied_at) VALUES
+          (12, CAST(strftime('%s','now') AS INTEGER) * 1000);
       `))
     }
   }

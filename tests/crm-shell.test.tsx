@@ -1,32 +1,44 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CrmContactDetailsDto, CrmContactSummaryDto, CrmDashboardDto, CrmStageDto } from '../src/shared/contracts'
 import { CrmShell } from '../src/renderer/src/components/CrmShell'
 import { useUiStore } from '../src/renderer/src/store'
 
 const stages: CrmStageDto[] = [
-  { id: 'stage-new', key: 'new', name: 'New enquiry', color: '#0ea5a4', position: 0, outcome: 'open' },
-  { id: 'stage-won', key: 'won', name: 'Won', color: '#16a34a', position: 1, outcome: 'won' }
+  { id: 'stage-new', key: 'new', name: 'New enquiry', color: '#F59E0B', position: 0, outcome: 'open' },
+  { id: 'stage-qualified', key: 'qualified', name: 'Qualified', color: '#EAB308', position: 1, outcome: 'open' },
+  { id: 'stage-quoted', key: 'quoted', name: 'Quoted', color: '#8B5CF6', position: 2, outcome: 'open' },
+  { id: 'stage-won', key: 'won', name: 'Won', color: '#84CC16', position: 3, outcome: 'won' },
+  { id: 'stage-lost', key: 'lost', name: 'Lost', color: '#EF4444', position: 4, outcome: 'lost' }
 ]
 const contact: CrmContactSummaryDto = {
   id: 'crm-1', identityId: 'identity-1', chatId: 'chat-1', lifecycle: 'lead', stageId: 'stage-new', stageKey: 'new',
-  stageName: 'New enquiry', stageColor: '#0ea5a4', name: 'Priya Enquiry', whatsappName: 'Priya WA',
+  stageName: 'New enquiry', stageColor: '#F59E0B', name: 'Priya Enquiry', whatsappName: 'Priya WA',
   phoneNumber: '+919876543210', company: 'Priya Studio', source: 'whatsapp', tags: [], createdAt: Date.now() - 60_000,
   lastActivityAt: Date.now(), orderCount: 0, lifetimeValue: 0, openTaskCount: 1
 }
+const wonContact: CrmContactSummaryDto = { ...contact, id: 'crm-won', identityId: 'identity-won', chatId: 'chat-won',
+  lifecycle: 'customer', stageId: 'stage-won', stageKey: 'won', stageName: 'Won', stageColor: '#84CC16', name: 'Won Customer' }
+const lostContact: CrmContactSummaryDto = { ...contact, id: 'crm-lost', identityId: 'identity-lost', chatId: 'chat-lost',
+  lifecycle: 'customer', stageId: 'stage-lost', stageKey: 'lost', stageName: 'Lost', stageColor: '#EF4444', name: 'Lost Customer' }
 const details: CrmContactDetailsDto = { ...contact, consentStatus: 'unknown', doNotContact: false, customFields: {} }
 const dashboard: CrmDashboardDto = { newLeads: 1, openLeads: 1, customers: 0, overdueTasks: 1, ordersThisMonth: 0,
   revenueThisMonth: 0, lifetimeRevenue: 0, recentContacts: [contact], pipeline: stages.map((stage) => ({ ...stage,
     count: stage.key === 'new' ? 1 : 0, value: 0 })) }
 
 function mockApi(): Record<string, unknown> {
+  const listContacts = vi.fn((input: { lifecycle?: string; stageId?: string } = {}) => {
+    if (input.lifecycle === 'active' && input.stageId === 'stage-won') return Promise.resolve([wonContact])
+    if (input.lifecycle === 'active' && input.stageId === 'stage-lost') return Promise.resolve([lostContact])
+    return Promise.resolve([contact])
+  })
   return {
     crm: {
       dashboard: vi.fn().mockResolvedValue(dashboard), pipeline: vi.fn().mockResolvedValue(stages),
-      contacts: { list: vi.fn().mockResolvedValue([contact]), get: vi.fn().mockResolvedValue(details),
+      contacts: { list: listContacts, get: vi.fn().mockResolvedValue(details),
         ensure: vi.fn(), update: vi.fn(), setStage: vi.fn().mockResolvedValue(details), setLifecycle: vi.fn() },
       notes: { list: vi.fn().mockResolvedValue([]), add: vi.fn(), delete: vi.fn() },
       tasks: { list: vi.fn().mockResolvedValue([]), save: vi.fn(), delete: vi.fn() },
@@ -47,6 +59,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  cleanup()
   vi.restoreAllMocks()
   Reflect.deleteProperty(window, 'warish')
 })
@@ -67,5 +80,26 @@ describe('CrmShell', () => {
     expect(await screen.findByRole('complementary', { name: 'CRM contact record' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Save contact' })).toBeInTheDocument()
     expect(screen.getAllByText('+919876543210').length).toBeGreaterThan(0)
+  })
+
+  it('shows converted contacts in terminal lead-stage filters without changing All leads', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={queryClient}><CrmShell /></QueryClientProvider>)
+    fireEvent.click(await screen.findByRole('button', { name: /^Leads/ }))
+
+    const listContacts = vi.mocked(window.warish.crm.contacts.list)
+    await waitFor(() => expect(listContacts).toHaveBeenCalledWith(expect.objectContaining({ lifecycle: 'lead', stageId: undefined })))
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Won' }))
+    expect(await screen.findByText('Won Customer')).toBeInTheDocument()
+    expect(listContacts).toHaveBeenCalledWith(expect.objectContaining({ lifecycle: 'active', stageId: 'stage-won' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Lost' }))
+    expect(await screen.findByText('Lost Customer')).toBeInTheDocument()
+    expect(listContacts).toHaveBeenCalledWith(expect.objectContaining({ lifecycle: 'active', stageId: 'stage-lost' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'All leads' }))
+    expect(await screen.findByText('Priya Enquiry')).toBeInTheDocument()
+    expect(listContacts).toHaveBeenCalledWith(expect.objectContaining({ lifecycle: 'lead', stageId: undefined }))
   })
 })

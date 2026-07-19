@@ -4,6 +4,8 @@ import { format } from 'date-fns'
 import { Check, CheckCheck, Clock3, Copy, Download, File, Forward, Heart, Images, List, ListTodo, MessageSquareText, NotebookPen, Package, Pencil, RefreshCw, Reply, Trash2, Vote, X } from 'lucide-react'
 import type { MessageDto } from '../../../shared/contracts'
 import type { MessageGroupPosition } from '../message-grouping'
+import { useMotionPhase } from '../motion-context'
+import { MotionPresence } from '../motion'
 
 export const MessageBubble = memo(function MessageBubble({ message, groupPosition = 'single', readOnly = false, showSender, onReply, onForward, onAddNote, onAddTask, onOpenQuote, onResize, onRetry, onError }: {
   message: MessageDto
@@ -91,15 +93,15 @@ export const MessageBubble = memo(function MessageBubble({ message, groupPositio
           {!readOnly && <button title="Delete" aria-label="Delete message" onClick={() => setDeleteOpen(true)}><Trash2 /></button>}
         </div>
       </div>
-      {editOpen && <ActionDialog title="Edit message" onClose={() => setEditOpen(false)}>
+      <MotionPresence show={editOpen}>{editOpen && <ActionDialog title="Edit message" onClose={() => setEditOpen(false)}>
         <textarea autoFocus value={editText} onChange={(event) => setEditText(event.target.value)} aria-label="Edited message" />
         <footer><button onClick={() => setEditOpen(false)}>Cancel</button><button className="primary-button" disabled={!editText.trim()} onClick={() => void edit()}>Save</button></footer>
-      </ActionDialog>}
-      {deleteOpen && <ActionDialog title="Delete message" onClose={() => setDeleteOpen(false)}>
+      </ActionDialog>}</MotionPresence>
+      <MotionPresence show={deleteOpen}>{deleteOpen && <ActionDialog title="Delete message" onClose={() => setDeleteOpen(false)}>
         <p>Choose how this message should be deleted.</p>
         <footer><button onClick={() => setDeleteOpen(false)}>Cancel</button><button className="secondary-button" onClick={() => void remove('for-me')}>Delete for me</button>
           {message.fromMe && <button className="danger-button" onClick={() => void remove('for-everyone')}>Delete for everyone</button>}</footer>
-      </ActionDialog>}
+      </ActionDialog>}</MotionPresence>
     </article>
   )
 })
@@ -189,12 +191,15 @@ function DeliveryIcon({ status }: { status: MessageDto['status'] }): React.JSX.E
 }
 
 function ActionDialog({ title, onClose, children }: { title: string; onClose(): void; children: React.ReactNode }): React.JSX.Element {
+  const motionPhase = useMotionPhase()
   useEffect(() => {
     const escape = (event: KeyboardEvent): void => { if (event.key === 'Escape') onClose() }
     window.addEventListener('keydown', escape)
     return () => window.removeEventListener('keydown', escape)
   }, [onClose])
-  return createPortal(<div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+  return createPortal(<div className="modal-backdrop" data-motion-state={motionPhase} role="presentation"
+    aria-hidden={motionPhase === 'exiting' ? true : undefined} inert={motionPhase === 'exiting' ? true : undefined}
+    onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
     <section className="modal action-dialog" role="dialog" aria-modal="true" aria-label={title}>
       <header><h2>{title}</h2><button className="icon-button" aria-label={`Close ${title}`} onClick={onClose}><X /></button></header>
       <div className="action-dialog-content">{children}</div>

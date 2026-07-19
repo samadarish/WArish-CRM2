@@ -68,7 +68,7 @@ describe('WarishDatabase', () => {
     const migrated = new WarishDatabase(path, Buffer.alloc(32, 7), pino({ enabled: false }))
     expect(migrated.getChat(lid)).toMatchObject({ title: 'Migrated name', savedName: 'Migrated name',
       whatsappName: 'Migrated profile', phoneNumber: '+33612345678' })
-    expect((migrated.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as { version: number }).version).toBe(11)
+    expect((migrated.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as { version: number }).version).toBe(12)
     migrated.close()
   })
 
@@ -160,7 +160,39 @@ describe('WarishDatabase', () => {
     expect(activityTypes.map((row) => row.type)).toEqual(expect.arrayContaining(['lead-created', 'note-added']))
     expect(activityTypes.map((row) => row.type)).not.toContain('google-saved')
     expect(retiredTable).toBeUndefined()
-    expect((migrated.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as { version: number }).version).toBe(11)
+    expect((migrated.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as { version: number }).version).toBe(12)
+    migrated.close()
+  })
+
+  it('standardizes CRM pipeline colors in v12', () => {
+    const { database, directory } = createDatabase()
+    const path = join(directory, 'warish.sqlite')
+    database.close()
+
+    const legacy = new DatabaseSync(path)
+    legacy.exec(`
+      UPDATE crm_pipeline_stages SET color=CASE id
+        WHEN 'stage-new' THEN '#0ea5a4'
+        WHEN 'stage-qualified' THEN '#3b82f6'
+        WHEN 'stage-quoted' THEN '#8b5cf6'
+        WHEN 'stage-won' THEN '#16a34a'
+        WHEN 'stage-lost' THEN '#64748b'
+        ELSE color
+      END;
+      DELETE FROM schema_migrations WHERE version>=12;
+    `)
+    legacy.close()
+
+    const migrated = new WarishDatabase(path, Buffer.alloc(32, 7), pino({ enabled: false }))
+    const colors = migrated.db.prepare('SELECT id, color FROM crm_pipeline_stages ORDER BY position').all() as Array<{ id: string; color: string }>
+    expect(Object.fromEntries(colors.map((stage) => [stage.id, stage.color]))).toEqual({
+      'stage-new': '#F59E0B',
+      'stage-qualified': '#EAB308',
+      'stage-quoted': '#8B5CF6',
+      'stage-won': '#84CC16',
+      'stage-lost': '#EF4444'
+    })
+    expect((migrated.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as { version: number }).version).toBe(12)
     migrated.close()
   })
 

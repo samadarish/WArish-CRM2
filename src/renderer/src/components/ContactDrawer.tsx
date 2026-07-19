@@ -5,6 +5,7 @@ import {
   Radio, UserRound, UsersRound, X
 } from 'lucide-react'
 import type { ChatSummary, ContactDetails } from '../../../shared/contracts'
+import { MotionPresence } from '../motion'
 import { useUiStore } from '../store'
 import { Avatar } from './Avatar'
 import { CrmContactPanel } from './CrmShell'
@@ -82,9 +83,9 @@ export const ContactDrawer = memo(function ContactDrawer({ chat, onClose, onArch
     <div className="crm-contact-body"><div className="crm-profile-section">{conversationOverview}<section className="crm-start-tracking"><BriefcaseBusiness />
       <strong>Not tracked in CRM</strong><button className="primary-button" disabled={ensureCrm.isPending} onClick={() => ensureCrm.mutate()}>
         {ensureCrm.isPending ? <LoaderCircle className="spin" /> : <BriefcaseBusiness />}Add to CRM</button></section></div></div>
-  </aside>{contactSaveOpen && <WhatsAppContactDialog chatId={chat.id}
+  </aside><MotionPresence show={contactSaveOpen}>{contactSaveOpen && <WhatsAppContactDialog chatId={chat.id}
     initialName={details.savedName ?? details.whatsappName ?? details.title} phoneNumber={details.phoneNumber}
-    saved={Boolean(details.savedName)} onClose={() => setContactSaveOpen(false)} />}</>
+    saved={Boolean(details.savedName)} onClose={() => setContactSaveOpen(false)} />}</MotionPresence></>
 
   return <aside className="contact-drawer" aria-label="Conversation details">
     <header><strong>Conversation info</strong><button className="icon-button" aria-label="Close conversation info" onClick={onClose}><X /></button></header>

@@ -1,9 +1,11 @@
-import { Component, lazy, Suspense, useEffect, type ErrorInfo, type ReactNode } from 'react'
+import { Component, lazy, memo, Suspense, useEffect, useState, type ErrorInfo, type ReactNode } from 'react'
 import { useQuery, useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query'
 import type { AppSettings, ChatMergedEvent, ChatSummary, CommunitySummary, ContactSyncState, CoreEventEnvelope, CoreEventPayloadMap, HistoryBatchEvent, MessageDto, Page, SessionState } from '../../shared/contracts'
 import { ChatShell } from './components/ChatShell'
 import { Onboarding } from './components/Onboarding'
 import { resolveSessionSurface } from './session-surface'
+import { MotionPresence } from './motion'
+import { motionDuration } from './motion-preference'
 import { useUiStore } from './store'
 import { destinationForChat } from './workspace-navigation'
 
@@ -15,7 +17,6 @@ const SettingsPanel = lazy(async () => {
 export function App(): React.JSX.Element {
   const queryClient = useQueryClient()
   const settingsOpen = useUiStore((state) => state.settingsOpen)
-  const notices = useUiStore((state) => state.notices)
   const sessionQuery = useQuery({ queryKey: ['session'], queryFn: () => window.warish.session.getState(), retry: false })
   const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: () => window.warish.settings.get() })
 
@@ -53,8 +54,8 @@ export function App(): React.JSX.Element {
   return (
     <div className="app-root">
       <AppErrorBoundary>{needsOnboarding ? <Onboarding session={session} /> : <ChatShell session={session} />}</AppErrorBoundary>
-      {settingsOpen && <Suspense fallback={<div className="modal-backdrop settings-backdrop"><div className="settings-loading"><div className="spinner" /><span>Opening settings…</span></div></div>}><SettingsPanel /></Suspense>}
-      <ToastRegion notices={notices} />
+      <MotionPresence show={settingsOpen}><Suspense fallback={<div className="modal-backdrop settings-backdrop"><div className="settings-loading"><div className="spinner" /><span>Opening settings…</span></div></div>}><SettingsPanel /></Suspense></MotionPresence>
+      <ToastRegion />
     </div>
   )
 }
@@ -210,18 +211,29 @@ function patchChatSummary(queryClient: QueryClient, chat: ChatSummary): void {
     let offset = 0
     return { ...current, pages: current.pages.map((page, pageIndex) => {
       const size = pageSizes[pageIndex] ?? 0
-      const next = { ...page, items: items.slice(offset, offset + size) }
+      const nextItems = items.slice(offset, offset + size)
       offset += size
-      return next
+      return sameItems(page.items, nextItems) ? page : { ...page, items: nextItems }
     }) }
   })
   queryClient.setQueriesData<InfiniteData<Page<CommunitySummary>, string | undefined>>(
-    { queryKey: ['communities'] }, (current) => current ? ({ ...current, pages: current.pages.map((page) => ({ ...page,
-      items: page.items.map((community) => ({ ...community,
-        children: community.children.map((child) => child.id === chat.id ? chat : child)
-      }))
-    })) }) : current
+    { queryKey: ['communities'] }, (current) => current ? ({ ...current, pages: current.pages.map((page) => {
+      let changed = false
+      const items = page.items.map((community) => {
+        const index = community.children.findIndex((child) => child.id === chat.id)
+        if (index < 0 || community.children[index] === chat) return community
+        const children = [...community.children]
+        children[index] = chat
+        changed = true
+        return { ...community, children }
+      })
+      return changed ? { ...page, items } : page
+    }) }) : current
   )
+}
+
+function sameItems<T>(left: T[], right: T[]): boolean {
+  return left.length === right.length && left.every((item, index) => item === right[index])
 }
 
 function compareChatSummaries(left: ChatSummary, right: ChatSummary): number {
@@ -235,22 +247,41 @@ function patchMessage(queryClient: QueryClient, message: MessageDto, replacedId?
   queryClient.setQueryData<MessagePages>(['messages', message.chatId], (current) => {
     if (!current?.pages.length) return current
     let found = false
-    const pages = current.pages.map((page) => ({ ...page, items: page.items.flatMap((item) => {
-      if (item.id === replacedId) return []
-      if (item.id !== message.id) return [item]
-      found = true
-      return [message]
-    }) }))
-    if (!found) pages[0] = { ...pages[0]!, items: [...pages[0]!.items, message].sort(compareMessages) }
+    let changed = false
+    const pages = current.pages.map((page) => {
+      if (!page.items.some((item) => item.id === replacedId || item.id === message.id)) return page
+      const items = page.items.flatMap((item) => {
+        if (item.id === replacedId) { changed = true; return [] }
+        if (item.id !== message.id) return [item]
+        found = true
+        if (item !== message) changed = true
+        return [message]
+      })
+      return changed ? { ...page, items } : page
+    })
+    if (!found) {
+      pages[0] = { ...pages[0]!, items: [...pages[0]!.items, message].sort(compareMessages) }
+      changed = true
+    }
+    if (!changed) return current
     return { ...current, pages }
   })
 }
 
 function patchMessageStatus(queryClient: QueryClient, chatId: string, messageId: string, status: MessageDto['status']): void {
-  queryClient.setQueryData<MessagePages>(['messages', chatId], (current) => current ? ({ ...current,
-    pages: current.pages.map((page) => ({ ...page,
-      items: page.items.map((message) => message.id === messageId ? { ...message, status } : message) }))
-  }) : current)
+  queryClient.setQueryData<MessagePages>(['messages', chatId], (current) => {
+    if (!current) return current
+    let changed = false
+    const pages = current.pages.map((page) => {
+      const index = page.items.findIndex((message) => message.id === messageId && message.status !== status)
+      if (index < 0) return page
+      const items = [...page.items]
+      items[index] = { ...items[index]!, status }
+      changed = true
+      return { ...page, items }
+    })
+    return changed ? { ...current, pages } : current
+  })
 }
 
 async function refreshLatestMessagePage(queryClient: QueryClient, chatId: string): Promise<void> {
@@ -268,7 +299,8 @@ function compareMessages(left: MessageDto, right: MessageDto): number {
   return left.timestamp - right.timestamp || left.id.localeCompare(right.id)
 }
 
-function ToastRegion({ notices }: { notices: Array<{ id: number; message: string; tone: 'error' | 'info' }> }): React.JSX.Element {
+function ToastRegion(): React.JSX.Element {
+  const notices = useUiStore((state) => state.notices)
   const dismiss = useUiStore((state) => state.dismissNotice)
   return <div className="toast-region" aria-live="polite">{notices.map((notice) =>
     <Toast key={notice.id} notice={notice} dismiss={dismiss} />
@@ -276,12 +308,18 @@ function ToastRegion({ notices }: { notices: Array<{ id: number; message: string
 }
 
 function Toast({ notice, dismiss }: { notice: { id: number; message: string; tone: 'error' | 'info' }; dismiss(id: number): void }): React.JSX.Element {
+  const [exiting, setExiting] = useState(false)
   useEffect(() => {
-    const timer = window.setTimeout(() => dismiss(notice.id), 5_000)
+    const timer = window.setTimeout(() => setExiting(true), 4_800)
     return () => window.clearTimeout(timer)
-  }, [dismiss, notice.id])
+  }, [])
+  useEffect(() => {
+    if (!exiting) return
+    const timer = window.setTimeout(() => dismiss(notice.id), motionDuration(180))
+    return () => window.clearTimeout(timer)
+  }, [dismiss, exiting, notice.id])
   return <button role={notice.tone === 'error' ? 'alert' : 'status'} className={`toast ${notice.tone}`}
-    onClick={() => dismiss(notice.id)}>{notice.message}</button>
+    data-motion-state={exiting ? 'exiting' : 'entered'} onClick={() => setExiting(true)}>{notice.message}</button>
 }
 
 class AppErrorBoundary extends Component<{ children: ReactNode }, { error?: Error }> {
@@ -310,9 +348,9 @@ function applyAppearance(settings?: AppSettings): void {
   document.documentElement.dataset.conversationBackground = settings.conversationBackground
 }
 
-function Splash({ label }: { label: string }): React.JSX.Element {
+const Splash = memo(function Splash({ label }: { label: string }): React.JSX.Element {
   return <main className="splash"><div className="brand-mark">W</div><div className="spinner" /><p>{label}</p></main>
-}
+})
 
 function FatalError({ error, onRetry }: { error: Error; onRetry(): void }): React.JSX.Element {
   return <main className="splash"><div className="brand-mark error">!</div><h1>WArish could not start</h1><p>{error.message}</p><button onClick={onRetry}>Try again</button></main>

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { useMutation, useQuery, useQueryClient, type QueryClient, type QueryKey } from '@tanstack/react-query'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { keepPreviousData, useMutation, useQuery, useQueryClient, type QueryClient, type QueryKey } from '@tanstack/react-query'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import {
   BadgeIndianRupee, BriefcaseBusiness, CalendarClock, Check, ChevronRight, CircleDollarSign, ContactRound,
   ExternalLink, FileText, LayoutDashboard, ListTodo, LoaderCircle, MessageCircle, NotebookPen,
@@ -9,7 +10,9 @@ import type {
   CrmCatalogItemDto, CrmContactDetailsDto, CrmContactSummaryDto, CrmDashboardDto,
   CrmMessageReferenceDto, CrmNoteDto, CrmOrderDto, CrmOrderInput, CrmStageDto, CrmTaskDto
 } from '../../../shared/contracts'
+import { MotionPresence } from '../motion'
 import { useUiStore } from '../store'
+import { useDebouncedValue } from '../use-debounced-value'
 import { Avatar } from './Avatar'
 import { WhatsAppContactDialog } from './WhatsAppContactDialog'
 
@@ -28,6 +31,7 @@ const CRM_VIEWS: Array<{ id: CrmView; label: string; icon: ReactNode }> = [
 export function CrmShell(): React.JSX.Element {
   const [view, setView] = useState<CrmView>('overview')
   const [query, setQuery] = useState('')
+  const debouncedQuery = useDebouncedValue(query.trim(), 200)
   const [stageId, setStageId] = useState('')
   const [taskDialogContactId, setTaskDialogContactId] = useState<string>()
   const [orderDialogContactId, setOrderDialogContactId] = useState<string>()
@@ -39,11 +43,15 @@ export function CrmShell(): React.JSX.Element {
   const queryClient = useQueryClient()
   const dashboardQuery = useQuery({ queryKey: ['crm', 'dashboard'], queryFn: () => window.warish.crm.dashboard() })
   const stagesQuery = useQuery({ queryKey: ['crm', 'pipeline'], queryFn: () => window.warish.crm.pipeline() })
+  const selectedStage = stagesQuery.data?.find((stage) => stage.id === stageId)
+  const contactsLifecycle = view === 'customers' ? 'customer'
+    : selectedStage && selectedStage.outcome !== 'open' ? 'active' : 'lead'
   const contactsQuery = useQuery({
-    queryKey: ['crm', 'contacts', view, stageId, query],
-    queryFn: () => window.warish.crm.contacts.list({ lifecycle: view === 'customers' ? 'customer' : 'lead',
-      stageId: stageId || undefined, query: query || undefined, limit: 500 }),
-    enabled: view === 'leads' || view === 'customers'
+    queryKey: ['crm', 'contacts', view, stageId, debouncedQuery],
+    queryFn: () => window.warish.crm.contacts.list({ lifecycle: contactsLifecycle,
+      stageId: stageId || undefined, query: debouncedQuery || undefined, limit: 500 }),
+    enabled: view === 'leads' || view === 'customers',
+    placeholderData: keepPreviousData
   })
   const allContactsQuery = useQuery({ queryKey: ['crm', 'contacts', 'active'],
     queryFn: () => window.warish.crm.contacts.list({ lifecycle: 'active', limit: 500 }),
@@ -82,7 +90,7 @@ export function CrmShell(): React.JSX.Element {
   return <main className="crm-workspace">
     <header className="crm-topbar"><div><span>Customer workspace</span><h1>{CRM_VIEWS.find((item) => item.id === view)?.label}</h1></div>
       <div className="crm-topbar-actions">
-        {(view === 'leads' || view === 'customers') && <label className="crm-search"><Search /><input value={query}
+        {(view === 'leads' || view === 'customers') && <label className="crm-search" aria-busy={contactsQuery.isFetching}><span className="crm-search-icon">{contactsQuery.isFetching ? <LoaderCircle className="spin" /> : <Search />}</span><input value={query}
           placeholder={`Search ${view}`} onChange={(event) => setQuery(event.target.value)} />{query && <button aria-label="Clear search" onClick={() => setQuery('')}><X /></button>}</label>}
         {view === 'tasks' && <button className="primary-button" onClick={() => setTaskDialogContactId(allContactsQuery.data?.[0]?.id)}><Plus />New task</button>}
         {view === 'orders' && <button className="primary-button" onClick={() => setOrderDialogContactId(allContactsQuery.data?.[0]?.id)}><Plus />New order</button>}
@@ -109,15 +117,15 @@ export function CrmShell(): React.JSX.Element {
           onEdit={setCatalogDialogItem} onError={(message) => pushNotice(message)} />}
       </section>
     </div>
-    {selectedContactId && <CrmContactPanel contactId={selectedContactId} stages={stagesQuery.data ?? []}
-      onClose={() => openCrmContact()} />}
-    {taskDialogContactId && <TaskDialog initialContactId={taskDialogContactId} contacts={allContactsQuery.data ?? []}
-      onClose={() => setTaskDialogContactId(undefined)} />}
-    {orderDialogContactId && <OrderDialog initialContactId={orderDialogContactId} contacts={allContactsQuery.data ?? []}
+    <MotionPresence show={Boolean(selectedContactId)}>{selectedContactId && <CrmContactPanel contactId={selectedContactId} stages={stagesQuery.data ?? []}
+      onClose={() => openCrmContact()} />}</MotionPresence>
+    <MotionPresence show={Boolean(taskDialogContactId)}>{taskDialogContactId && <TaskDialog initialContactId={taskDialogContactId} contacts={allContactsQuery.data ?? []}
+      onClose={() => setTaskDialogContactId(undefined)} />}</MotionPresence>
+    <MotionPresence show={Boolean(orderDialogContactId)}>{orderDialogContactId && <OrderDialog initialContactId={orderDialogContactId} contacts={allContactsQuery.data ?? []}
       catalog={catalogQuery.data?.filter((item) => item.active) ?? []} order={editingOrder}
-      onClose={() => { setOrderDialogContactId(undefined); setEditingOrder(undefined) }} />}
-    {catalogDialogItem !== undefined && <CatalogDialog item={catalogDialogItem ?? undefined}
-      onClose={() => setCatalogDialogItem(undefined)} />}
+      onClose={() => { setOrderDialogContactId(undefined); setEditingOrder(undefined) }} />}</MotionPresence>
+    <MotionPresence show={catalogDialogItem !== undefined}>{catalogDialogItem !== undefined && <CatalogDialog item={catalogDialogItem ?? undefined}
+      onClose={() => setCatalogDialogItem(undefined)} />}</MotionPresence>
   </main>
 }
 
@@ -130,9 +138,9 @@ function CrmOverview({ query, onContact, onView }: {
   const dashboard = query.data
   const stats = [
     { label: 'New enquiries', value: dashboard.newLeads, detail: `${dashboard.openLeads} active leads`, icon: <BriefcaseBusiness />, view: 'leads' as const },
-    { label: 'Customers', value: dashboard.customers, detail: 'Won relationships', icon: <UsersRound />, view: 'customers' as const },
+    { label: 'Customers', value: dashboard.customers, detail: 'Won contacts', icon: <UsersRound />, view: 'customers' as const },
     { label: 'Revenue this month', value: money(dashboard.revenueThisMonth), detail: `${dashboard.ordersThisMonth} orders`, icon: <CircleDollarSign />, view: 'orders' as const },
-    { label: 'Overdue follow-ups', value: dashboard.overdueTasks, detail: 'Needs attention', icon: <CalendarClock />, view: 'tasks' as const }
+    { label: 'Overdue follow-ups', value: dashboard.overdueTasks, detail: 'Overdue', icon: <CalendarClock />, view: 'tasks' as const }
   ]
   return <div className="crm-overview">
     <div className="crm-stat-grid">{stats.map((stat) => <button key={stat.label} className="crm-stat" onClick={() => onView(stat.view)}>
@@ -147,12 +155,11 @@ function CrmOverview({ query, onContact, onView }: {
       </section>
       <section className="crm-card crm-recent"><header><div><span>Recent activity</span><strong>Latest contacts</strong></div></header>
         <div>{dashboard.recentContacts.length ? dashboard.recentContacts.map((contact) => <ContactCompactRow key={contact.id}
-          contact={contact} onClick={() => onContact(contact.id)} />) : <CrmEmpty icon={<UserRound />} title="No enquiries yet"
-            description="New inbound WhatsApp numbers will appear here automatically." />}</div>
+          contact={contact} onClick={() => onContact(contact.id)} />) : <CrmEmpty icon={<UserRound />} title="No enquiries yet" />}</div>
       </section>
     </div>
-    <section className="crm-card crm-revenue-strip"><span><BadgeIndianRupee /></span><div><small>Recorded lifetime revenue</small>
-      <strong>{money(dashboard.lifetimeRevenue)}</strong></div><p>Completed orders are counted here. Quotes and drafts remain in the pipeline without inflating revenue.</p></section>
+    <section className="crm-card crm-revenue-strip"><span><BadgeIndianRupee /></span><div><small>Lifetime revenue</small>
+      <strong>{money(dashboard.lifetimeRevenue)}</strong></div></section>
   </div>
 }
 
@@ -162,30 +169,95 @@ function ContactsView({ contacts, loading, error, stages, stageId, onStage, onCo
 }): React.JSX.Element {
   if (loading) return <CrmLoading label={`Loading ${emptyLabel}…`} />
   if (error) return <CrmError label={`Could not load ${emptyLabel}`} onRetry={onRetry} />
+  const selectedStage = stages.find((stage) => stage.id === stageId)
   return <div className="crm-list-view">
     {emptyLabel === 'leads' && <div className="crm-filter-row"><button className={!stageId ? 'active' : ''} onClick={() => onStage('')}>All leads</button>
       {stages.map((stage) => <button key={stage.id} className={stageId === stage.id ? 'active' : ''} onClick={() => onStage(stage.id)}>
         <i style={{ background: stage.color }} />{stage.name}</button>)}</div>}
     {!contacts?.length ? <CrmEmpty icon={emptyLabel === 'leads' ? <BriefcaseBusiness /> : <UsersRound />}
-      title={`No ${emptyLabel} found`} description={emptyLabel === 'leads'
-        ? 'Unsaved numbers that message you will become leads automatically.' : 'Move a lead to Won or record an order to create a customer.'} />
-      : <div className="crm-table-card"><table className="crm-table"><thead><tr><th>Contact</th><th>Stage</th><th>Tags</th>
-        <th>Orders</th><th>Value</th><th>Follow-ups</th><th>Last activity</th></tr></thead><tbody>{contacts.map((contact) => <tr key={contact.id}
-          onClick={() => onContact(contact.id)}><td><ContactCell contact={contact} /></td><td><StagePill contact={contact} /></td>
-          <td><TagList contact={contact} /></td><td>{contact.orderCount}</td><td>{money(contact.lifetimeValue)}</td>
-          <td>{contact.openTaskCount ? <span className="task-count">{contact.openTaskCount} open</span> : <span className="muted">None</span>}</td>
-          <td><RelativeDate value={contact.lastActivityAt} /></td></tr>)}</tbody></table></div>}
+      title={selectedStage ? `No contacts in ${selectedStage.name}` : `No ${emptyLabel}`} />
+      : contacts.length > 80 ? <VirtualContactsTable contacts={contacts} onContact={onContact} />
+        : <div className="crm-table-card"><table className="crm-table crm-contacts-table"><ContactsTableHead /><tbody>{contacts.map((contact) => <ContactTableRow key={contact.id}
+          contact={contact} onContact={onContact} />)}</tbody></table></div>}
+  </div>
+}
+
+function ContactsTableHead(): React.JSX.Element {
+  return <thead><tr><th>Contact</th><th>Stage</th><th>Tags</th><th>Orders</th><th>Value</th><th>Follow-ups</th><th>Last activity</th></tr></thead>
+}
+
+function ContactTableRow({ contact, onContact, virtualStart, virtualIndex, measureElement }: {
+  contact: CrmContactSummaryDto
+  onContact(id: string): void
+  virtualStart?: number
+  virtualIndex?: number
+  measureElement?: (element: HTMLTableRowElement | null) => void
+}): React.JSX.Element {
+  const open = (): void => onContact(contact.id)
+  return <tr ref={measureElement} className={virtualStart === undefined ? undefined : 'crm-virtual-row'} data-index={virtualIndex}
+    style={virtualStart === undefined ? undefined : { transform: `translateY(${virtualStart}px)` }} tabIndex={0}
+    onClick={open} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open() } }}>
+    <td><ContactCell contact={contact} /></td><td><StagePill contact={contact} /></td><td><TagList contact={contact} /></td>
+    <td>{contact.orderCount}</td><td>{money(contact.lifetimeValue)}</td>
+    <td>{contact.openTaskCount ? <span className="task-count">{contact.openTaskCount} open</span> : <span className="muted">None</span>}</td>
+    <td><RelativeDate value={contact.lastActivityAt} /></td>
+  </tr>
+}
+
+function VirtualContactsTable({ contacts, onContact }: { contacts: CrmContactSummaryDto[]; onContact(id: string): void }): React.JSX.Element {
+  const parentRef = useRef<HTMLDivElement>(null)
+  const virtualizer = useVirtualizer({ count: contacts.length, getScrollElement: () => parentRef.current,
+    estimateSize: () => 58, overscan: 8, getItemKey: (index) => contacts[index]?.id ?? index })
+  return <div ref={parentRef} className="crm-table-card crm-virtual-table" style={{ height: Math.min(681, contacts.length * 58 + 41) }}>
+    <table className="crm-table crm-contacts-table"><ContactsTableHead /><tbody style={{ height: virtualizer.getTotalSize() }}>
+      {virtualizer.getVirtualItems().map((item) => <ContactTableRow key={String(item.key)} contact={contacts[item.index]!}
+        onContact={onContact} virtualStart={item.start} virtualIndex={item.index} measureElement={virtualizer.measureElement} />)}
+    </tbody></table>
   </div>
 }
 
 function OrdersView({ orders, contacts, loading, onEdit }: { orders?: CrmOrderDto[]; contacts: CrmContactSummaryDto[]; loading: boolean; onEdit(order: CrmOrderDto): void }): React.JSX.Element {
   const names = useMemo(() => new Map(contacts.map((contact) => [contact.id, contact.name])), [contacts])
   if (loading) return <CrmLoading label="Loading orders…" />
-  if (!orders?.length) return <CrmEmpty icon={<ShoppingBag />} title="No orders yet" description="Create an order from a contact record or use New order above." />
-  return <div className="crm-table-card"><table className="crm-table"><thead><tr><th>Order</th><th>Customer</th><th>Status</th><th>Payment</th><th>Total</th><th>Balance</th><th>Updated</th></tr></thead>
-    <tbody>{orders.map((order) => <tr key={order.id} onClick={() => onEdit(order)}><td><strong>{order.orderNumber}</strong><small>{order.items.length} line item{order.items.length === 1 ? '' : 's'}</small></td>
-      <td>{names.get(order.contactId) ?? 'Customer'}</td><td><StatusPill value={order.status} /></td><td><StatusPill value={order.paymentStatus} /></td>
-      <td><strong>{money(order.total, order.currency)}</strong></td><td>{money(order.balanceAmount, order.currency)}</td><td><RelativeDate value={order.updatedAt} /></td></tr>)}</tbody></table></div>
+  if (!orders?.length) return <CrmEmpty icon={<ShoppingBag />} title="No orders" />
+  return orders.length > 80 ? <VirtualOrdersTable orders={orders} names={names} onEdit={onEdit} />
+    : <div className="crm-table-card"><table className="crm-table crm-orders-table"><OrdersTableHead /><tbody>{orders.map((order) => <OrderTableRow key={order.id}
+      order={order} customerName={names.get(order.contactId)} onEdit={onEdit} />)}</tbody></table></div>
+}
+
+function OrdersTableHead(): React.JSX.Element {
+  return <thead><tr><th>Order</th><th>Customer</th><th>Status</th><th>Payment</th><th>Total</th><th>Balance</th><th>Updated</th></tr></thead>
+}
+
+function OrderTableRow({ order, customerName, onEdit, virtualStart, virtualIndex, measureElement }: {
+  order: CrmOrderDto
+  customerName?: string
+  onEdit(order: CrmOrderDto): void
+  virtualStart?: number
+  virtualIndex?: number
+  measureElement?: (element: HTMLTableRowElement | null) => void
+}): React.JSX.Element {
+  const open = (): void => onEdit(order)
+  return <tr ref={measureElement} className={virtualStart === undefined ? undefined : 'crm-virtual-row'} data-index={virtualIndex}
+    style={virtualStart === undefined ? undefined : { transform: `translateY(${virtualStart}px)` }} tabIndex={0}
+    onClick={open} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open() } }}>
+    <td><strong>{order.orderNumber}</strong><small>{order.items.length} line item{order.items.length === 1 ? '' : 's'}</small></td>
+    <td>{customerName ?? 'Customer'}</td><td><StatusPill value={order.status} /></td><td><StatusPill value={order.paymentStatus} /></td>
+    <td><strong>{money(order.total, order.currency)}</strong></td><td>{money(order.balanceAmount, order.currency)}</td><td><RelativeDate value={order.updatedAt} /></td>
+  </tr>
+}
+
+function VirtualOrdersTable({ orders, names, onEdit }: { orders: CrmOrderDto[]; names: Map<string, string>; onEdit(order: CrmOrderDto): void }): React.JSX.Element {
+  const parentRef = useRef<HTMLDivElement>(null)
+  const virtualizer = useVirtualizer({ count: orders.length, getScrollElement: () => parentRef.current,
+    estimateSize: () => 58, overscan: 8, getItemKey: (index) => orders[index]?.id ?? index })
+  return <div ref={parentRef} className="crm-table-card crm-virtual-table" style={{ height: Math.min(681, orders.length * 58 + 41) }}>
+    <table className="crm-table crm-orders-table"><OrdersTableHead /><tbody style={{ height: virtualizer.getTotalSize() }}>
+      {virtualizer.getVirtualItems().map((item) => <OrderTableRow key={String(item.key)} order={orders[item.index]!}
+        customerName={names.get(orders[item.index]!.contactId)} onEdit={onEdit} virtualStart={item.start} virtualIndex={item.index}
+        measureElement={virtualizer.measureElement} />)}
+    </tbody></table>
+  </div>
 }
 
 function TasksView({ tasks, contacts, loading, onContact }: { tasks?: CrmTaskDto[]; contacts: CrmContactSummaryDto[]; loading: boolean; onContact(id: string): void }): React.JSX.Element {
@@ -197,12 +269,45 @@ function TasksView({ tasks, contacts, loading, onContact }: { tasks?: CrmTaskDto
       ['crm', 'contact', task.contactId], ['crm', 'activity', task.contactId]),
     onError: (error) => pushNotice(errorMessage(error)) })
   if (loading) return <CrmLoading label="Loading follow-ups…" />
-  if (!tasks?.length) return <CrmEmpty icon={<ListTodo />} title="No follow-ups yet" description="Create tasks to make sure every enquiry gets a timely response." />
-  return <div className="crm-task-list">{tasks.map((task) => <article key={task.id} className={`crm-task ${task.status} ${isOverdue(task) ? 'overdue' : ''}`}>
-    <button className="crm-task-check" disabled={task.status !== 'open' || complete.isPending} aria-label="Complete task" onClick={() => complete.mutate(task)}>{task.status === 'completed' && <Check />}</button>
+  if (!tasks?.length) return <CrmEmpty icon={<ListTodo />} title="No follow-ups" />
+  const renderTask = (task: CrmTaskDto, virtualStart?: number, virtualIndex?: number, measureElement?: (element: HTMLElement | null) => void): React.JSX.Element => <TaskRow key={task.id}
+    task={task} contactName={names.get(task.contactId)} pending={complete.isPending} onComplete={() => complete.mutate(task)}
+    onContact={onContact} virtualStart={virtualStart} virtualIndex={virtualIndex} measureElement={measureElement} />
+  return tasks.length > 80 ? <VirtualTaskList tasks={tasks} renderTask={renderTask} />
+    : <div className="crm-task-list">{tasks.map((task) => renderTask(task))}</div>
+}
+
+function TaskRow({ task, contactName, pending, onComplete, onContact, virtualStart, virtualIndex, measureElement }: {
+  task: CrmTaskDto
+  contactName?: string
+  pending: boolean
+  onComplete(): void
+  onContact(id: string): void
+  virtualStart?: number
+  virtualIndex?: number
+  measureElement?: (element: HTMLElement | null) => void
+}): React.JSX.Element {
+  return <article ref={measureElement} className={`crm-task ${task.status} ${isOverdue(task) ? 'overdue' : ''} ${virtualStart === undefined ? '' : 'crm-virtual-row'}`}
+    data-index={virtualIndex} style={virtualStart === undefined ? undefined : { transform: `translateY(${virtualStart}px)` }}>
+    <button className="crm-task-check" disabled={task.status !== 'open' || pending} aria-label="Complete task" onClick={onComplete}>{task.status === 'completed' && <Check />}</button>
     <div><span><strong>{task.title}</strong><PriorityPill value={task.priority} /></span>{task.description && <p>{task.description}</p>}
-      <button className="link-button" onClick={() => onContact(task.contactId)}>{names.get(task.contactId) ?? 'Contact'} <ExternalLink /></button></div>
-    <time className={isOverdue(task) ? 'danger-text' : ''}>{task.dueAt ? formatDateTime(task.dueAt) : 'No due date'}</time></article>)}</div>
+      <button className="link-button" onClick={() => onContact(task.contactId)}>{contactName ?? 'Contact'} <ExternalLink /></button></div>
+    <time className={isOverdue(task) ? 'danger-text' : ''}>{task.dueAt ? formatDateTime(task.dueAt) : 'No due date'}</time>
+  </article>
+}
+
+function VirtualTaskList({ tasks, renderTask }: {
+  tasks: CrmTaskDto[]
+  renderTask(task: CrmTaskDto, virtualStart?: number, virtualIndex?: number, measureElement?: (element: HTMLElement | null) => void): React.JSX.Element
+}): React.JSX.Element {
+  const parentRef = useRef<HTMLDivElement>(null)
+  const virtualizer = useVirtualizer({ count: tasks.length, getScrollElement: () => parentRef.current,
+    estimateSize: () => 78, overscan: 8, getItemKey: (index) => tasks[index]?.id ?? index })
+  return <div ref={parentRef} className="crm-task-list crm-virtual-task-list" style={{ height: Math.min(680, tasks.length * 78) }}>
+    <div className="crm-virtual-list" style={{ height: virtualizer.getTotalSize() }}>
+      {virtualizer.getVirtualItems().map((item) => renderTask(tasks[item.index]!, item.start, item.index, virtualizer.measureElement))}
+    </div>
+  </div>
 }
 
 function CatalogView({ items, loading, onEdit, onError }: { items?: CrmCatalogItemDto[]; loading: boolean; onEdit(item: CrmCatalogItemDto): void; onError(message: string): void }): React.JSX.Element {
@@ -210,7 +315,7 @@ function CatalogView({ items, loading, onEdit, onError }: { items?: CrmCatalogIt
   const archive = useMutation({ mutationFn: (id: string) => window.warish.crm.catalog.delete(id),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['crm', 'catalog'] }), onError: (error) => onError(errorMessage(error)) })
   if (loading) return <CrmLoading label="Loading catalog…" />
-  if (!items?.length) return <CrmEmpty icon={<Package />} title="Your catalog is empty" description="Add reusable products and services, then pull them into orders in one click." />
+  if (!items?.length) return <CrmEmpty icon={<Package />} title="No catalog items" />
   return <div className="catalog-grid">{items.map((item) => <article key={item.id} className={`catalog-card ${item.active ? '' : 'inactive'}`}>
     <header><span className="catalog-icon">{item.type === 'product' ? <Package /> : <BriefcaseBusiness />}</span><div><small>{item.type}{item.sku ? ` · ${item.sku}` : ''}</small><strong>{item.name}</strong></div>
       <button className="icon-button" aria-label={`Edit ${item.name}`} onClick={() => onEdit(item)}><Pencil /></button></header>
@@ -294,15 +399,15 @@ export function CrmContactPanel({ contactId, stages, onClose, inConversation = f
           onEdit={(order) => setOrderEditor(order)} />}
         {tab === 'activity' && <ContactActivity contactId={contactId} />}
       </div>
-      {contactSaveOpen && <WhatsAppContactDialog chatId={contact.chatId}
+      <MotionPresence show={contactSaveOpen}>{contactSaveOpen && <WhatsAppContactDialog chatId={contact.chatId}
         initialName={whatsappDetailsQuery.data?.savedName ?? contact.name} phoneNumber={contact.phoneNumber}
-        saved={Boolean(whatsappDetailsQuery.data?.savedName)} onClose={() => setContactSaveOpen(false)} />}
+        saved={Boolean(whatsappDetailsQuery.data?.savedName)} onClose={() => setContactSaveOpen(false)} />}</MotionPresence>
     </>}
   </aside>
-    {contact && taskEditor !== undefined && <TaskDialog key={taskEditor?.id ?? 'new-task'} initialContactId={contact.id} contacts={[contact]}
-      task={taskEditor ?? undefined} onClose={() => setTaskEditor(undefined)} />}
-    {contact && orderEditor !== undefined && <OrderDialog key={orderEditor?.id ?? 'new-order'} initialContactId={contact.id} contacts={[contact]}
-      catalog={catalogQuery.data ?? []} order={orderEditor ?? undefined} onClose={() => setOrderEditor(undefined)} />}
+    <MotionPresence show={Boolean(contact && taskEditor !== undefined)}>{contact && taskEditor !== undefined && <TaskDialog key={taskEditor?.id ?? 'new-task'} initialContactId={contact.id} contacts={[contact]}
+      task={taskEditor ?? undefined} onClose={() => setTaskEditor(undefined)} />}</MotionPresence>
+    <MotionPresence show={Boolean(contact && orderEditor !== undefined)}>{contact && orderEditor !== undefined && <OrderDialog key={orderEditor?.id ?? 'new-order'} initialContactId={contact.id} contacts={[contact]}
+      catalog={catalogQuery.data ?? []} order={orderEditor ?? undefined} onClose={() => setOrderEditor(undefined)} />}</MotionPresence>
   </>
 }
 
@@ -374,14 +479,14 @@ function ContactNotes({ contactId, onJumpToMessage }: { contactId: string; onJum
       {note.sourceMessage && <MessageReference reference={note.sourceMessage} onJump={onJumpToMessage} />}
       <footer><time>{formatDateTime(note.createdAt)}</time><span><button className="icon-button" aria-label="Edit note" onClick={() => edit(note)}><Pencil /></button>
         <button className="icon-button danger-text" aria-label="Delete note" disabled={remove.isPending} onClick={() => remove.mutate(note.id)}><Trash2 /></button></span></footer></article>)}
-      {!query.isLoading && !query.data?.length && <CrmEmpty icon={<FileText />} title="No notes yet" description="Keep useful customer context here." />}</div></div>
+      {!query.isLoading && !query.data?.length && <CrmEmpty icon={<FileText />} title="No notes" />}</div></div>
 }
 
 function ContactOrders({ contactId, onNew, onEdit }: { contactId: string; onNew(): void; onEdit(order: CrmOrderDto): void }): React.JSX.Element {
   const query = useQuery({ queryKey: ['crm', 'orders', contactId], queryFn: () => window.warish.crm.orders.list(contactId) })
   return <div><button className="primary-button contact-tab-action" onClick={onNew}><Plus />New order</button>{query.data?.map((order) => <button className="contact-order" key={order.id} onClick={() => onEdit(order)}>
     <span><strong>{order.orderNumber}</strong><small>{formatDateTime(order.createdAt)}</small></span><StatusPill value={order.status} /><b>{money(order.total, order.currency)}</b><Pencil /></button>)}
-    {!query.isLoading && !query.data?.length && <CrmEmpty icon={<ShoppingBag />} title="No purchase history" description="Orders for this contact will appear here." />}</div>
+    {!query.isLoading && !query.data?.length && <CrmEmpty icon={<ShoppingBag />} title="No purchase history" />}</div>
 }
 
 function ContactTasks({ contactId, onNew, onEdit, onJumpToMessage }: { contactId: string; onNew(): void; onEdit(task: CrmTaskDto): void; onJumpToMessage?(messageId: string): void }): React.JSX.Element {
@@ -403,13 +508,13 @@ function ContactTasks({ contactId, onNew, onEdit, onJumpToMessage }: { contactId
     <button className="contact-task-copy" onClick={() => onEdit(task)}><strong>{task.title}</strong><small>{task.dueAt ? formatDateTime(task.dueAt) : 'No due date'}</small></button>
     <PriorityPill value={task.priority} /><button className="icon-button danger-text" aria-label="Delete task" disabled={remove.isPending} onClick={() => remove.mutate(task.id)}><Trash2 /></button>
     {task.sourceMessage && <MessageReference reference={task.sourceMessage} onJump={onJumpToMessage} />}</article>)}
-    {!query.isLoading && !query.data?.length && <CrmEmpty icon={<ListTodo />} title="No follow-ups" description="Create a task so this relationship does not go cold." />}</div>
+    {!query.isLoading && !query.data?.length && <CrmEmpty icon={<ListTodo />} title="No follow-ups" />}</div>
 }
 
 function ContactActivity({ contactId }: { contactId: string }): React.JSX.Element {
   const query = useQuery({ queryKey: ['crm', 'activity', contactId], queryFn: () => window.warish.crm.activity(contactId, 100) })
   return <div className="crm-timeline">{query.data?.map((activity) => <article key={activity.id}><i /><div><strong>{activity.summary}</strong><time>{formatDateTime(activity.createdAt)}</time></div></article>)}
-    {!query.isLoading && !query.data?.length && <CrmEmpty icon={<RefreshCw />} title="No activity yet" description="CRM changes will be recorded here." />}</div>
+    {!query.isLoading && !query.data?.length && <CrmEmpty icon={<RefreshCw />} title="No activity" />}</div>
 }
 
 function MessageReference({ reference, onJump }: { reference: CrmMessageReferenceDto; onJump?(messageId: string): void }): React.JSX.Element {
@@ -549,7 +654,7 @@ function FormField({ label, children }: { label: string; children: ReactNode }):
 function RelativeDate({ value }: { value: number }): React.JSX.Element { return <time title={formatDateTime(value)}>{relativeDate(value)}</time> }
 function CrmLoading({ label }: { label: string }): React.JSX.Element { return <div className="crm-state"><LoaderCircle className="spin" /><span>{label}</span></div> }
 function CrmError({ label, onRetry }: { label: string; onRetry(): void }): React.JSX.Element { return <div className="crm-state error-text"><span>{label}</span><button className="secondary-button" onClick={onRetry}><RefreshCw />Try again</button></div> }
-function CrmEmpty({ icon, title, description }: { icon: ReactNode; title: string; description: string }): React.JSX.Element { return <div className="crm-empty">{icon}<strong>{title}</strong><p>{description}</p></div> }
+function CrmEmpty({ icon, title, description }: { icon: ReactNode; title: string; description?: string }): React.JSX.Element { return <div className="crm-empty">{icon}<strong>{title}</strong>{description && <p>{description}</p>}</div> }
 
 const currencyFormatter = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 })
 function money(value: number, currency = 'INR'): string {
