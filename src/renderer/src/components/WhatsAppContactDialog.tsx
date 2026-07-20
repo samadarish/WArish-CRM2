@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ContactRound, LoaderCircle, Save, X } from 'lucide-react'
 import type { ContactDetails } from '../../../shared/contracts'
 import { useUiStore } from '../store'
+import { useDialogFocus } from '../use-dialog-focus'
 
 export function WhatsAppContactDialog({ chatId, initialName, phoneNumber, saved, onClose }: {
   chatId: string
@@ -28,14 +29,11 @@ export function WhatsAppContactDialog({ chatId, initialName, phoneNumber, saved,
     },
     onError: (error) => pushNotice(error instanceof Error ? error.message : 'Could not save this WhatsApp contact')
   })
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent): void => { if (event.key === 'Escape' && !save.isPending) onClose() }
-    window.addEventListener('keydown', closeOnEscape)
-    return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [onClose, save.isPending])
+  const dialogRef = useDialogFocus<HTMLElement>(onClose, !save.isPending)
   return <div className="modal-backdrop crm-dialog-backdrop" onMouseDown={(event) => {
     if (event.target === event.currentTarget && !save.isPending) onClose()
-  }}><section className="modal crm-dialog whatsapp-contact-dialog" role="dialog" aria-modal="true" aria-labelledby="whatsapp-contact-title">
+  }}><section ref={dialogRef} className="modal crm-dialog whatsapp-contact-dialog" role="dialog" aria-modal="true"
+    aria-labelledby="whatsapp-contact-title" tabIndex={-1}>
     <header><div><span>WhatsApp contact</span><h2 id="whatsapp-contact-title">{saved ? 'Edit saved contact' : 'Save new contact'}</h2></div>
       <button className="icon-button" aria-label="Close contact dialog" disabled={save.isPending} onClick={onClose}><X /></button></header>
     <div className="crm-dialog-body"><form className="crm-form" onSubmit={(event) => { event.preventDefault(); if (fullName.trim()) save.mutate() }}>

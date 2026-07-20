@@ -1,11 +1,12 @@
 import { memo, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { format } from 'date-fns'
-import { Check, CheckCheck, Clock3, Copy, Download, File, Forward, Heart, Images, List, ListTodo, MessageSquareText, NotebookPen, Package, Pencil, RefreshCw, Reply, Trash2, Vote, X } from 'lucide-react'
+import { Check, CheckCheck, Clock3, Copy, Download, EllipsisVertical, File, Forward, Heart, Images, List, ListTodo, MessageSquareText, NotebookPen, Package, Pencil, RefreshCw, Reply, Trash2, Vote, X } from 'lucide-react'
 import type { MessageDto } from '../../../shared/contracts'
 import type { MessageGroupPosition } from '../message-grouping'
 import { useMotionPhase } from '../motion-context'
 import { MotionPresence } from '../motion'
+import { useDialogFocus } from '../use-dialog-focus'
 
 export const MessageBubble = memo(function MessageBubble({ message, groupPosition = 'single', readOnly = false, showSender, onReply, onForward, onAddNote, onAddTask, onOpenQuote, onResize, onRetry, onError }: {
   message: MessageDto
@@ -28,6 +29,8 @@ export const MessageBubble = memo(function MessageBubble({ message, groupPositio
   const [editOpen, setEditOpen] = useState(false)
   const [editText, setEditText] = useState(message.text ?? '')
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
+  const actionsRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const token = message.attachment?.cacheToken
     const draftToken = message.attachment?.draftToken
@@ -35,6 +38,21 @@ export const MessageBubble = memo(function MessageBubble({ message, groupPositio
       ? { url: `warish-media://cache/${encodeURIComponent(token)}`, token }
       : draftToken ? { url: `warish-media://drafts/${encodeURIComponent(draftToken)}`, token: draftToken } : undefined)
   }, [message.attachment?.cacheToken, message.attachment?.draftToken])
+  useEffect(() => {
+    if (!moreOpen) return
+    const closeOnOutsidePointer = (event: PointerEvent): void => {
+      if (!actionsRef.current?.contains(event.target as Node)) setMoreOpen(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setMoreOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOnOutsidePointer)
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePointer)
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [moreOpen])
   const download = async (): Promise<void> => {
     setDownloading(true)
     try {
@@ -82,15 +100,24 @@ export const MessageBubble = memo(function MessageBubble({ message, groupPositio
         <div className="message-meta">{message.edited && <span>edited</span>}<time>{format(message.timestamp, 'HH:mm')}</time>{message.fromMe && <DeliveryIcon status={message.status} />}</div>
         {!readOnly && message.status === 'failed' && onRetry && <button className="message-failed" onClick={() => onRetry(message.id)}><RefreshCw />Retry</button>}
         {message.reactions.length > 0 && <div className="reaction-pill">{message.reactions.map((reaction) => reaction.emoji).join(' ')}</div>}
-        <div className="message-actions">
+        <div className="message-actions" ref={actionsRef}>
           {!readOnly && <button title="Reply" aria-label="Reply" onClick={() => onReply(message)}><Reply /></button>}
           {!readOnly && <button title="React with heart" aria-label="React with heart" onClick={() => void react()}><Heart /></button>}
-          {message.text && <button title="Copy text" aria-label="Copy message text" onClick={() => void copy()}><Copy /></button>}
-          {onAddNote && <button title="Add to CRM notes" aria-label="Add message to CRM notes" onClick={() => onAddNote(message)}><NotebookPen /></button>}
-          {onAddTask && <button title="Create CRM task" aria-label="Create task from message" onClick={() => onAddTask(message)}><ListTodo /></button>}
-          <button title="Forward" aria-label="Forward" onClick={() => onForward(message)}><Forward /></button>
-          {!readOnly && message.fromMe && message.kind === 'text' && <button title="Edit" aria-label="Edit message" onClick={() => { setEditText(message.text ?? ''); setEditOpen(true) }}><Pencil /></button>}
-          {!readOnly && <button title="Delete" aria-label="Delete message" onClick={() => setDeleteOpen(true)}><Trash2 /></button>}
+          {readOnly && message.text && <button title="Copy text" aria-label="Copy message text" onClick={() => void copy()}><Copy /></button>}
+          {readOnly && <button title="Forward" aria-label="Forward" onClick={() => onForward(message)}><Forward /></button>}
+          {!readOnly && <div className="message-action-overflow"><button title="More actions" aria-label="More message actions" aria-haspopup="menu"
+            aria-expanded={moreOpen} onClick={() => setMoreOpen((open) => !open)}><EllipsisVertical /></button>
+            {moreOpen && <div className="message-action-menu" role="menu">
+              {message.text && <button role="menuitem" onClick={() => { setMoreOpen(false); void copy() }}><Copy />Copy text</button>}
+              {onAddNote && <button role="menuitem" onClick={() => { setMoreOpen(false); onAddNote(message) }}><NotebookPen />Add to CRM notes</button>}
+              {onAddTask && <button role="menuitem" onClick={() => { setMoreOpen(false); onAddTask(message) }}><ListTodo />Create follow-up</button>}
+              <button role="menuitem" onClick={() => { setMoreOpen(false); onForward(message) }}><Forward />Forward</button>
+              {message.fromMe && message.kind === 'text' && <button role="menuitem" onClick={() => {
+                setMoreOpen(false); setEditText(message.text ?? ''); setEditOpen(true)
+              }}><Pencil />Edit message</button>}
+              <button role="menuitem" className="danger-text" onClick={() => { setMoreOpen(false); setDeleteOpen(true) }}><Trash2 />Delete message</button>
+            </div>}
+          </div>}
         </div>
       </div>
       <MotionPresence show={editOpen}>{editOpen && <ActionDialog title="Edit message" onClose={() => setEditOpen(false)}>
@@ -192,15 +219,11 @@ function DeliveryIcon({ status }: { status: MessageDto['status'] }): React.JSX.E
 
 function ActionDialog({ title, onClose, children }: { title: string; onClose(): void; children: React.ReactNode }): React.JSX.Element {
   const motionPhase = useMotionPhase()
-  useEffect(() => {
-    const escape = (event: KeyboardEvent): void => { if (event.key === 'Escape') onClose() }
-    window.addEventListener('keydown', escape)
-    return () => window.removeEventListener('keydown', escape)
-  }, [onClose])
+  const dialogRef = useDialogFocus<HTMLElement>(onClose)
   return createPortal(<div className="modal-backdrop" data-motion-state={motionPhase} role="presentation"
     aria-hidden={motionPhase === 'exiting' ? true : undefined} inert={motionPhase === 'exiting' ? true : undefined}
     onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-    <section className="modal action-dialog" role="dialog" aria-modal="true" aria-label={title}>
+    <section ref={dialogRef} className="modal action-dialog" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1}>
       <header><h2>{title}</h2><button className="icon-button" aria-label={`Close ${title}`} onClick={onClose}><X /></button></header>
       <div className="action-dialog-content">{children}</div>
     </section>

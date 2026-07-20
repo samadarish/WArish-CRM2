@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CrmContactDetailsDto, CrmContactSummaryDto, CrmDashboardDto, CrmStageDto } from '../src/shared/contracts'
 import { CrmShell } from '../src/renderer/src/components/CrmShell'
@@ -101,5 +101,38 @@ describe('CrmShell', () => {
     fireEvent.click(screen.getByRole('button', { name: 'All leads' }))
     expect(await screen.findByText('Priya Enquiry')).toBeInTheDocument()
     expect(listContacts).toHaveBeenCalledWith(expect.objectContaining({ lifecycle: 'lead', stageId: undefined }))
+  })
+
+  it('disables contact-dependent actions and explains the empty CRM state', async () => {
+    vi.mocked(window.warish.crm.contacts.list).mockResolvedValue([])
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={queryClient}><CrmShell /></QueryClientProvider>)
+
+    const navigation = screen.getByRole('navigation', { name: 'CRM sections' })
+    fireEvent.click(within(navigation).getByRole('button', { name: 'Tasks' }))
+    const newTask = await screen.findByRole('button', { name: 'New task' })
+    await waitFor(() => expect(newTask).toBeDisabled())
+    expect(newTask).toHaveAttribute('title', 'Save a WhatsApp contact before creating a task')
+    expect(await screen.findByText('No contacts to follow up with')).toBeInTheDocument()
+    expect(screen.getByText('Save a WhatsApp contact before creating a task.')).toBeInTheDocument()
+  })
+
+  it('flags an order payment that exceeds the calculated total', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={queryClient}><CrmShell /></QueryClientProvider>)
+
+    const navigation = screen.getByRole('navigation', { name: 'CRM sections' })
+    fireEvent.click(within(navigation).getByRole('button', { name: 'Orders' }))
+    const newOrder = await screen.findByRole('button', { name: 'New order' })
+    await waitFor(() => expect(newOrder).toBeEnabled())
+    fireEvent.click(newOrder)
+    const dialog = await screen.findByRole('dialog', { name: 'New order' })
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Item name' }), { target: { value: 'Consultation' } })
+    fireEvent.change(within(dialog).getByRole('spinbutton', { name: 'Rate' }), { target: { value: '100' } })
+    const payment = within(dialog).getByRole('spinbutton', { name: 'Payment received' })
+    expect(payment).toHaveAttribute('max', '100')
+    fireEvent.change(payment, { target: { value: '101' } })
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('Payment cannot exceed the order total.')
+    expect(within(dialog).getByRole('button', { name: 'Save order' })).toBeDisabled()
   })
 })

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { MessageDto } from '../src/shared/contracts'
 import { MessageBubble } from '../src/renderer/src/components/MessageBubble'
@@ -148,11 +148,14 @@ describe('MessageBubble', () => {
     const message = createMessage({ chatId: 'person@s.whatsapp.net' })
     const onAddNote = vi.fn()
     const onAddTask = vi.fn()
-    render(<MessageBubble message={message} showSender={false} onReply={vi.fn()} onForward={vi.fn()}
+    const { container } = render(<MessageBubble message={message} showSender={false} onReply={vi.fn()} onForward={vi.fn()}
       onAddNote={onAddNote} onAddTask={onAddTask} onOpenQuote={vi.fn()} onResize={vi.fn()} onError={vi.fn()} />)
+    const bubble = within(container)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add message to CRM notes' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Create task from message' }))
+    fireEvent.click(bubble.getByRole('button', { name: 'More message actions' }))
+    fireEvent.click(bubble.getByRole('menuitem', { name: 'Add to CRM notes' }))
+    fireEvent.click(bubble.getByRole('button', { name: 'More message actions' }))
+    fireEvent.click(bubble.getByRole('menuitem', { name: 'Create follow-up' }))
     expect(onAddNote).toHaveBeenCalledWith(message)
     expect(onAddTask).toHaveBeenCalledWith(message)
   })

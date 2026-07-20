@@ -390,6 +390,19 @@ describe('WarishDatabase', () => {
     database.close()
   })
 
+  it('falls back to the newest message page when a cursor has invalid tuple values', () => {
+    const { database } = createDatabase()
+    const chatId = '15550005556@s.whatsapp.net'
+    database.storeMessage({ id: 'older', chatId, fromMe: false, kind: 'text', text: 'older',
+      timestamp: 1_000, status: 'read', incrementUnread: false })
+    database.storeMessage({ id: 'newer', chatId, fromMe: false, kind: 'text', text: 'newer',
+      timestamp: 2_000, status: 'read', incrementUnread: false })
+    const invalidCursor = Buffer.from(JSON.stringify(['not-a-timestamp', { id: 'not-a-string' }])).toString('base64url')
+
+    expect(database.listMessages(chatId, invalidCursor, 1).items.map((message) => message.id)).toEqual(['newer'])
+    database.close()
+  })
+
   it('keeps the newest preview across out-of-order and equal-timestamp imports', () => {
     const { database } = createDatabase()
     const chatId = '15550006666@s.whatsapp.net'

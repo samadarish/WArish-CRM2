@@ -1939,6 +1939,10 @@ function decodeCommunityCursor(cursor?: string): { timestamp: number; id: string
 function encodeMessageCursor(timestamp: number, id: string): string { return Buffer.from(JSON.stringify([timestamp, id])).toString('base64url') }
 function decodeMessageCursor(cursor?: string): { timestamp: number; id: string } {
   if (!cursor) return { timestamp: Number.MAX_SAFE_INTEGER, id: '\uffff' }
-  try { const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as [number, string]; return { timestamp: parsed[0], id: parsed[1] } }
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as [number, string]
+    if (!Number.isFinite(parsed[0]) || typeof parsed[1] !== 'string') throw new Error('Invalid cursor')
+    return { timestamp: parsed[0], id: parsed[1] }
+  }
   catch { return { timestamp: Number.MAX_SAFE_INTEGER, id: '\uffff' } }
 }

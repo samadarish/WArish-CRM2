@@ -248,7 +248,10 @@ function attachmentKind(value: unknown): 'image' | 'video' | 'document' | 'audio
     ? value
     : undefined
 }
-function deleteMode(value: unknown): 'for-me' | 'for-everyone' { return value === 'for-everyone' ? value : 'for-me' }
+function deleteMode(value: unknown): 'for-me' | 'for-everyone' {
+  if (value === 'for-me' || value === 'for-everyone') return value
+  throw new Error('Invalid delete mode')
+}
 function themeValue(value: unknown): AppSettings['theme'] | undefined {
   return ['system', 'light', 'dark', 'black', 'salesforce-black'].includes(String(value)) ? value as AppSettings['theme'] : undefined
 }

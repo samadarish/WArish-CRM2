@@ -14,6 +14,7 @@ import { contactIdentityPresentation, type ContactIdentityPresentation } from '.
 import { messageGroupPositions } from '../message-grouping'
 import { MotionPresence } from '../motion'
 import { useDebouncedValue } from '../use-debounced-value'
+import { useDialogFocus } from '../use-dialog-focus'
 import { Avatar } from './Avatar'
 import { MessageBubble } from './MessageBubble'
 import { NavigationRail, type SidebarDestination } from './NavigationRail'
@@ -27,6 +28,16 @@ const CrmShell = lazy(async () => {
   const module = await import('./CrmShell')
   return { default: module.CrmShell }
 })
+
+const COMPOSER_EMOJIS = [
+  ['😀', 'Grinning face'], ['😂', 'Face with tears of joy'], ['😊', 'Smiling face'], ['😍', 'Heart eyes'],
+  ['🥰', 'Smiling face with hearts'], ['😅', 'Smiling face with sweat'], ['🤔', 'Thinking face'], ['😢', 'Crying face'],
+  ['👍', 'Thumbs up'], ['🙏', 'Folded hands'], ['👏', 'Clapping hands'], ['🙌', 'Raising hands'],
+  ['👌', 'OK hand'], ['💪', 'Flexed biceps'], ['🤝', 'Handshake'], ['👋', 'Waving hand'],
+  ['❤️', 'Red heart'], ['🔥', 'Fire'], ['🎉', 'Party popper'], ['✨', 'Sparkles'],
+  ['✅', 'Check mark'], ['💯', 'Hundred points'], ['📞', 'Telephone'], ['💬', 'Speech balloon'],
+  ['📦', 'Package'], ['💰', 'Money bag'], ['🕒', 'Clock'], ['📍', 'Location pin']
+] as const
 
 export const ChatShell = memo(function ChatShell({ session }: { session: SessionState }): React.JSX.Element {
   const destination = useUiStore((state) => state.destination)
@@ -317,6 +328,7 @@ function SessionBanner({ session, retryPending, onRetry, onRelink, onSettings }:
 
 function RelinkDialog({ session, onClose }: { session: SessionState; onClose(): void }): React.JSX.Element {
   const [phone, setPhone] = useState('')
+  const dialogRef = useDialogFocus<HTMLElement>(onClose)
   const queryClient = useQueryClient()
   const pushNotice = useUiStore((state) => state.pushNotice)
   const qrMutation = useMutation({
@@ -330,7 +342,8 @@ function RelinkDialog({ session, onClose }: { session: SessionState; onClose(): 
     onError: (error) => pushNotice(errorMessage(error))
   })
   const pending = qrMutation.isPending || codeMutation.isPending
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="modal relink-dialog" role="dialog" aria-modal="true" aria-labelledby="relink-title">
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section ref={dialogRef}
+    className="modal relink-dialog" role="dialog" aria-modal="true" aria-labelledby="relink-title" tabIndex={-1}>
     <header><div><h2 id="relink-title">Relink WhatsApp</h2><p>Your local conversations and preferences will remain unchanged.</p></div><button className="icon-button" aria-label="Close relink dialog" onClick={onClose}><X /></button></header>
     <div className="relink-content">{session.qrDataUrl ? <div className="relink-qr"><img className="qr-code" src={session.qrDataUrl} alt="WhatsApp linked-device QR code" /><div><strong>Scan with your phone</strong><ol><li>Open WhatsApp</li><li>Open Linked devices</li><li>Choose Link a device</li></ol></div></div>
       : session.pairingCode ? <div className="code-view"><strong>{formatPairingCode(session.pairingCode)}</strong><p>Enter this code from WhatsApp → Linked devices → Link a device.</p></div>
@@ -462,8 +475,11 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
   const [enteringMessageIds, setEnteringMessageIds] = useState<Set<string>>(() => new Set())
   const [replyTo, setReplyTo] = useState<MessageDto>()
   const [crmCapture, setCrmCapture] = useState<{ kind: 'note' | 'task'; message: MessageDto }>()
+  const [emojiOpen, setEmojiOpen] = useState(false)
+  const [restrictedSendOpen, setRestrictedSendOpen] = useState(false)
   const [attachment, setAttachment] = useState<PickedAttachment>()
   const [attachmentKind, setAttachmentKind] = useState<'image' | 'video' | 'document' | 'audio' | 'voice' | 'sticker'>()
+  const emojiToolRef = useRef<HTMLDivElement>(null)
   const recorder = useRef<MediaRecorder | undefined>(undefined)
   const recordingTimer = useRef<number | undefined>(undefined)
   const recordingCancelledRef = useRef(false)
@@ -638,14 +654,19 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
     },
     onSettled: () => { pendingOwnSendRef.current = false }
   })
-  const submitMessage = (): void => {
+  const sendMessage = (restrictedContactAcknowledged = false): void => {
     if (chat.readOnly || sendMutation.isPending || session.phase !== 'connected' || (!text.trim() && !attachment)) return
-    const restrictedContactAcknowledged = chat.crm?.restricted
-      ? window.confirm(`Send a new message to ${chat.crm.name ?? chat.title}? This contact is marked as restricted in CRM.`)
-      : false
-    if (chat.crm?.restricted && !restrictedContactAcknowledged) return
     sendMutation.mutate({ chatId: chat.id, clientId: crypto.randomUUID(), text: text.trim() || undefined,
       attachmentToken: attachment?.token, attachmentKind, quotedMessageId: replyTo?.id, restrictedContactAcknowledged })
+  }
+  const submitMessage = (): void => {
+    if (chat.readOnly || sendMutation.isPending || session.phase !== 'connected' || (!text.trim() && !attachment)) return
+    if (chat.crm?.restricted) {
+      setEmojiOpen(false)
+      setRestrictedSendOpen(true)
+      return
+    }
+    sendMessage()
   }
   const earlierMutation = useMutation({
     mutationFn: () => window.warish.messages.loadEarlier(chat.id),
@@ -679,6 +700,8 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
     for (const timer of messageEnterTimersRef.current.values()) window.clearTimeout(timer)
     messageEnterTimersRef.current.clear()
     setCrmCapture(undefined)
+    setEmojiOpen(false)
+    setRestrictedSendOpen(false)
     if (recorder.current?.state === 'recording') {
       recorder.current.ondataavailable = null
       recorder.current.onstop = null
@@ -705,6 +728,35 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
     if (!textarea) return
     textarea.style.height = 'auto'
     textarea.style.height = `${Math.min(textarea.scrollHeight, 112)}px`
+  }, [text])
+
+  useEffect(() => {
+    if (!emojiOpen) return
+    const closeOnOutsidePointer = (event: PointerEvent): void => {
+      if (!emojiToolRef.current?.contains(event.target as Node)) setEmojiOpen(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setEmojiOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOnOutsidePointer)
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePointer)
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [emojiOpen])
+
+  const insertEmoji = useCallback((emoji: string): void => {
+    const textarea = composerRef.current
+    const start = textarea?.selectionStart ?? text.length
+    const end = textarea?.selectionEnd ?? start
+    const nextText = `${text.slice(0, start)}${emoji}${text.slice(end)}`
+    const caret = start + emoji.length
+    setText(nextText)
+    requestAnimationFrame(() => {
+      composerRef.current?.focus()
+      composerRef.current?.setSelectionRange(caret, caret)
+    })
   }, [text])
 
   useEffect(() => {
@@ -992,6 +1044,12 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
       persistent={chat.kind === 'direct'} overlayOpen={contactDrawerOpen} onClose={closeContactDetails}
       onArchived={handleContactArchived} onJumpToMessage={handleJumpToMessage} /></Suspense>}</MotionPresence>
     <MotionPresence show={Boolean(crmCapture)}>{crmCapture && <CrmCaptureDialog chat={chat} capture={crmCapture} onClose={() => setCrmCapture(undefined)} />}</MotionPresence>
+    <MotionPresence show={restrictedSendOpen}>{restrictedSendOpen && <ConfirmationDialog title="Send to a restricted contact?"
+      description={`${chat.crm?.name ?? chat.title} is marked as restricted in CRM. Confirm that you intend to start this conversation.`}
+      confirmLabel="Send message" pending={sendMutation.isPending} onClose={() => setRestrictedSendOpen(false)} onConfirm={() => {
+        setRestrictedSendOpen(false)
+        sendMessage(true)
+      }} />}</MotionPresence>
     {newMessageCount > 0 && <button className="new-messages-button" onClick={() => scrollToNewest()}><ArrowDown />{newMessageCount} new {newMessageCount === 1 ? 'message' : 'messages'}</button>}
     {!chat.readOnly && (replyTo || attachment) && <div className="composer-context">
       <div>{replyTo && <><strong>Replying to {replyTo.senderName ?? (replyTo.fromMe ? 'yourself' : chat.title)}</strong><span>{replyTo.text ?? replyTo.kind}</span></>}{attachment && <><strong>{attachmentKind === 'voice' ? 'Voice message' : attachment.name}</strong><span>{formatBytes(attachment.size)}</span></>}</div>
@@ -1003,7 +1061,10 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
       }}><X /></button>
     </div>}
     {chat.readOnly ? <footer className="read-only-composer"><Radio /><span>Channels are read-only in WArish</span></footer> : <footer className="composer">
-      <button className="icon-button" title="Emoji" onClick={() => setText((value) => `${value} 😊`)}><Smile /></button>
+      <div className="composer-tool" ref={emojiToolRef}><button className={`icon-button ${emojiOpen ? 'active' : ''}`} title="Emoji"
+        aria-label="Choose an emoji" aria-haspopup="dialog" aria-expanded={emojiOpen} disabled={isRecording}
+        onClick={() => setEmojiOpen((open) => !open)}><Smile /></button>
+        <MotionPresence show={emojiOpen}>{emojiOpen && <EmojiPicker onSelect={insertEmoji} onClose={() => setEmojiOpen(false)} />}</MotionPresence></div>
       <button className="icon-button" title="Attach" aria-label="Attach a file" disabled={isRecording} onClick={() => void chooseAttachment()}><Paperclip /></button>
       <textarea ref={composerRef} value={text} rows={1} aria-label="Message" placeholder={isRecording ? `Recording… ${formatDuration(recordingSeconds)}` : session.phase === 'connected' ? 'Type a message' : 'Type a draft — reconnect to send'} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => {
         if (shouldSubmitComposer(event, enterToSend)) { event.preventDefault(); submitMessage() }
@@ -1017,12 +1078,50 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
   </>
 }
 
+function EmojiPicker({ onSelect, onClose }: { onSelect(emoji: string): void; onClose(): void }): React.JSX.Element {
+  const moveFocus = (event: React.KeyboardEvent<HTMLButtonElement>, index: number): void => {
+    const offsets: Partial<Record<string, number>> = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 }
+    const offset = offsets[event.key]
+    if (offset === undefined) return
+    event.preventDefault()
+    const next = (index + offset + COMPOSER_EMOJIS.length) % COMPOSER_EMOJIS.length
+    const buttons = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('button')
+    buttons?.[next]?.focus()
+  }
+  return <div className="emoji-picker" role="dialog" aria-label="Choose an emoji">
+    <header><strong>Emoji</strong><button aria-label="Close emoji picker" onClick={onClose}><X /></button></header>
+    <div className="emoji-grid">{COMPOSER_EMOJIS.map(([emoji, label], index) => <button key={emoji} title={label} aria-label={label}
+      onMouseDown={(event) => event.preventDefault()} onKeyDown={(event) => moveFocus(event, index)} onClick={() => onSelect(emoji)}>{emoji}</button>)}</div>
+  </div>
+}
+
+function ConfirmationDialog({ title, description, confirmLabel, pending = false, onConfirm, onClose }: {
+  title: string
+  description: string
+  confirmLabel: string
+  pending?: boolean
+  onConfirm(): void
+  onClose(): void
+}): React.JSX.Element {
+  const dialogRef = useDialogFocus<HTMLElement>(onClose, !pending)
+  return <div className="modal-backdrop confirmation-backdrop" onMouseDown={(event) => {
+    if (!pending && event.target === event.currentTarget) onClose()
+  }}><section ref={dialogRef} className="modal action-dialog confirmation-dialog" role="alertdialog" aria-modal="true"
+    aria-label={title} tabIndex={-1}>
+    <header><div className="dialog-icon warning"><CircleAlert /></div><h2>{title}</h2>
+      <button className="icon-button" aria-label="Cancel" disabled={pending} onClick={onClose}><X /></button></header>
+    <div className="action-dialog-content"><p>{description}</p><footer><button disabled={pending} onClick={onClose}>Cancel</button>
+      <button className="primary-button" disabled={pending} onClick={onConfirm}>{pending ? 'Working…' : confirmLabel}</button></footer></div>
+  </section></div>
+}
+
 function CrmCaptureDialog({ chat, capture, onClose }: {
   chat: ChatSummary
   capture: { kind: 'note' | 'task'; message: MessageDto }
   onClose(): void
 }): React.JSX.Element {
   const preview = messagePreview(capture.message)
+  const dialogRef = useDialogFocus<HTMLElement>(onClose)
   const [body, setBody] = useState(preview)
   const [title, setTitle] = useState('Follow up on WhatsApp')
   const [description, setDescription] = useState(preview)
@@ -1056,12 +1155,9 @@ function CrmCaptureDialog({ chat, capture, onClose }: {
     pushNotice(capture.kind === 'note' ? 'Message added to CRM notes' : 'Follow-up task created', 'info')
     onClose()
   }, onError: (error) => pushNotice(errorMessage(error)) })
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent): void => { if (event.key === 'Escape') onClose() }
-    window.addEventListener('keydown', closeOnEscape)
-    return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [onClose])
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="modal crm-capture-dialog" role="dialog" aria-modal="true" aria-label={capture.kind === 'note' ? 'Add CRM note' : 'Create follow-up task'}>
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section ref={dialogRef}
+    className="modal crm-capture-dialog" role="dialog" aria-modal="true" tabIndex={-1}
+    aria-label={capture.kind === 'note' ? 'Add CRM note' : 'Create follow-up task'}>
     <header><div><span>{capture.kind === 'note' ? 'CRM note' : 'Follow-up task'}</span><h2>{capture.kind === 'note' ? 'Add message to notes' : 'Create task from message'}</h2></div><button className="icon-button" aria-label="Close" onClick={onClose}><X /></button></header>
     <form onSubmit={(event) => { event.preventDefault(); save.mutate() }}><div className="crm-capture-source"><MessageCircle /><span><small>{capture.message.fromMe ? 'You' : capture.message.senderName ?? chat.title}</small><strong>{preview}</strong></span></div>
       {capture.kind === 'note' ? <label><span>Note</span><textarea autoFocus value={body} onChange={(event) => setBody(event.target.value)} required /></label>
@@ -1078,6 +1174,8 @@ function CrmCaptureDialog({ chat, capture, onClose }: {
 function ForwardDialog({ message, onClose }: { message: MessageDto; onClose(): void }): React.JSX.Element {
   const [selected, setSelected] = useState<string[]>([])
   const [query, setQuery] = useState('')
+  const [restrictedConfirmation, setRestrictedConfirmation] = useState<{ ids: string[]; names: string[] }>()
+  const dialogRef = useDialogFocus<HTMLElement>(onClose)
   const debouncedQuery = useDebouncedValue(query, 220)
   const pushNotice = useUiStore((state) => state.pushNotice)
   const chatsQuery = useInfiniteQuery({
@@ -1091,15 +1189,14 @@ function ForwardDialog({ message, onClose }: { message: MessageDto; onClose(): v
     onError: (error) => pushNotice(errorMessage(error)) })
   const submitForward = (): void => {
     const restricted = chats.filter((chat) => selected.includes(chat.id) && chat.crm?.restricted)
-    if (restricted.length && !window.confirm(`Forward this message to ${restricted.map((chat) => chat.crm?.name ?? chat.title).join(', ')}? ${restricted.length === 1 ? 'This contact is' : 'These contacts are'} marked as restricted in CRM.`)) return
+    if (restricted.length) {
+      setRestrictedConfirmation({ ids: restricted.map((chat) => chat.id), names: restricted.map((chat) => chat.crm?.name ?? chat.title) })
+      return
+    }
     mutation.mutate(restricted.map((chat) => chat.id))
   }
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent): void => { if (event.key === 'Escape') onClose() }
-    window.addEventListener('keydown', closeOnEscape)
-    return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [onClose])
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="modal forward-dialog" role="dialog" aria-modal="true" aria-labelledby="forward-title"><header><h2 id="forward-title">Forward message</h2><button className="icon-button" aria-label="Close forward dialog" onClick={onClose}><X /></button></header>
+  return <><div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section ref={dialogRef}
+    className="modal forward-dialog" role="dialog" aria-modal="true" aria-labelledby="forward-title" tabIndex={-1}><header><h2 id="forward-title">Forward message</h2><button className="icon-button" aria-label="Close forward dialog" onClick={onClose}><X /></button></header>
     <label className="search-box"><Search /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search conversations" aria-label="Search conversations" />{query && <button aria-label="Clear search" onClick={() => setQuery('')}><X /></button>}</label>
     <div className="forward-list" onScroll={(event) => {
       const element = event.currentTarget
@@ -1110,6 +1207,12 @@ function ForwardDialog({ message, onClose }: { message: MessageDto; onClose(): v
       {chats.map((chat) => <label key={chat.id}><input type="checkbox" checked={selected.includes(chat.id)} onChange={() => setSelected((items) => items.includes(chat.id) ? items.filter((id) => id !== chat.id) : [...items, chat.id])} /><Avatar title={chat.title} src={chat.avatarUrl} /><span>{chat.title}</span>{selected.includes(chat.id) && <Check />}</label>)}
       {chatsQuery.isFetchingNextPage && <LoadingRow label="Loading more conversations…" />}
     </div><footer><button onClick={onClose}>Cancel</button><button className="primary-button" disabled={!selected.length || mutation.isPending} onClick={submitForward}>{mutation.isPending ? 'Forwarding…' : 'Forward'}</button></footer></section></div>
+    <MotionPresence show={Boolean(restrictedConfirmation)}>{restrictedConfirmation && <ConfirmationDialog title="Forward to restricted contacts?"
+      description={`${restrictedConfirmation.names.join(', ')} ${restrictedConfirmation.names.length === 1 ? 'is' : 'are'} marked as restricted in CRM.`}
+      confirmLabel="Forward anyway" onClose={() => setRestrictedConfirmation(undefined)} onConfirm={() => {
+        mutation.mutate(restrictedConfirmation.ids)
+        setRestrictedConfirmation(undefined)
+      }} />}</MotionPresence></>
 }
 
 function WelcomePanel(): React.JSX.Element { return <div className="welcome-panel"><MessageCircle /><h2>No conversation selected</h2></div> }

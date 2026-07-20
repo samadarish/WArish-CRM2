@@ -48,7 +48,7 @@ export function SalesLifecyclePath({ chat }: { chat: ChatSummary }): React.JSX.E
   })
 
   return <section className="sales-lifecycle" aria-label="Sales lifecycle">
-    <span className="sales-lifecycle-label"><strong>Sales lifecycle</strong><small>{chat.crm ? 'Pipeline' : 'Not tracked'}</small></span>
+    <span className="sales-lifecycle-label"><strong>Pipeline</strong><small>{chat.crm?.stageName ?? 'Not tracked'}</small></span>
     <div className="sales-lifecycle-scroll">
       {stagesQuery.isLoading && <div className="sales-lifecycle-skeleton" aria-label="Loading sales lifecycle">
         {Array.from({ length: 5 }, (_, index) => <i key={index} />)}
