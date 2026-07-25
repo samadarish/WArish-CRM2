@@ -27,6 +27,14 @@ export default tseslint.config(
     }
   },
   {
+    files: ['scripts/*.mjs'],
+    ...tseslint.configs.disableTypeChecked,
+    languageOptions: {
+      ...tseslint.configs.disableTypeChecked.languageOptions,
+      globals: { Buffer: 'readonly', console: 'readonly', process: 'readonly' }
+    }
+  },
+  {
     files: ['src/core/auth-store.ts', 'src/core/normalizer.ts', 'src/core/whatsapp-client.ts'],
     rules: {
       '@typescript-eslint/require-await': 'off',

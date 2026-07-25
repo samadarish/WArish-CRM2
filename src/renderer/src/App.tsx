@@ -1,6 +1,8 @@
 import { Component, lazy, memo, Suspense, useEffect, useState, type ErrorInfo, type ReactNode } from 'react'
 import { useQuery, useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query'
+import { brandToneForTheme, resolveAppTheme } from '../../shared/branding'
 import type { AppSettings, ChatMergedEvent, ChatSummary, CommunitySummary, ContactSyncState, CoreEventEnvelope, CoreEventPayloadMap, HistoryBatchEvent, MessageDto, Page, SessionState } from '../../shared/contracts'
+import { BrandMark } from './components/BrandMark'
 import { ChatShell } from './components/ChatShell'
 import { Onboarding } from './components/Onboarding'
 import { resolveSessionSurface } from './session-surface'
@@ -337,10 +339,9 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { error?: Erro
 
 function applyAppearance(settings?: AppSettings): void {
   if (!settings) return
-  const theme = settings.theme === 'system'
-    ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-    : settings.theme
+  const theme = resolveAppTheme(settings.theme, window.matchMedia('(prefers-color-scheme: dark)').matches)
   document.documentElement.dataset.theme = theme
+  document.documentElement.dataset.brandTone = brandToneForTheme(theme)
   document.documentElement.dataset.density = settings.density === 'ultra-dense' ? 'dense' : settings.density
   document.documentElement.dataset.densityMode = settings.density
   document.documentElement.dataset.navigation = settings.navigationMode
@@ -349,9 +350,9 @@ function applyAppearance(settings?: AppSettings): void {
 }
 
 const Splash = memo(function Splash({ label }: { label: string }): React.JSX.Element {
-  return <main className="splash"><div className="brand-mark">W</div><div className="spinner" /><p>{label}</p></main>
+  return <main className="splash"><BrandMark size="large" label="WArish" /><div className="spinner" /><p>{label}</p></main>
 })
 
 function FatalError({ error, onRetry }: { error: Error; onRetry(): void }): React.JSX.Element {
-  return <main className="splash"><div className="brand-mark error">!</div><h1>WArish could not start</h1><p>{error.message}</p><button onClick={onRetry}>Try again</button></main>
+  return <main className="splash"><div className="brand-error-mark" aria-hidden="true">!</div><h1>WArish could not start</h1><p>{error.message}</p><button onClick={onRetry}>Try again</button></main>
 }

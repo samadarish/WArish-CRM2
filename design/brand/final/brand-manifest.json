@@ -1,0 +1,100 @@
+{
+  "identity": "WArish Flow",
+  "selectedConcept": "03 Flow",
+  "masterType": "exact selected raster artwork",
+  "sourceFile": "design/logo-concepts/round-01/03-flow-salesforce-preview.png",
+  "sourceSha256": "10201926167af46dd7c6ea55a2d995182765f05695f39b06fff3d4052b595e27",
+  "palettes": {
+    "light": {
+      "ribbon": "#0D9DDA",
+      "body": "#032D60",
+      "source": "exact selected artwork"
+    },
+    "dark": {
+      "ribbon": "#1B96FF",
+      "body": "#0B5CAB",
+      "source": "selected artwork with brightness-only adaptation"
+    },
+    "trayOnLight": "#032D60",
+    "trayOnDark": "#F3F9FF"
+  },
+  "exportedPngSizes": [
+    16,
+    32,
+    64,
+    128,
+    256,
+    512,
+    1024
+  ],
+  "applicationIcoSizes": [
+    16,
+    20,
+    24,
+    32,
+    40,
+    48,
+    64,
+    128,
+    256
+  ],
+  "applicationVisibleCanvasFraction": 0.9375,
+  "applicationMarkCanvasFraction": 0.8671875,
+  "applicationTile": {
+    "fill": "#EAF4FB",
+    "cornerRadiusFraction": 0.21979166666666666,
+    "border": null
+  },
+  "applicationGlyph": {
+    "source": "exact selected dimensional artwork"
+  },
+  "trayIcoSizes": [
+    16,
+    20,
+    24,
+    32
+  ],
+  "generatedFiles": [
+    "build/brand.svg",
+    "build/icon.ico",
+    "build/icon.png",
+    "build/runtime-icons/app-icon.ico",
+    "build/runtime-icons/app-icon.png",
+    "build/runtime-icons/tray-on-dark.ico",
+    "build/runtime-icons/tray-on-light.ico",
+    "design/brand/final/brand-manifest.json",
+    "design/brand/final/flow-dark-compact.svg",
+    "design/brand/final/flow-dark.svg",
+    "design/brand/final/flow-light-compact.svg",
+    "design/brand/final/flow-light.svg",
+    "design/brand/final/flow-tray-on-dark.svg",
+    "design/brand/final/flow-tray-on-light.svg",
+    "design/brand/final/png/dark/flow-dark-1024.png",
+    "design/brand/final/png/dark/flow-dark-128.png",
+    "design/brand/final/png/dark/flow-dark-16.png",
+    "design/brand/final/png/dark/flow-dark-256.png",
+    "design/brand/final/png/dark/flow-dark-32.png",
+    "design/brand/final/png/dark/flow-dark-512.png",
+    "design/brand/final/png/dark/flow-dark-64.png",
+    "design/brand/final/png/light/flow-light-1024.png",
+    "design/brand/final/png/light/flow-light-128.png",
+    "design/brand/final/png/light/flow-light-16.png",
+    "design/brand/final/png/light/flow-light-256.png",
+    "design/brand/final/png/light/flow-light-32.png",
+    "design/brand/final/png/light/flow-light-512.png",
+    "design/brand/final/png/light/flow-light-64.png",
+    "design/brand/final/theme-comparison.png",
+    "design/brand/final/tray-on-dark-16.png",
+    "design/brand/final/tray-on-dark-32.png",
+    "design/brand/final/tray-on-light-16.png",
+    "design/brand/final/tray-on-light-32.png",
+    "src/renderer/src/assets/brand/flow-dark-compact.png",
+    "src/renderer/src/assets/brand/flow-dark-compact.svg",
+    "src/renderer/src/assets/brand/flow-dark.png",
+    "src/renderer/src/assets/brand/flow-dark.svg",
+    "src/renderer/src/assets/brand/flow-light-compact.png",
+    "src/renderer/src/assets/brand/flow-light-compact.svg",
+    "src/renderer/src/assets/brand/flow-light.png",
+    "src/renderer/src/assets/brand/flow-light.svg"
+  ]
+}

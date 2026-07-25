@@ -105,6 +105,31 @@ test('starts at the supported desktop width and exposes settings diagnostics', a
   await expect(page.getByRole('dialog')).not.toBeVisible()
 })
 
+test('renders the Flow identity across every explicit app theme', async () => {
+  const visualDirectory = resolve('test-results', 'visual', 'brand-themes')
+  mkdirSync(visualDirectory, { recursive: true })
+  await page.setViewportSize({ width: 1280, height: 820 })
+  const mark = page.locator('.brand-lockup .brand-mark')
+  await expect(mark).toHaveAttribute('data-brand-variant', 'full')
+
+  const themes = [
+    { button: 'Light', theme: 'light', tone: 'light' },
+    { button: 'Dark', theme: 'dark', tone: 'dark' },
+    { button: 'Black', theme: 'black', tone: 'dark' },
+    { button: 'Salesforce black', theme: 'salesforce-black', tone: 'dark' }
+  ] as const
+  for (const selection of themes) {
+    await page.getByRole('button', { name: 'Settings' }).click()
+    await page.getByRole('button', { name: selection.button, exact: true }).click()
+    await page.getByRole('button', { name: 'Close settings' }).click()
+    await expect.poll(() => page.locator('html').getAttribute('data-theme')).toBe(selection.theme)
+    await expect.poll(() => page.locator('html').getAttribute('data-brand-tone')).toBe(selection.tone)
+    await expect(mark.locator(`.brand-mark-image.${selection.tone}`)).toBeVisible()
+    await expect(mark.locator(`.brand-mark-image.${selection.tone === 'light' ? 'dark' : 'light'}`)).toBeHidden()
+    await page.screenshot({ path: join(visualDirectory, `warish-flow-${selection.theme}-1280x820.png`), animations: 'disabled' })
+  }
+})
+
 test('keeps the offline workspace available and opens the dedicated CRM', async () => {
   await expect(page.getByRole('heading', { name: 'Welcome to WArish' })).toBeVisible()
   await application.close()
@@ -117,6 +142,7 @@ test('keeps the offline workspace available and opens the dedicated CRM', async 
     env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' } })
   page = await application.firstWindow()
   await expect(page.getByRole('button', { name: 'CRM' })).toBeVisible()
+  await expect(page.locator('.nav-brand .brand-mark')).toHaveAttribute('data-brand-variant', 'compact')
   await page.getByRole('button', { name: 'CRM' }).click()
   await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible()
   await expect(page.getByText('Revenue this month')).toBeVisible()

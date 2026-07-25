@@ -1,0 +1,474 @@
+{
+  "concepts": [
+    {
+      "file": "01-relay.png",
+      "mode": "RGBA",
+      "size": [
+        1024,
+        1024
+      ],
+      "alpha_bbox": [
+        160,
+        200,
+        864,
+        823
+      ],
+      "margins": [
+        160,
+        200,
+        160,
+        201
+      ],
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "16px_bbox": [
+        2,
+        3,
+        14,
+        13
+      ],
+      "16px_occupied_pixels": 81,
+      "16px_components": 1,
+      "green_key_pixels": 0,
+      "magenta_key_pixels": 0,
+      "checks": {
+        "size_1024": true,
+        "transparent_corners": true,
+        "normalized_extent": true,
+        "minimum_padding": true,
+        "tray_occupancy": true,
+        "no_green_key_fringe": true,
+        "no_magenta_key_fringe": true
+      },
+      "passed": true
+    },
+    {
+      "file": "02-nexus.png",
+      "mode": "RGBA",
+      "size": [
+        1024,
+        1024
+      ],
+      "alpha_bbox": [
+        160,
+        173,
+        864,
+        851
+      ],
+      "margins": [
+        160,
+        173,
+        160,
+        173
+      ],
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "16px_bbox": [
+        2,
+        2,
+        14,
+        13
+      ],
+      "16px_occupied_pixels": 71,
+      "16px_components": 1,
+      "green_key_pixels": 0,
+      "magenta_key_pixels": 0,
+      "checks": {
+        "size_1024": true,
+        "transparent_corners": true,
+        "normalized_extent": true,
+        "minimum_padding": true,
+        "tray_occupancy": true,
+        "no_green_key_fringe": true,
+        "no_magenta_key_fringe": true
+      },
+      "passed": true
+    },
+    {
+      "file": "03-flow.png",
+      "mode": "RGBA",
+      "size": [
+        1024,
+        1024
+      ],
+      "alpha_bbox": [
+        160,
+        263,
+        864,
+        761
+      ],
+      "margins": [
+        160,
+        263,
+        160,
+        263
+      ],
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "16px_bbox": [
+        2,
+        4,
+        14,
+        12
+      ],
+      "16px_occupied_pixels": 63,
+      "16px_components": 1,
+      "green_key_pixels": 0,
+      "magenta_key_pixels": 0,
+      "checks": {
+        "size_1024": true,
+        "transparent_corners": true,
+        "normalized_extent": true,
+        "minimum_padding": true,
+        "tray_occupancy": true,
+        "no_green_key_fringe": true,
+        "no_magenta_key_fringe": true
+      },
+      "passed": true
+    },
+    {
+      "file": "04-orbit.png",
+      "mode": "RGBA",
+      "size": [
+        1024,
+        1024
+      ],
+      "alpha_bbox": [
+        160,
+        197,
+        864,
+        826
+      ],
+      "margins": [
+        160,
+        197,
+        160,
+        198
+      ],
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "16px_bbox": [
+        2,
+        3,
+        14,
+        13
+      ],
+      "16px_occupied_pixels": 92,
+      "16px_components": 1,
+      "green_key_pixels": 0,
+      "magenta_key_pixels": 0,
+      "checks": {
+        "size_1024": true,
+        "transparent_corners": true,
+        "normalized_extent": true,
+        "minimum_padding": true,
+        "tray_occupancy": true,
+        "no_green_key_fringe": true,
+        "no_magenta_key_fringe": true
+      },
+      "passed": true
+    },
+    {
+      "file": "05-aperture.png",
+      "mode": "RGBA",
+      "size": [
+        1024,
+        1024
+      ],
+      "alpha_bbox": [
+        187,
+        160,
+        836,
+        864
+      ],
+      "margins": [
+        187,
+        160,
+        188,
+        160
+      ],
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "16px_bbox": [
+        3,
+        2,
+        13,
+        14
+      ],
+      "16px_occupied_pixels": 116,
+      "16px_components": 1,
+      "green_key_pixels": 0,
+      "magenta_key_pixels": 0,
+      "checks": {
+        "size_1024": true,
+        "transparent_corners": true,
+        "normalized_extent": true,
+        "minimum_padding": true,
+        "tray_occupancy": true,
+        "no_green_key_fringe": true,
+        "no_magenta_key_fringe": true
+      },
+      "passed": true
+    },
+    {
+      "file": "06-bridge.png",
+      "mode": "RGBA",
+      "size": [
+        1024,
+        1024
+      ],
+      "alpha_bbox": [
+        160,
+        310,
+        864,
+        714
+      ],
+      "margins": [
+        160,
+        310,
+        160,
+        310
+      ],
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "16px_bbox": [
+        2,
+        4,
+        14,
+        12
+      ],
+      "16px_occupied_pixels": 64,
+      "16px_components": 1,
+      "green_key_pixels": 0,
+      "magenta_key_pixels": 0,
+      "checks": {
+        "size_1024": true,
+        "transparent_corners": true,
+        "normalized_extent": true,
+        "minimum_padding": true,
+        "tray_occupancy": true,
+        "no_green_key_fringe": true,
+        "no_magenta_key_fringe": true
+      },
+      "passed": true
+    },
+    {
+      "file": "07-pulse.png",
+      "mode": "RGBA",
+      "size": [
+        1024,
+        1024
+      ],
+      "alpha_bbox": [
+        160,
+        191,
+        864,
+        833
+      ],
+      "margins": [
+        160,
+        191,
+        160,
+        191
+      ],
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "16px_bbox": [
+        2,
+        3,
+        14,
+        13
+      ],
+      "16px_occupied_pixels": 111,
+      "16px_components": 1,
+      "green_key_pixels": 0,
+      "magenta_key_pixels": 0,
+      "checks": {
+        "size_1024": true,
+        "transparent_corners": true,
+        "normalized_extent": true,
+        "minimum_padding": true,
+        "tray_occupancy": true,
+        "no_green_key_fringe": true,
+        "no_magenta_key_fringe": true
+      },
+      "passed": true
+    },
+    {
+      "file": "08-facet.png",
+      "mode": "RGBA",
+      "size": [
+        1024,
+        1024
+      ],
+      "alpha_bbox": [
+        163,
+        160,
+        860,
+        864
+      ],
+      "margins": [
+        163,
+        160,
+        164,
+        160
+      ],
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "16px_bbox": [
+        2,
+        2,
+        14,
+        14
+      ],
+      "16px_occupied_pixels": 105,
+      "16px_components": 1,
+      "green_key_pixels": 15,
+      "magenta_key_pixels": 0,
+      "checks": {
+        "size_1024": true,
+        "transparent_corners": true,
+        "normalized_extent": true,
+        "minimum_padding": true,
+        "tray_occupancy": true,
+        "no_green_key_fringe": true,
+        "no_magenta_key_fringe": true
+      },
+      "passed": true
+    },
+    {
+      "file": "09-thread.png",
+      "mode": "RGBA",
+      "size": [
+        1024,
+        1024
+      ],
+      "alpha_bbox": [
+        160,
+        173,
+        864,
+        851
+      ],
+      "margins": [
+        160,
+        173,
+        160,
+        173
+      ],
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "16px_bbox": [
+        2,
+        2,
+        14,
+        14
+      ],
+      "16px_occupied_pixels": 91,
+      "16px_components": 1,
+      "green_key_pixels": 0,
+      "magenta_key_pixels": 0,
+      "checks": {
+        "size_1024": true,
+        "transparent_corners": true,
+        "normalized_extent": true,
+        "minimum_padding": true,
+        "tray_occupancy": true,
+        "no_green_key_fringe": true,
+        "no_magenta_key_fringe": true
+      },
+      "passed": true
+    },
+    {
+      "file": "10-beacon.png",
+      "mode": "RGBA",
+      "size": [
+        1024,
+        1024
+      ],
+      "alpha_bbox": [
+        171,
+        160,
+        853,
+        864
+      ],
+      "margins": [
+        171,
+        160,
+        171,
+        160
+      ],
+      "corner_alpha": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "16px_bbox": [
+        2,
+        2,
+        14,
+        14
+      ],
+      "16px_occupied_pixels": 70,
+      "16px_components": 1,
+      "green_key_pixels": 0,
+      "magenta_key_pixels": 0,
+      "checks": {
+        "size_1024": true,
+        "transparent_corners": true,
+        "normalized_extent": true,
+        "minimum_padding": true,
+        "tray_occupancy": true,
+        "no_green_key_fringe": true,
+        "no_magenta_key_fringe": true
+      },
+      "passed": true
+    }
+  ],
+  "comparison_sheet": {
+    "file": "comparison-sheet.png",
+    "size": [
+      2200,
+      2594
+    ],
+    "mode": "RGB",
+    "passed": true
+  },
+  "all_checks_passed": true
+}

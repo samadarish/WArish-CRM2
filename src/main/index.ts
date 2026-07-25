@@ -5,8 +5,12 @@ import { basename, extname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
   app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, Notification, protocol,
-  session, shell, Tray
+  nativeTheme, session, shell, Tray
 } from 'electron'
+import {
+  APPLICATION_ICON_ASSET, APPLICATION_USER_MODEL_ID, DEVELOPMENT_APPLICATION_USER_MODEL_ID,
+  trayAssetForNativeTheme, type TrayAssetName
+} from '../shared/branding'
 import {
   rpcInvocationSchema, type AppSettings, type ChatSummary, type CoreEventEnvelope,
   type MessageDto, type PickedAttachment, type SessionState
@@ -15,6 +19,7 @@ import { CoreBridge } from './core-bridge'
 import { loadOrCreateMasterKey } from './security'
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'warish-media', privileges: { secure: true, standard: true, supportFetchAPI: true, stream: true } }])
+app.setAppUserModelId(app.isPackaged ? APPLICATION_USER_MODEL_ID : DEVELOPMENT_APPLICATION_USER_MODEL_ID)
 
 let mainWindow: BrowserWindow | undefined
 let tray: Tray | undefined
@@ -35,7 +40,6 @@ else {
 
 async function bootstrap(): Promise<void> {
   app.setName('WArish')
-  app.setAppUserModelId('com.warish.desktop')
   const userDataPath = app.getPath('userData')
   const masterKey = loadOrCreateMasterKey(userDataPath)
   core = new CoreBridge(userDataPath, masterKey, app.getVersion())
@@ -58,6 +62,7 @@ async function bootstrap(): Promise<void> {
 }
 
 function createWindow(): void {
+  const windowIcon = loadBrandImage(APPLICATION_ICON_ASSET)
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -66,6 +71,7 @@ function createWindow(): void {
     show: false,
     backgroundColor: '#0b141a',
     title: 'WArish',
+    icon: windowIcon,
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),
@@ -77,6 +83,7 @@ function createWindow(): void {
       devTools: !app.isPackaged
     }
   })
+  mainWindow.setIcon(windowIcon)
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (isSafeExternalUrl(url)) void shell.openExternal(url)
     return { action: 'deny' }
@@ -93,10 +100,7 @@ function createWindow(): void {
 }
 
 function createTray(): void {
-  const icon = nativeImage.createFromDataURL(
-    `data:image/svg+xml;base64,${Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect rx="8" width="32" height="32" fill="#00a884"/><path d="M7 8h4l2 12 3-8 3 8 2-12h4l-4 16h-4l-3-7-3 7H9z" fill="white"/></svg>').toString('base64')}`
-  )
-  tray = new Tray(icon.resize({ width: 16, height: 16 }))
+  tray = new Tray(loadBrandImage(trayAssetForNativeTheme(nativeTheme.shouldUseDarkColors)))
   tray.setToolTip('WArish')
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open WArish', click: showWindow },
@@ -104,6 +108,20 @@ function createTray(): void {
     { label: 'Quit', click: () => { isQuitting = true; app.quit() } }
   ]))
   tray.on('double-click', showWindow)
+  nativeTheme.on('updated', updateTrayIcon)
+}
+
+function updateTrayIcon(): void {
+  tray?.setImage(loadBrandImage(trayAssetForNativeTheme(nativeTheme.shouldUseDarkColors)))
+}
+
+function loadBrandImage(fileName: TrayAssetName | typeof APPLICATION_ICON_ASSET): Electron.NativeImage {
+  const path = app.isPackaged
+    ? join(process.resourcesPath, 'brand', fileName)
+    : join(__dirname, '../../build/runtime-icons', fileName)
+  const image = nativeImage.createFromPath(path)
+  if (image.isEmpty()) throw new Error(`WArish brand asset could not be loaded: ${fileName}`)
+  return image
 }
 
 function registerIpc(userDataPath: string): void {
@@ -295,5 +313,5 @@ function isSafeExternalUrl(value: string): boolean {
   try { return ['https:', 'mailto:'].includes(new URL(value).protocol) } catch { return false }
 }
 
-app.on('before-quit', () => { isQuitting = true; void core?.stop() })
+app.on('before-quit', () => { isQuitting = true; nativeTheme.removeListener('updated', updateTrayIcon); void core?.stop() })
 app.on('window-all-closed', () => { /* WArish intentionally remains in the tray. */ })

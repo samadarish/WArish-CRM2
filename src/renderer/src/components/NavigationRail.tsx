@@ -6,6 +6,7 @@ import {
 import type { AppSettings } from '../../../shared/contracts'
 import { useUiStore, type WorkspaceDestination } from '../store'
 import { WORKSPACE_DESTINATIONS } from '../workspace-navigation'
+import { BrandMark } from './BrandMark'
 
 export type SidebarDestination = WorkspaceDestination
 
@@ -28,7 +29,7 @@ export function NavigationRail({ current, onNavigate }: {
   const toggle = (): void => update.mutate(expanded ? 'collapsed' : 'expanded')
 
   return <nav className={`nav-rail ${expanded ? 'expanded' : 'collapsed'}`} aria-label="Primary navigation">
-    <div className="nav-brand"><div className="brand-mark small" aria-hidden="true">W</div><strong>WArish</strong></div>
+    <div className="nav-brand"><BrandMark variant="compact" size="small" /><strong>WArish</strong></div>
     {WORKSPACE_DESTINATIONS.map((destination) => <RailButton key={destination} destination={destination} current={current}
       label={destinationLabel(destination)} onClick={onNavigate}>{destinationIcon(destination)}</RailButton>)}
     <div className="nav-spacer" />

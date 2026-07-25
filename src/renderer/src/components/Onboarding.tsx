@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { CalendarDays, KeyRound, LoaderCircle, QrCode, Settings } from 'lucide-react'
 import type { SessionState } from '../../../shared/contracts'
 import { useUiStore } from '../store'
+import { BrandMark } from './BrandMark'
 
 export function Onboarding({ session }: { session: SessionState }): React.JSX.Element {
   const [phone, setPhone] = useState('')
@@ -31,7 +32,7 @@ export function Onboarding({ session }: { session: SessionState }): React.JSX.El
     <main className="onboarding">
       <button className="icon-button onboarding-settings" title="Settings" aria-label="Settings" onClick={() => setSettingsOpen(true)}><Settings size={20} /></button>
       <section className="onboarding-card">
-        <div className="brand-lockup"><div className="brand-mark">W</div><div><h1>Welcome to WArish</h1><p>Your conversations stay on this computer.</p></div></div>
+        <div className="brand-lockup"><BrandMark /><div><h1>Welcome to WArish</h1><p>Your conversations stay on this computer.</p></div></div>
         {session.phase === 'pairing' && session.qrDataUrl ? (
           <div className="pairing-view">
             <img className="qr-code" src={session.qrDataUrl} alt="WhatsApp linked-device QR code" />
