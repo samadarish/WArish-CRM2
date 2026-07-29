@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { MotionPhaseContext, type MotionPhase } from './motion-context'
-import { motionDuration } from './motion-preference'
+import { MOTION_MS, motionDuration, prefersReducedMotion, subscribeToReducedMotion } from './motion-preference'
 
-function usePresenceValue<T>(value: T | undefined, exitMs = 220): {
+function usePresenceValue<T>(value: T | undefined, exitMs: number = MOTION_MS.slow): {
   value: T | undefined
   phase: MotionPhase
 } {
@@ -19,6 +19,7 @@ function usePresenceValue<T>(value: T | undefined, exitMs = 220): {
     timerRef.current = undefined
 
     if (value !== undefined) {
+      renderedRef.current = value
       setRendered(value)
       if (motionDuration(1) === 0) {
         setPhase('entered')
@@ -33,6 +34,7 @@ function usePresenceValue<T>(value: T | undefined, exitMs = 220): {
     }
 
     if (renderedRef.current === undefined || motionDuration(1) === 0) {
+      renderedRef.current = undefined
       setRendered(undefined)
       setPhase('entered')
       return
@@ -41,24 +43,37 @@ function usePresenceValue<T>(value: T | undefined, exitMs = 220): {
     setPhase('exiting')
     timerRef.current = window.setTimeout(() => {
       timerRef.current = undefined
+      renderedRef.current = undefined
       setRendered(undefined)
       setPhase('entered')
     }, exitMs)
   }, [exitMs, value])
-
-  useEffect(() => {
-    renderedRef.current = rendered
-  }, [rendered])
 
   useEffect(() => () => {
     if (frameRef.current !== undefined) window.cancelAnimationFrame(frameRef.current)
     if (timerRef.current !== undefined) window.clearTimeout(timerRef.current)
   }, [])
 
+  useEffect(() => {
+    const finishImmediately = (): void => {
+      if (!prefersReducedMotion()) return
+      if (frameRef.current !== undefined) window.cancelAnimationFrame(frameRef.current)
+      if (timerRef.current !== undefined) window.clearTimeout(timerRef.current)
+      frameRef.current = undefined
+      timerRef.current = undefined
+      if (phase === 'exiting') {
+        renderedRef.current = undefined
+        setRendered(undefined)
+      }
+      setPhase('entered')
+    }
+    return subscribeToReducedMotion(finishImmediately)
+  }, [phase])
+
   return { value: rendered, phase }
 }
 
-export function MotionPresence({ show, children, exitMs = 220 }: {
+export function MotionPresence({ show, children, exitMs = MOTION_MS.slow }: {
   show: boolean
   children: ReactNode
   exitMs?: number

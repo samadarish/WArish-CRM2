@@ -20,10 +20,15 @@
   --active: #e9edef;
   --danger: #d64545;
   --shadow: 0 18px 55px rgb(11 20 26 / 14%);
-  --motion-fast: 120ms;
-  --motion-medium: 180ms;
+  --motion-fast: 100ms;
+  --motion-medium: 160ms;
   --motion-slow: 220ms;
   --motion-ease: cubic-bezier(.2, .8, .2, 1);
+  --motion-distance-short: 3px;
+  --motion-distance-medium: 6px;
+  --motion-distance-long: 10px;
+  --radius-control: 6px;
+  --radius-panel: 8px;
   --rail-width: 184px;
   --conversation-header-height: 66px;
   --sales-lifecycle-height: 44px;
@@ -126,7 +131,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .nav-rail.collapsed .nav-button span, .nav-rail.collapsed .nav-brand strong { display: none; }
 .nav-button svg { flex: 0 0 auto; }
 .icon-button { display: grid; width: 40px; height: 40px; flex: 0 0 auto; place-items: center; border-radius: 50%; background: transparent; color: var(--muted); }
-.nav-button:hover, .icon-button:hover { color: var(--text); background: var(--hover); }
 .nav-button.active { color: var(--accent-strong); background: color-mix(in srgb, var(--accent) 11%, var(--panel)); font-weight: 650; }
 .nav-button.active::before { position: absolute; top: 9px; bottom: 9px; left: 0; width: 3px; border-radius: 2px; background: var(--accent); content: ''; }
 .nav-brand { display: flex; min-height: 46px; align-items: center; gap: 11px; padding: 0 2px; margin-bottom: 7px; }
@@ -163,7 +167,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .chat-row.direct.has-identity { min-height: 88px; }
 .chat-previews-hidden .chat-row { min-height: 64px; }
 .chat-previews-hidden .chat-row.has-identity { min-height: 72px; }
-.chat-row:hover { background: var(--hover); }
 .chat-row.active { background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
 .chat-row.active::before { position: absolute; top: 9px; bottom: 9px; left: 0; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent); content: ''; }
 .avatar { display: grid; width: 52px; height: 52px; flex: 0 0 auto; place-items: center; overflow: hidden; border-radius: 10px; color: white; background: linear-gradient(145deg, #718895, #3d515d); font-size: 13px; font-weight: 700; }
@@ -192,7 +195,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .community-list { width: 100%; }
 .community-row { border-bottom: 1px solid var(--border); }
 .community-parent { display: flex; width: 100%; min-height: 78px; align-items: center; gap: 8px; padding: 6px 10px 6px 7px; background: transparent; text-align: left; }
-.community-parent:hover { background: var(--hover); }
 .community-parent > svg { width: 17px; height: 17px; flex: 0 0 auto; color: var(--muted); }
 .community-parent .avatar { width: 52px; height: 52px; }
 .community-copy { min-width: 0; flex: 1; }
@@ -203,7 +205,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .community-copy b { margin-left: auto; padding: 3px 6px; border-radius: 10px; color: white; background: var(--accent); font-size: 10px; }
 .chat-row.nested { min-height: 70px; padding-left: 28px; background: color-mix(in srgb, var(--panel-soft) 52%, transparent); }
 .chat-row.nested.has-identity { min-height: 88px; }
-.chat-row.nested:hover { background: var(--hover); }
 .chat-row.nested.active { background: var(--active); }
 .chat-row.nested .avatar { width: 48px; height: 48px; }
 .community-empty { padding: 15px 18px 17px 46px; color: var(--muted); font-size: 12px; }
@@ -233,7 +234,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .conversation-header.menu-open { z-index: 25; }
 .conversation-header .avatar { width: 48px; height: 48px; }
 .conversation-identity { display: flex; min-width: 150px; flex: 1 1 250px; align-items: center; gap: 12px; padding: 4px; border-radius: 7px; background: transparent; text-align: left; }
-.conversation-identity:hover { background: var(--hover); }
 .conversation-identity > span { display: flex; min-width: 0; flex: 1; flex-direction: column; }
 .conversation-identity > span > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
 .conversation-identity > span > span { margin-top: 3px; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
@@ -259,7 +259,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .customer-summary-next { min-width: 130px; flex: 1 1 210px; }
 .customer-summary-untracked { flex: 0 1 230px; }
 .customer-summary-untracked button { display: flex; width: 100%; min-width: 0; align-items: center; gap: 8px; padding: 4px 11px; color: var(--accent-strong); background: transparent; text-align: left; }
-.customer-summary-untracked button:hover { background: var(--hover); }
 .customer-summary-untracked svg { width: 16px; height: 16px; flex: 0 0 auto; }
 .customer-summary-untracked span, .customer-summary-untracked strong, .customer-summary-untracked small { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .customer-summary-untracked strong { color: var(--text); font-size: 10px; }
@@ -278,7 +277,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .sales-lifecycle-path button:first-child { padding-left: 12px; clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 0 100%); }
 .sales-lifecycle-path button:last-child { padding-right: 10px; clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, 10px 50%); }
 .sales-lifecycle-path button + button { margin-left: 2px; }
-.sales-lifecycle-path button:hover:not(:disabled) { color: var(--text); background: var(--hover); }
 .sales-lifecycle-path button.completed { color: white; background: color-mix(in srgb, var(--accent) 82%, #17324d); }
 .sales-lifecycle-path button.current { z-index: 1; color: white; background: var(--stage-color); box-shadow: inset 0 0 0 2px rgb(255 255 255 / 24%); font-weight: 700; }
 .sales-lifecycle-path button:focus-visible { z-index: 2; outline-offset: -2px; }
@@ -293,7 +291,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .sales-lifecycle-error { display: flex; height: 100%; min-width: 220px; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; }
 .sales-lifecycle-error > svg { width: 15px; height: 15px; color: var(--danger); }
 .sales-lifecycle-error button { display: grid; width: 26px; height: 26px; place-items: center; margin-left: 2px; border-radius: 50%; color: var(--muted); background: transparent; }
-.sales-lifecycle-error button:hover { color: var(--text); background: var(--hover); }
 .sales-lifecycle-error button svg { width: 14px; height: 14px; }
 @container conversation (max-width: 760px) {
   .customer-summary-next { display: none; }
@@ -312,7 +309,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .sidebar-header-menu { right: 11px; }
 .conversation-header-menu { right: 12px; }
 .header-menu button { display: flex; width: 100%; align-items: center; gap: 11px; padding: 10px 12px; border-radius: 7px; text-align: left; background: transparent; white-space: nowrap; }
-.header-menu button:hover { background: var(--hover); }
 .header-menu button:disabled { opacity: .55; }
 .header-menu svg { width: 18px; height: 18px; color: var(--muted); }
 .connection-banner { position: absolute; top: calc(var(--conversation-header-height) + var(--active-sales-lifecycle-height)); left: 0; right: 0; z-index: 5; display: flex; justify-content: center; gap: 8px; padding: 7px; color: #5f4100; background: #ffdd8c; font-size: 12px; }
@@ -325,7 +321,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .session-banner strong { font-size: 12px; }
 .session-banner small { margin-top: 2px; color: color-mix(in srgb, currentColor 72%, transparent); font-size: 11px; }
 .session-banner button { display: inline-flex; min-height: 32px; align-items: center; justify-content: center; gap: 6px; flex: 0 0 auto; padding: 6px 10px; border: 1px solid rgb(0 0 0 / 12%); border-radius: 7px; color: inherit; background: rgb(255 255 255 / 68%); font-weight: 650; }
-.session-banner button:hover { background: rgb(255 255 255 / 90%); }
 .session-banner.warning { color: #684600; background: #fff0c7; }
 .session-banner.danger { color: #802d2d; background: #ffe2e2; }
 .conversation-panel:has(.session-banner) .message-scroller { padding-top: 64px; }
@@ -352,10 +347,9 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .message-row.mine.group-first .message-bubble { border-bottom-right-radius: 4px; }
 .message-row.mine.group-middle .message-bubble { border-top-right-radius: 4px; border-bottom-right-radius: 4px; }
 .message-row.mine.group-last .message-bubble { border-top-right-radius: 4px; }
-.message-bubble:hover .message-actions, .message-bubble:focus-within .message-actions { display: flex; }
+.message-bubble:focus-within .message-actions, .message-actions[data-focus-restoring='true'] { display: flex; }
 .sender-name { margin-bottom: 3px; color: #aa3d85; font-weight: 650; }
 .quoted-message { display: grid; width: 100%; gap: 1px; margin: -1px 0 5px; padding: 5px 8px; overflow: hidden; border-left: 3px solid var(--accent); border-radius: 5px; background: color-mix(in srgb, var(--accent) 7%, transparent); color: var(--muted); text-align: left; font-size: 11px; line-height: 1.25; }
-.quoted-message:hover { background: rgb(0 0 0 / 8%); }
 .quoted-message strong, .quoted-message span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .quoted-message strong { color: var(--accent-strong); font-size: 11px; font-weight: 650; }
 .message-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -365,14 +359,12 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .message-meta svg.read { color: #53bdeb; }
 .message-actions { position: absolute; top: -18px; right: 5px; z-index: 3; display: none; padding: 3px; border: 1px solid var(--border); border-radius: 16px; background: var(--panel); box-shadow: 0 3px 12px rgb(0 0 0 / 12%); }
 .message-actions button { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 50%; color: var(--muted); background: transparent; }
-.message-actions button:hover { color: var(--text); background: var(--hover); }
 .message-actions svg { width: 15px; height: 15px; }
 .message-action-overflow { position: relative; }
 .message-action-menu { position: absolute; top: 33px; right: -3px; z-index: 12; display: grid; width: 196px; overflow: hidden; padding: 4px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
 .message-actions .message-action-menu button { display: flex; width: 100%; height: 34px; align-items: center; justify-content: flex-start; gap: 9px; padding: 0 9px; border-radius: 4px; text-align: left; white-space: nowrap; }
 .message-actions .message-action-menu button svg { width: 15px; height: 15px; flex: 0 0 auto; }
 .message-failed { display: flex; align-items: center; gap: 4px; margin: 4px 0 1px auto; padding: 3px 7px; border-radius: 10px; color: var(--danger); background: transparent; font-size: 10px; }
-.message-failed:hover { background: rgb(214 69 69 / 10%); }
 .message-failed svg { width: 12px; height: 12px; }
 .delivery-failed { color: var(--danger); }
 .reaction-pill { position: absolute; right: 8px; bottom: -13px; padding: 2px 7px; border: 2px solid var(--conversation); border-radius: 12px; background: var(--panel-soft); box-shadow: 0 1px 2px rgb(0 0 0 / 10%); font-size: 12px; }
@@ -387,7 +379,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .message-audio { display: block; width: min(330px, 60vw); margin: 4px 0 6px; }
 .media-thumbnail { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: .48; }
 .media-download { position: absolute; inset: 0; z-index: 1; display: grid; place-content: center; place-items: center; gap: 7px; width: 100%; height: 100%; padding: 10px; overflow: hidden; border-radius: inherit; background: rgb(0 0 0 / 8%); color: white; }
-.media-download:hover { background: rgb(0 0 0 / 14%); }
 .media-download > span { z-index: 1; }
 .download-circle { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 50%; color: white; background: rgb(0 0 0 / 55%); }
 .document-card { display: flex; min-width: 250px; align-items: center; gap: 10px; padding: 12px; border-radius: 6px; background: rgb(0 0 0 / 7%); text-align: left; }
@@ -406,7 +397,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 :root[data-theme='black'] .history-start { background: rgb(12 12 12 / 90%); }
 :root[data-theme='salesforce-black'] .history-start { background: rgb(21 23 26 / 90%); }
 .new-messages-button { position: absolute; right: max(5%, 22px); bottom: 76px; z-index: 6; display: flex; align-items: center; gap: 7px; padding: 9px 13px; border: 1px solid var(--border); border-radius: 20px; color: var(--accent-strong); background: var(--panel); box-shadow: 0 4px 18px rgb(11 20 26 / 20%); }
-.new-messages-button:hover { background: var(--hover); }
 .new-messages-button svg { width: 17px; height: 17px; }
 .virtual-message.search-target .message-bubble { outline: 2px solid var(--accent); outline-offset: 2px; }
 .conversation-search-panel { position: absolute; top: calc(var(--conversation-header-height) + var(--active-sales-lifecycle-height)); right: 0; bottom: 0; z-index: 12; display: grid; width: min(380px, 86%); min-height: 0; grid-template-rows: 62px 58px minmax(0, 1fr); border-left: 1px solid var(--border); background: var(--panel); box-shadow: -8px 0 24px rgb(11 20 26 / 14%); }
@@ -418,7 +408,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .contact-profile > span { color: var(--muted); line-height: 1.4; }
 .contact-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 14px 18px; border-bottom: 1px solid var(--border); }
 .contact-actions button { display: flex; min-width: 0; align-items: center; justify-content: center; flex-direction: column; gap: 7px; padding: 10px 5px; border: 1px solid var(--border); border-radius: 9px; color: var(--accent-strong); background: var(--panel-soft); }
-.contact-actions button:hover { background: var(--hover); }
 .contact-actions button span { color: var(--text); font-size: 11px; }
 .contact-detail-list { padding: 8px 0 24px; }
 .contact-detail { display: flex; gap: 13px; padding: 12px 20px; }
@@ -434,7 +423,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .conversation-search-results { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .search-hint { padding: 28px 22px; color: var(--muted); text-align: center; line-height: 1.5; }
 .message-search-result { display: block; width: 100%; padding: 12px 17px; border-bottom: 1px solid var(--border); background: transparent; text-align: left; }
-.message-search-result:hover { background: var(--hover); }
 .message-search-result > span { display: flex; align-items: center; gap: 8px; }
 .message-search-result strong { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .message-search-result time { color: var(--muted); font-size: 11px; }
@@ -452,11 +440,10 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .emoji-picker > header { display: flex; height: 36px; align-items: center; padding: 0 8px 0 11px; border-bottom: 1px solid var(--border); }
 .emoji-picker > header strong { min-width: 0; flex: 1; font-size: 12px; }
 .emoji-picker > header button { display: grid; width: 26px; height: 26px; place-items: center; border-radius: 4px; color: var(--muted); background: transparent; }
-.emoji-picker > header button:hover { color: var(--text); background: var(--hover); }
 .emoji-picker > header svg { width: 15px; height: 15px; }
 .emoji-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; padding: 8px; }
 .emoji-grid button { display: grid; width: 35px; height: 35px; place-items: center; border-radius: 5px; background: transparent; font-family: "Segoe UI Emoji", "Noto Color Emoji", sans-serif; font-size: 20px; line-height: 1; }
-.emoji-grid button:hover, .emoji-grid button:focus-visible { background: var(--hover); }
+.emoji-grid button:focus-visible { background: var(--hover); }
 .composer textarea { min-height: 42px; max-height: 112px; min-width: 0; flex: 1; resize: none; overflow-y: auto; border: 1px solid var(--border); border-radius: 12px; outline: 0; padding: 10px 13px; background: var(--panel); line-height: 20px; }
 .composer textarea:focus { border-color: color-mix(in srgb, var(--accent) 70%, var(--border)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 10%, transparent); }
 .composer .icon-button { flex: 0 0 auto; }
@@ -464,7 +451,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .read-only-composer { display: flex; min-height: 62px; grid-column: 1; grid-row: 5; align-items: center; justify-content: center; gap: 9px; padding: 10px 14px; border-top: 1px solid var(--border); color: var(--muted); background: var(--panel-soft); font-size: 12px; }
 .read-only-composer svg { width: 17px; height: 17px; color: var(--accent); }
 .send-button { display: grid; width: 42px; height: 42px; flex: 0 0 auto; place-items: center; border-radius: 11px; color: white; background: var(--accent); }
-.send-button:hover { background: var(--accent-strong); }
 .welcome-panel { display: flex; height: 100%; grid-column: 1 / -1; grid-row: 1 / -1; align-items: center; justify-content: center; flex-direction: column; padding: 72px 40px 40px; text-align: center; border-bottom: 3px solid var(--accent); background: radial-gradient(circle at 50% 40%, color-mix(in srgb, var(--accent) 7%, var(--panel-soft)), var(--panel-soft) 44%); }
 .conversation-panel > .query-error { grid-column: 1 / -1; grid-row: 1 / -1; align-self: center; }
 .welcome-panel h2 { margin: 26px 0 8px; font-size: 28px; font-weight: 400; }
@@ -486,7 +472,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .history-heading span, .history-picker > small { margin-top: 3px; color: var(--muted); font-size: 12px; line-height: 1.4; }
 .history-options { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
 .history-options button { display: flex; min-height: 58px; align-items: flex-start; justify-content: center; flex-direction: column; padding: 9px 11px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); text-align: left; }
-.history-options button:hover { border-color: var(--accent); }
 .history-options button.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: rgb(0 168 132 / 8%); }
 .history-options button span { margin-top: 2px; color: var(--muted); font-size: 11px; }
 .custom-days { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
@@ -496,10 +481,8 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .history-picker > small { display: block; margin-top: 10px; }
 .primary-button, .secondary-button, .danger-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 9px 16px; border-radius: 8px; }
 .primary-button { color: white; background: var(--accent); }
-.primary-button:hover { background: var(--accent-strong); }
 .primary-button.large { width: 100%; min-height: 48px; font-weight: 650; }
 .secondary-button { border: 1px solid var(--border); background: var(--panel); }
-.secondary-button:hover { background: var(--hover); }
 .danger-button { color: white; background: var(--danger); }
 .divider { display: flex; align-items: center; gap: 12px; margin: 20px 0; color: var(--muted); font-size: 12px; }
 .divider::before, .divider::after { height: 1px; flex: 1; content: ''; background: var(--border); }
@@ -517,7 +500,7 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .status-line, .error-text { display: flex; justify-content: center; gap: 8px; margin: 20px 0 0; }
 .error-text { color: var(--danger); }
 
-.modal-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgb(11 20 26 / 68%); animation: motion-fade-in var(--motion-medium) var(--motion-ease); }
+.modal-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgb(11 20 26 / 68%); animation: motion-fade-in var(--motion-slow) var(--motion-ease); }
 .modal { width: min(480px, calc(100% - 32px)); max-height: min(650px, calc(100% - 32px)); border-radius: 14px; background: var(--panel); box-shadow: var(--shadow); overflow: hidden; animation: motion-rise-in var(--motion-slow) var(--motion-ease); }
 .modal header, .modal footer, .settings-panel > header { display: flex; align-items: center; padding: 16px 20px; }
 .modal header { border-bottom: 1px solid var(--border); }
@@ -544,7 +527,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .forward-list { max-height: 470px; overflow: auto; }
 .forward-dialog > .search-box { margin: 10px 14px; }
 .forward-list label { display: flex; min-height: 64px; align-items: center; gap: 12px; padding: 8px 18px; cursor: pointer; }
-.forward-list label:hover { background: var(--hover); }
 .forward-list input { position: absolute; opacity: 0; }
 .forward-list .avatar { width: 42px; height: 42px; }
 .forward-list span { flex: 1; }
@@ -582,7 +564,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .settings-layout { display: grid; min-height: 0; grid-template-columns: 192px minmax(0, 1fr); }
 .settings-nav { display: flex; min-height: 0; flex-direction: column; gap: 4px; padding: 14px 10px; overflow-y: auto; border-right: 1px solid var(--border); background: var(--panel-soft); }
 .settings-nav button { display: flex; min-height: 40px; align-items: center; gap: 10px; padding: 0 11px; border-radius: 8px; color: var(--muted); background: transparent; text-align: left; }
-.settings-nav button:hover { color: var(--text); background: var(--hover); }
 .settings-nav button.active { color: var(--accent-strong); background: color-mix(in srgb, var(--accent) 12%, var(--panel)); font-weight: 650; }
 .settings-nav svg { width: 18px; height: 18px; flex: 0 0 auto; }
 .settings-content { min-height: 0; padding: 26px 30px 40px; overflow-y: auto; }
@@ -600,14 +581,12 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .density-options { grid-template-columns: repeat(3, 1fr); }
 .navigation-options { grid-template-columns: repeat(3, 1fr); }
 .option-grid button { position: relative; display: flex; min-height: 46px; align-items: center; justify-content: center; gap: 8px; padding: 8px 13px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); text-transform: capitalize; }
-.option-grid button:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); background: var(--hover); }
 .option-grid button.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); color: var(--accent-strong); background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
 .option-grid button > svg:not(.option-check) { width: 17px; height: 17px; }
 .option-grid .option-check { position: absolute; top: 5px; right: 5px; width: 13px; height: 13px; }
 .black-theme-icon { fill: currentColor; }
 .background-options { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .background-option { display: grid; gap: 7px; padding: 6px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); text-align: left; text-transform: capitalize; }
-.background-option:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
 .background-option.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .background-option strong { padding: 0 5px 4px; }
 .background-swatch { display: grid; height: 64px; place-items: center; border-radius: 6px; color: var(--accent-strong); background-color: var(--conversation); }
@@ -623,8 +602,8 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .setting-icon { display: grid; width: 34px; height: 34px; flex: 0 0 auto; place-items: center; border-radius: 8px; color: var(--accent-strong); background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
 .setting-icon svg { width: 17px; height: 17px; }
 .toggle-setting input { position: absolute; right: 13px; width: 40px; height: 22px; margin: 0; opacity: 0; cursor: pointer; z-index: 1; }
-.toggle-setting i { position: relative; width: 40px; height: 22px; flex: 0 0 auto; border-radius: 12px; background: color-mix(in srgb, var(--muted) 70%, var(--panel)); transition: .18s; }
-.toggle-setting i::after { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: white; box-shadow: 0 1px 3px rgb(0 0 0 / 20%); content: ''; transition: .18s; }
+.toggle-setting i { position: relative; width: 40px; height: 22px; flex: 0 0 auto; border-radius: 12px; background: color-mix(in srgb, var(--muted) 70%, var(--panel)); transition: background-color var(--motion-medium) var(--motion-ease); }
+.toggle-setting i::after { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: white; box-shadow: 0 1px 3px rgb(0 0 0 / 20%); content: ''; transition: transform var(--motion-medium) var(--motion-ease); }
 .toggle-setting input:focus-visible + i { outline: 2px solid var(--accent); outline-offset: 2px; }
 .toggle-setting input:checked + i { background: var(--accent); }
 .toggle-setting input:checked + i::after { transform: translateX(18px); }
@@ -690,17 +669,17 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 @keyframes pulse { 50% { box-shadow: 0 0 0 8px rgb(214 69 69 / 18%); } }
 @keyframes skeleton-pulse { 50% { opacity: .48; } }
 @keyframes motion-fade-in { from { opacity: 0; } }
-@keyframes motion-rise-in { from { opacity: 0; transform: translateY(8px) scale(.985); } }
-@keyframes motion-panel-in { from { opacity: 0; transform: translateX(8px); } }
-@keyframes motion-menu-in { from { opacity: 0; transform: translateY(-4px) scale(.98); } }
-@keyframes motion-content-in { from { opacity: 0; transform: translateY(4px); } }
-@keyframes motion-toast-in { from { opacity: 0; transform: translateY(8px); } }
-@keyframes motion-message-in { from { opacity: 0; transform: translateY(5px) scale(.99); } }
+@keyframes motion-rise-in { from { opacity: 0; transform: translateY(var(--motion-distance-medium)) scale(.985); } }
+@keyframes motion-panel-in { from { opacity: 0; transform: translateX(var(--motion-distance-long)); } }
+@keyframes motion-menu-in { from { opacity: 0; transform: translateY(var(--motion-popover-offset, calc(-1 * var(--motion-distance-short)))) scale(.99); } }
+@keyframes motion-content-in { from { opacity: 0; } }
+@keyframes motion-toast-in { from { opacity: 0; transform: translateY(var(--motion-distance-medium)); } }
+@keyframes motion-message-in { from { opacity: 0; transform: translateY(var(--motion-distance-short)) scale(.99); } }
+@keyframes motion-chat-row-in { from { opacity: 0; transform: translateY(var(--motion-distance-short)); } }
 
 .header-menu { transform-origin: top right; animation: motion-menu-in var(--motion-medium) var(--motion-ease); }
 .crm-contact-panel.in-conversation, .conversation-search-panel { animation: motion-panel-in var(--motion-slow) var(--motion-ease); }
-.crm-contact-body > *, .settings-content > *, .crm-dialog-body > * { animation: motion-content-in var(--motion-medium) var(--motion-ease); }
-.customer-summary { animation: motion-fade-in var(--motion-medium) var(--motion-ease); }
+.crm-contact-body > * { animation: motion-content-in var(--motion-medium) var(--motion-ease); }
 .message-item.message-enter .message-bubble { animation: motion-message-in var(--motion-slow) var(--motion-ease); }
 
 @media (prefers-reduced-motion: reduce) {
@@ -836,7 +815,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .crm-layout { display: grid; min-width: 0; min-height: 0; grid-template-columns: 172px minmax(0, 1fr); }
 .crm-section-nav { display: flex; min-height: 0; flex-direction: column; gap: 4px; padding: 14px 9px; overflow-y: auto; border-right: 1px solid var(--border); background: var(--panel); }
 .crm-section-nav button { position: relative; display: flex; min-height: 40px; align-items: center; gap: 9px; padding: 0 10px; border-radius: 8px; color: var(--muted); background: transparent; text-align: left; }
-.crm-section-nav button:hover { color: var(--text); background: var(--hover); }
 .crm-section-nav button.active { color: var(--accent-strong); background: color-mix(in srgb, var(--accent) 11%, var(--panel)); font-weight: 650; }
 .crm-section-nav button.active::before { position: absolute; top: 9px; bottom: 9px; left: 0; width: 3px; border-radius: 3px; background: var(--accent); content: ''; }
 .crm-section-nav svg { width: 18px; height: 18px; flex: 0 0 auto; }
@@ -846,7 +824,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .crm-overview { display: grid; gap: 16px; max-width: 1380px; margin: 0 auto; }
 .crm-stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .crm-stat { display: grid; min-width: 0; min-height: 104px; align-content: center; gap: 3px; padding: 15px 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); box-shadow: 0 2px 7px rgb(18 38 48 / 4%); text-align: left; }
-.crm-stat:hover { border-color: color-mix(in srgb, var(--accent) 28%, var(--border)); box-shadow: 0 7px 20px rgb(18 38 48 / 7%); transform: translateY(-1px); }
 .crm-stat small, .crm-stat strong, .crm-stat > span { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .crm-stat small { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .crm-stat strong { margin: 1px 0; font-size: 22px; font-variant-numeric: tabular-nums; letter-spacing: 0; }
@@ -859,11 +836,9 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .crm-card > header strong { font-size: 15px; }
 .crm-card > header span { margin-top: 3px; color: var(--muted); font-size: 10px; font-weight: 500; }
 .crm-card > header button { display: flex; align-items: center; gap: 4px; padding: 7px 8px; border-radius: 7px; color: var(--accent-strong); background: transparent; font-size: 11px; font-weight: 650; }
-.crm-card > header button:hover { background: var(--hover); }
 .crm-card > header button svg { width: 14px; height: 14px; }
 .crm-pipeline > div { display: grid; padding: 6px 0; }
 .crm-pipeline > div > button { display: flex; min-height: 51px; align-items: center; gap: 10px; padding: 7px 15px; background: transparent; text-align: left; }
-.crm-pipeline > div > button:hover, .contact-compact-row:hover { background: var(--hover); }
 .crm-pipeline i { width: 7px; height: 30px; flex: 0 0 auto; border-radius: 5px; }
 .crm-pipeline button > span { min-width: 0; flex: 1; }
 .crm-pipeline button strong, .crm-pipeline button small { display: block; }
@@ -888,14 +863,13 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .crm-list-view { max-width: 1380px; margin: 0 auto; }
 .crm-filter-row { display: flex; gap: 6px; margin-bottom: 12px; overflow-x: auto; }
 .crm-filter-row button { display: flex; height: 32px; flex: 0 0 auto; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--border); border-radius: 16px; color: var(--muted); background: var(--panel); font-size: 11px; }
-.crm-filter-row button:hover, .crm-filter-row button.active { color: var(--text); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
+.crm-filter-row button.active { color: var(--text); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
 .crm-filter-row i { width: 7px; height: 7px; border-radius: 50%; }
 .crm-table-card { max-width: 1380px; margin: 0 auto; overflow: auto; border: 1px solid var(--border); border-radius: 11px; background: var(--panel); box-shadow: 0 2px 7px rgb(18 38 48 / 4%); }
 .crm-table { width: 100%; border-collapse: collapse; white-space: nowrap; }
 .crm-table th { height: 40px; padding: 0 12px; border-bottom: 1px solid var(--border); color: var(--muted); background: var(--panel-soft); font-size: 10px; font-weight: 700; letter-spacing: .35px; text-align: left; text-transform: uppercase; }
 .crm-table td { height: 58px; padding: 6px 12px; border-bottom: 1px solid var(--border); font-size: 12px; }
 .crm-table tbody tr { cursor: pointer; }
-.crm-table tbody tr:hover { background: var(--hover); }
 .crm-table tbody tr:last-child td { border-bottom: 0; }
 .crm-table td > strong, .crm-table td > small { display: block; }
 .crm-table td > small { margin-top: 3px; color: var(--muted); font-size: 10px; }
@@ -923,7 +897,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .crm-task.overdue { border-left: 3px solid var(--danger); }
 .crm-task.completed { opacity: .68; }
 .crm-task-check { display: grid; width: 22px; height: 22px; place-items: center; border: 1px solid var(--border); border-radius: 7px; color: white; background: var(--panel-soft); }
-.crm-task-check:hover { border-color: var(--accent); }
 .crm-task.completed .crm-task-check { border-color: var(--accent); background: var(--accent); }
 .crm-task-check svg { width: 14px; height: 14px; }
 .crm-task > div { min-width: 0; }
@@ -950,7 +923,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .catalog-card > footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
 .catalog-card > footer strong { font-size: 14px; }
 .catalog-card > footer button { display: flex; align-items: center; gap: 5px; color: var(--muted); background: transparent; font-size: 9px; }
-.catalog-card > footer button:hover { color: var(--danger); }
 .catalog-card > footer svg { width: 13px; height: 13px; }
 .crm-state { display: flex; min-height: 300px; align-items: center; justify-content: center; flex-direction: column; gap: 11px; color: var(--muted); }
 .crm-state > svg { width: 24px; height: 24px; }
@@ -975,7 +947,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .crm-contact-copy > div { display: flex; align-items: center; gap: 6px; }
 .crm-contact-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; padding: 3px 18px 13px; border-bottom: 1px solid var(--border-strong); }
 .crm-contact-actions button { display: flex; min-width: 0; height: 46px; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--border); border-radius: 7px; color: var(--accent-strong); background: var(--surface-control); font-size: 10px; }
-.crm-contact-actions button:hover { background: var(--hover); }
 .crm-contact-actions svg { width: 15px; height: 15px; }
 .crm-stage-select { display: flex; min-height: 49px; align-items: center; gap: 10px; padding: 7px 18px; border-bottom: 1px solid var(--border-strong); background: var(--surface-section); }
 .crm-stage-select span { flex: 1; color: var(--muted); font-size: 10px; font-weight: 650; }
@@ -1028,7 +999,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .contact-tab-action { min-height: 32px; margin: 0 0 10px auto; padding: 5px 9px; font-size: 10px; }
 .contact-tab-action svg { width: 14px; height: 14px; }
 .contact-order { display: grid; width: 100%; min-height: 54px; grid-template-columns: minmax(0, 1fr) auto auto 18px; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--border); background: transparent; text-align: left; }
-.contact-order:hover { background: var(--hover); }
 .contact-order span strong, .contact-order span small { display: block; }
 .contact-order span strong { font-size: 11px; }
 .contact-order span small { margin-top: 2px; color: var(--muted); font-size: 9px; }
@@ -1063,7 +1033,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .crm-timeline time { margin-top: 3px; color: var(--muted); font-size: 9px; }
 
 .contact-crm-entry { display: flex; width: calc(100% - 36px); min-height: 62px; align-items: center; gap: 11px; margin: 12px 18px 3px; padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border)); border-radius: 9px; background: color-mix(in srgb, var(--accent) 6%, var(--panel)); text-align: left; }
-.contact-crm-entry:hover { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
 .contact-crm-entry > span { display: grid; width: 34px; height: 34px; flex: 0 0 auto; place-items: center; border-radius: 8px; color: var(--accent-strong); background: color-mix(in srgb, var(--accent) 13%, var(--panel)); }
 .contact-crm-entry > span svg { width: 17px; height: 17px; }
 .contact-crm-entry > div { min-width: 0; flex: 1; }
@@ -1096,7 +1065,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .order-lines > header { display: flex; align-items: center; margin-bottom: 3px; }
 .order-lines > header strong { flex: 1; font-size: 11px; }
 .order-lines > header button { display: flex; align-items: center; gap: 4px; padding: 5px 7px; border-radius: 6px; color: var(--accent-strong); background: transparent; font-size: 9px; font-weight: 650; }
-.order-lines > header button:hover { background: var(--hover); }
 .order-lines > header svg { width: 13px; height: 13px; }
 .order-line { display: grid; grid-template-columns: 125px minmax(140px, 1fr) 90px 64px 86px 78px 68px 92px 30px; align-items: end; gap: 5px; }
 .order-line > input, .order-line > select, .order-line label input { width: 100%; height: 34px; min-width: 0; border: 1px solid var(--border); border-radius: 6px; padding: 5px 7px; background: var(--panel); font-size: 9px; }
@@ -1442,9 +1410,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 :root[data-density-mode='ultra-dense'] .form-field select,
 :root[data-density-mode='ultra-dense'] .form-field textarea { min-height: 31px; }
 
-:root[data-theme='salesforce-black'] .primary-button:hover,
-:root[data-theme='salesforce-black'] .send-button:hover { background: #0b5cab; }
-
 @media (max-width: 1120px) {
   :root[data-density='dense'][data-navigation='auto'] { --rail-width: 52px; }
   :root[data-density-mode='ultra-dense'][data-navigation='auto'] { --rail-width: 48px; }
@@ -1499,18 +1464,10 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 @media (max-width: 1179px) {
   .conversation-panel.has-persistent-details .persistent-contact-panel:not(.details-overlay-open) { display: none; }
   .conversation-panel.has-persistent-details .persistent-contact-panel.details-overlay-open { display: grid; }
+  .conversation-panel.has-persistent-details .motion-presence[data-motion-state='exiting'] > .persistent-contact-panel { display: grid; }
 }
 
 /* Professional interaction and surface refinement */
-:root {
-  --motion-fast: 100ms;
-  --motion-medium: 160ms;
-  --motion-slow: 220ms;
-  --motion-ease: cubic-bezier(.2, .75, .25, 1);
-  --radius-control: 6px;
-  --radius-panel: 8px;
-}
-
 * { letter-spacing: 0 !important; }
 body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
 
@@ -1526,42 +1483,53 @@ input, textarea, select, .search-box, .crm-search {
   transition: border-color var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease),
     box-shadow var(--motion-fast) var(--motion-ease);
 }
-button:active:not(:disabled) { transform: translateY(1px); }
+button:active:not(:disabled) { transform: none; opacity: .88; }
 .virtual-chat-row button:active, .virtual-message button:active, .crm-virtual-row:active { transform: none; }
 
 .motion-presence { display: contents; }
 .motion-presence[data-motion-state='exiting'] { pointer-events: none; }
-.motion-presence > .modal-backdrop { opacity: 1; animation: none; transition: opacity var(--motion-medium) var(--motion-ease); }
+.motion-presence > .modal-backdrop { opacity: 1; animation: none; transition: opacity var(--motion-slow) var(--motion-ease); }
 .motion-presence > .modal-backdrop > :is(.modal, .settings-panel, .settings-loading) { opacity: 1; transform: translateY(0) scale(1); animation: none;
-  transition: opacity var(--motion-medium) var(--motion-ease), transform var(--motion-slow) var(--motion-ease); }
+  transition: opacity var(--motion-slow) var(--motion-ease), transform var(--motion-slow) var(--motion-ease); }
 .motion-presence[data-motion-state='entering'] > .modal-backdrop,
-.motion-presence[data-motion-state='exiting'] > .modal-backdrop { opacity: 0; }
+.motion-presence[data-motion-state='exiting'] > .modal-backdrop { opacity: 0; will-change: opacity; }
 .motion-presence[data-motion-state='entering'] > .modal-backdrop > :is(.modal, .settings-panel, .settings-loading),
-.motion-presence[data-motion-state='exiting'] > .modal-backdrop > :is(.modal, .settings-panel, .settings-loading) { opacity: 0; transform: translateY(6px) scale(.992); }
-.modal-backdrop[data-motion-state] { opacity: 1; animation: none; transition: opacity var(--motion-medium) var(--motion-ease); }
+.motion-presence[data-motion-state='exiting'] > .modal-backdrop > :is(.modal, .settings-panel, .settings-loading) {
+  opacity: 0;
+  transform: translateY(var(--motion-distance-medium)) scale(.992);
+  will-change: opacity, transform;
+}
+.modal-backdrop[data-motion-state] { opacity: 1; animation: none; transition: opacity var(--motion-slow) var(--motion-ease); }
 .modal-backdrop[data-motion-state] > .modal { opacity: 1; transform: translateY(0) scale(1); animation: none;
-  transition: opacity var(--motion-medium) var(--motion-ease), transform var(--motion-slow) var(--motion-ease); }
-.modal-backdrop[data-motion-state='entering'], .modal-backdrop[data-motion-state='exiting'] { opacity: 0; }
+  transition: opacity var(--motion-slow) var(--motion-ease), transform var(--motion-slow) var(--motion-ease); }
+.modal-backdrop[data-motion-state='entering'], .modal-backdrop[data-motion-state='exiting'] {
+  opacity: 0;
+  will-change: opacity;
+}
 .modal-backdrop[data-motion-state='entering'] > .modal, .modal-backdrop[data-motion-state='exiting'] > .modal {
   opacity: 0;
-  transform: translateY(6px) scale(.992);
+  transform: translateY(var(--motion-distance-medium)) scale(.992);
+  will-change: opacity, transform;
 }
 .motion-presence > .header-menu { opacity: 1; transform: translateY(0) scale(1); animation: none;
-  transition: opacity var(--motion-fast) var(--motion-ease), transform var(--motion-medium) var(--motion-ease); }
+  transition: opacity var(--motion-medium) var(--motion-ease), transform var(--motion-medium) var(--motion-ease); }
 .motion-presence[data-motion-state='entering'] > .header-menu,
-.motion-presence[data-motion-state='exiting'] > .header-menu { opacity: 0; transform: translateY(-3px) scale(.99); }
-.motion-presence > .emoji-picker { opacity: 1; transform: translateY(0); transition: opacity var(--motion-fast) var(--motion-ease), transform var(--motion-medium) var(--motion-ease); }
+.motion-presence[data-motion-state='exiting'] > .header-menu { opacity: 0; transform: translateY(calc(-1 * var(--motion-distance-short))) scale(.99); }
+.motion-presence > .emoji-picker { opacity: 1; transform: translateY(0); transition: opacity var(--motion-medium) var(--motion-ease), transform var(--motion-medium) var(--motion-ease); }
 .motion-presence[data-motion-state='entering'] > .emoji-picker,
-.motion-presence[data-motion-state='exiting'] > .emoji-picker { opacity: 0; transform: translateY(4px); }
+.motion-presence[data-motion-state='exiting'] > .emoji-picker { opacity: 0; transform: translateY(var(--motion-distance-short)); }
 .motion-presence > :is(.conversation-search-panel, .contact-drawer, .crm-contact-panel) { opacity: 1; transform: translateX(0); animation: none;
-  transition: opacity var(--motion-medium) var(--motion-ease), transform var(--motion-slow) var(--motion-ease); }
+  transition: opacity var(--motion-slow) var(--motion-ease), transform var(--motion-slow) var(--motion-ease); }
 .motion-presence[data-motion-state='entering'] > :is(.conversation-search-panel, .contact-drawer, .crm-contact-panel),
-.motion-presence[data-motion-state='exiting'] > :is(.conversation-search-panel, .contact-drawer, .crm-contact-panel) { opacity: 0; transform: translateX(10px); }
+.motion-presence[data-motion-state='exiting'] > :is(.conversation-search-panel, .contact-drawer, .crm-contact-panel) {
+  opacity: 0;
+  transform: translateX(var(--motion-distance-long));
+  will-change: opacity, transform;
+}
 .toast { opacity: 1; transform: translateY(0); animation: motion-toast-in var(--motion-slow) var(--motion-ease);
   transition: opacity var(--motion-medium) var(--motion-ease), transform var(--motion-medium) var(--motion-ease); }
-.toast[data-motion-state='exiting'] { opacity: 0; transform: translateY(6px); }
-.crm-workspace, .conversation-panel { animation: motion-content-in var(--motion-medium) var(--motion-ease); }
-.crm-content > *, .crm-contact-body > * { animation: motion-content-in var(--motion-medium) var(--motion-ease); }
+.toast[data-motion-state='exiting'] { opacity: 0; transform: translateY(var(--motion-distance-medium)); }
+.crm-contact-body > * { animation: motion-content-in var(--motion-medium) var(--motion-ease); }
 .message-item.message-enter .message-bubble { animation: motion-message-in var(--motion-slow) var(--motion-ease); }
 
 .nav-rail { gap: 2px; padding: 8px 7px; background: var(--panel); }
@@ -1621,7 +1589,6 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .crm-stat-grid { gap: 0; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--panel); }
 .crm-stat { min-height: 92px; border: 0; border-right: 1px solid var(--border); border-radius: 0; box-shadow: none; }
 .crm-stat:last-child { border-right: 0; }
-.crm-stat:hover { border-color: var(--border); box-shadow: none; transform: none; background: var(--hover); }
 .crm-revenue-strip > span { border-radius: var(--radius-control); }
 .crm-overview-grid { gap: 0; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--panel); }
 .crm-overview-grid .crm-card { border: 0; border-radius: 0; box-shadow: none; }
@@ -1648,10 +1615,13 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .crm-task-list { gap: 0; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--panel); }
 .crm-task { border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; }
 .crm-task:last-child { border-bottom: 0; }
-.crm-task:hover { background: var(--hover); }
 .crm-virtual-task-list { display: block; max-height: calc(100vh - 156px); overflow: auto; }
 .crm-virtual-list { position: relative; width: 100%; }
 .crm-virtual-task-list .crm-virtual-row { position: absolute; top: 0; left: 0; width: 100%; min-height: 70px; }
+.crm-virtual-task-list .crm-task.crm-virtual-row {
+  transition: color var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease), opacity var(--motion-fast) var(--motion-ease);
+}
 .catalog-card { border-radius: var(--radius-panel); }
 .catalog-icon { border-radius: var(--radius-control); }
 .crm-empty { min-height: 180px; }
@@ -1662,7 +1632,6 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .crm-contact-hero .avatar.large { border-radius: var(--radius-panel); }
 .crm-contact-actions { gap: 2px; border-bottom-color: var(--border); }
 .crm-contact-actions button { border-color: transparent; border-radius: var(--radius-control); background: transparent; }
-.crm-contact-actions button:hover { background: var(--hover); }
 .crm-stage-select, .crm-contact-tabs { background: var(--panel); }
 .crm-contact-tabs button { text-transform: none; }
 .crm-contact-tabs button.active::after { transform: scaleX(1); transform-origin: center;
@@ -1736,3 +1705,170 @@ button:active:not(:disabled) { transform: translateY(1px); }
   transition: none !important;
   animation: none !important;
 }
+
+/* Shared interaction primitives */
+.app-surface { width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
+.sr-only { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important;
+  overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
+
+.ui-choice-field { display: grid; min-width: 0; gap: 5px; }
+.ui-choice-copy { display: grid; min-width: 0; gap: 2px; }
+.ui-choice-label { color: var(--muted); font-size: 10px; font-weight: 700; }
+.ui-choice-copy small { color: var(--muted); line-height: 1.4; }
+.ui-choice-trigger, .ui-combobox-control { display: flex; width: 100%; min-width: 0; min-height: 37px; align-items: center;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-control); background: var(--surface-control); }
+.ui-choice-trigger { justify-content: space-between; gap: 8px; padding: 0 9px; text-align: left; }
+.ui-choice-trigger > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-choice-trigger svg, .ui-combobox-button svg { width: 15px; height: 15px; flex: 0 0 auto; color: var(--muted); }
+.ui-choice-trigger[data-pressed], .ui-combobox-button[data-pressed] { background: var(--active); transform: none; }
+.ui-choice-field[data-disabled] { opacity: .55; }
+.ui-choice-field[data-disabled] :is(.ui-choice-trigger, .ui-combobox-input, .ui-combobox-button) { cursor: default; }
+.ui-choice-field[data-required] .ui-choice-label::after { margin-left: 2px; color: var(--danger); content: '*'; }
+.ui-combobox-control:focus-within, .ui-choice-trigger[data-focus-visible] { border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 12%, transparent); outline: 0; }
+.ui-combobox-input { width: 100%; min-width: 0; height: 35px; flex: 1; border: 0; outline: 0; padding: 0 9px; background: transparent; }
+.ui-combobox-input:focus-visible { outline: 0; }
+.ui-combobox-button { display: grid; width: 34px; height: 35px; flex: 0 0 auto; place-items: center; padding: 0; border-radius: 0 var(--radius-control) var(--radius-control) 0; background: transparent; }
+.ui-choice-field.compact :is(.ui-choice-trigger, .ui-combobox-control) { min-height: 32px; }
+.ui-choice-field.compact .ui-combobox-input { height: 30px; }
+.ui-choice-field.compact .ui-combobox-button { width: 30px; height: 30px; }
+
+.ui-popover { --motion-popover-offset: calc(-1 * var(--motion-distance-short)); z-index: 180; min-width: var(--trigger-width); max-width: min(380px, calc(100vw - 16px));
+  overflow: hidden; border: 1px solid var(--border-strong); border-radius: var(--radius-control); color: var(--text);
+  background: var(--panel); box-shadow: 0 10px 30px rgb(11 20 26 / 22%); transform-origin: var(--trigger-anchor-point); }
+.ui-popover[data-placement^='top'] { --motion-popover-offset: var(--motion-distance-short); }
+.ui-popover[data-entering] { animation: motion-menu-in var(--motion-medium) var(--motion-ease); }
+.ui-popover[data-exiting] { opacity: 0; transform: translateY(var(--motion-popover-offset));
+  transition: opacity var(--motion-medium) var(--motion-ease), transform var(--motion-medium) var(--motion-ease); }
+.ui-popover[data-entering], .ui-popover[data-exiting], .ui-tooltip[data-entering], .ui-tooltip[data-exiting] {
+  will-change: opacity, transform;
+}
+.ui-listbox, .ui-menu { max-height: min(320px, var(--available-height)); overflow-y: auto; padding: 4px; outline: 0;
+  scrollbar-color: var(--muted) transparent; scrollbar-width: thin; }
+.ui-option, .ui-menu-item { display: flex; width: 100%; min-height: 34px; align-items: center; gap: 9px; padding: 7px 9px;
+  border-radius: 4px; outline: 0; cursor: default; }
+.ui-option > span, .ui-menu-item > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-option > svg, .ui-menu-item > svg { width: 15px; height: 15px; flex: 0 0 auto; color: var(--muted); }
+.ui-option[data-selected] { color: var(--accent-strong); font-weight: 650; }
+.ui-option[data-disabled], .ui-menu-item[data-disabled] { opacity: .45; }
+.ui-option[data-focus-visible], .ui-menu-item[data-focus-visible] { background: var(--hover); box-shadow: inset 0 0 0 1px var(--accent); }
+.ui-empty-option { padding: 16px 12px; color: var(--muted); text-align: center; }
+.ui-menu-popover { min-width: max(190px, var(--trigger-width)); }
+.ui-menu-item.danger-text { color: var(--danger); }
+.ui-menu-item.danger-text > svg { color: currentColor; }
+
+.ui-tooltip { z-index: 220; max-width: min(260px, calc(100vw - 16px)); padding: 5px 8px; border: 1px solid var(--border-strong);
+  border-radius: 4px; color: var(--text); background: var(--surface-control); box-shadow: 0 4px 14px rgb(11 20 26 / 18%);
+  font-size: 11px; line-height: 1.3; }
+.ui-tooltip[data-entering] { animation: motion-fade-in var(--motion-fast) var(--motion-ease); }
+.ui-tooltip[data-exiting] { opacity: 0; transition: opacity var(--motion-fast) var(--motion-ease); }
+
+.ui-choice-field.select-setting { display: flex; }
+.select-setting .ui-choice-copy { min-width: 0; flex: 1; }
+.select-setting .ui-choice-label { color: var(--text); font-size: 13px; }
+.select-setting .ui-choice-trigger { width: auto; min-width: 118px; flex: 0 0 auto; }
+.ui-choice-field.crm-stage-select { display: flex; }
+.crm-stage-select .ui-choice-copy { min-width: 0; flex: 1; }
+.crm-stage-select .ui-choice-label { font-size: 10px; }
+.crm-stage-select .ui-choice-trigger { width: auto; min-width: 160px; min-height: 32px; font-size: 11px; }
+.form-field > .ui-choice-copy > .ui-choice-label { color: var(--muted); font-size: 10px; }
+.form-field > :is(.ui-choice-trigger, .ui-combobox-control) { min-height: 37px; font-size: 11px; }
+.crm-capture-dialog .ui-choice-field { display: grid; }
+.crm-capture-dialog .ui-choice-trigger { min-height: 38px; }
+.order-line-choice { align-self: end; }
+.order-line-choice > :is(.ui-choice-trigger, .ui-combobox-control) { height: 34px; min-height: 34px; font-size: 10px; }
+.order-line-choice .ui-combobox-input { height: 32px; padding-inline: 7px; font-size: 10px; }
+.order-line-choice .ui-combobox-button { height: 32px; }
+
+.message-action-trigger { display: grid; width: 28px; height: 28px; place-items: center; padding: 0; border-radius: 4px;
+  color: var(--muted); background: transparent; }
+.message-action-trigger svg { width: 15px; height: 15px; }
+.icon-button[aria-expanded='true'], .message-action-trigger[aria-expanded='true'] { color: var(--text); background: var(--active); }
+
+/* Loading completion and meaningful new content */
+.chat-row-enter { animation: motion-chat-row-in var(--motion-slow) var(--motion-ease) backwards;
+  animation-delay: var(--row-enter-delay, 0ms); }
+.message-scroller { position: relative; }
+.message-history-skeleton { position: absolute; inset: 0; z-index: 1; display: grid; align-content: center; gap: 12px;
+  padding: 58px max(5%, 22px) 28px; pointer-events: none; }
+.message-history-skeleton > div { display: flex; align-items: end; gap: 6px; }
+.message-history-skeleton > div.mine { justify-content: flex-end; }
+.message-history-skeleton i { display: block; width: clamp(170px, 36%, 310px); height: 52px; border-radius: var(--radius-panel);
+  background: color-mix(in srgb, var(--panel-soft) 88%, var(--conversation)); animation: skeleton-pulse 1.4s ease-in-out infinite; }
+.message-history-skeleton > div:nth-child(3n) i { width: clamp(130px, 27%, 230px); height: 38px; }
+.message-history-skeleton span { width: 24px; height: 12px; border-radius: 6px; background: var(--panel-soft);
+  animation: skeleton-pulse 1.4s ease-in-out infinite; }
+.message-history-ready { animation: motion-fade-in var(--motion-medium) var(--motion-ease); }
+.conversation-uncached-skeleton { position: relative; min-width: 0; min-height: 0; grid-column: 1 / -1; grid-row: 1 / -1; }
+
+/* Each transition captures only its changing surface; stable wrappers prevent geometry morphs. */
+:root[data-surface-transition='session'] .app-surface { view-transition-name: session-surface; }
+:root[data-surface-transition='workspace'] :is(.chat-shell, .crm-shell-frame) { view-transition-name: workspace-surface; }
+:root[data-surface-transition='chat'] .conversation-panel { view-transition-name: chat-surface; }
+:root[data-surface-transition='crm'] .crm-content { view-transition-name: crm-surface; }
+:root[data-surface-transition='settings'] .settings-content { view-transition-name: settings-surface; }
+::view-transition-old(root), ::view-transition-new(root) { animation: none; }
+::view-transition-group(session-surface), ::view-transition-group(workspace-surface),
+::view-transition-group(chat-surface), ::view-transition-group(crm-surface),
+::view-transition-group(settings-surface) { animation: none; }
+::view-transition-old(session-surface), ::view-transition-old(workspace-surface),
+::view-transition-old(chat-surface), ::view-transition-old(crm-surface),
+::view-transition-old(settings-surface) {
+  animation: surface-fade-out var(--motion-medium) var(--motion-ease) both;
+}
+::view-transition-new(session-surface), ::view-transition-new(workspace-surface),
+::view-transition-new(chat-surface), ::view-transition-new(crm-surface),
+::view-transition-new(settings-surface) {
+  animation: motion-fade-in var(--motion-medium) var(--motion-ease) both;
+}
+@keyframes surface-fade-out { to { opacity: 0; } }
+.toast { transition-duration: var(--motion-slow), var(--motion-slow); }
+
+@media (hover: hover) {
+  .nav-button:hover:not(.active), .icon-button:hover { color: var(--text); background: var(--hover); }
+  .chat-row:hover:not(.active), .community-parent:hover, .conversation-identity:hover,
+  .customer-summary-untracked button:hover, .header-menu button:hover, .contact-actions button:hover,
+  .message-search-result:hover, .settings-nav button:hover:not(.active), .crm-card > header button:hover,
+  .crm-pipeline > div > button:hover, .contact-compact-row:hover, .crm-table tbody tr:hover,
+  .crm-contact-actions button:hover, .contact-order:hover, .order-lines > header button:hover,
+  .crm-task:hover { background: var(--hover); }
+  .sales-lifecycle-path button:hover:not(:disabled), .sales-lifecycle-error button:hover,
+  .message-actions button:hover, .emoji-picker > header button:hover { color: var(--text); background: var(--hover); }
+  .session-banner button:hover { background: rgb(255 255 255 / 90%); }
+  .message-bubble:hover .message-actions { display: flex; }
+  .quoted-message:hover { background: rgb(0 0 0 / 8%); }
+  .message-failed:hover { background: rgb(214 69 69 / 10%); }
+  .media-download:hover { background: rgb(0 0 0 / 14%); }
+  .new-messages-button:hover, .secondary-button:hover, .forward-list label:hover,
+  .emoji-grid button:hover { background: var(--hover); }
+  .send-button:hover, .primary-button:hover { background: var(--accent-strong); }
+  .history-options button:hover, .crm-task-check:hover { border-color: var(--accent); }
+  .option-grid button:hover:not(.active) { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); background: var(--hover); }
+  .background-option:hover:not(.active) { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+  .crm-section-nav button:hover:not(.active) { color: var(--text); background: var(--hover); }
+  .crm-stat:hover { border-color: var(--border); box-shadow: none; transform: none; background: var(--hover); }
+  .crm-filter-row button:hover:not(.active) { color: var(--text); border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+    background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
+  .catalog-card > footer button:hover { color: var(--danger); }
+  .contact-crm-entry:hover { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
+  :root[data-theme='salesforce-black'] .primary-button:hover,
+  :root[data-theme='salesforce-black'] .send-button:hover { background: #0b5cab; }
+  .ui-option[data-hovered], .ui-menu-item[data-hovered] { background: var(--hover); }
+  :is(.nav-button, .chat-row, .community-parent, .crm-section-nav button, .settings-nav button, .crm-contact-tabs button):hover:not(.active) {
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+}
+.nav-button:focus-visible, .chat-row:focus-visible, .community-parent:focus-visible, .crm-section-nav button:focus-visible,
+.settings-nav button:focus-visible, .crm-contact-tabs button:focus-visible, .catalog-card:focus-within, .crm-card:focus-within {
+  outline: 2px solid var(--accent); outline-offset: -2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-row-enter, .message-history-ready, .message-history-skeleton *, .onboarding-step,
+  .settings-content[data-surface-section], .crm-content[data-surface-section] { animation: none !important; }
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+}
+:root[data-motion='reduced'] :is(.chat-row-enter, .message-history-ready, .message-history-skeleton *, .onboarding-step,
+  .settings-content[data-surface-section], .crm-content[data-surface-section]) { animation: none !important; }
+:root[data-motion='reduced']::view-transition-group(*), :root[data-motion='reduced']::view-transition-old(*),
+:root[data-motion='reduced']::view-transition-new(*) { animation: none !important; }

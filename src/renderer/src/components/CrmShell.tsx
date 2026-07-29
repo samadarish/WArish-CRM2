@@ -11,11 +11,13 @@ import type {
   CrmMessageReferenceDto, CrmNoteDto, CrmOrderDto, CrmOrderInput, CrmStageDto, CrmTaskDto
 } from '../../../shared/contracts'
 import { MotionPresence } from '../motion'
+import { runSurfaceTransition } from '../surface-transition'
 import { useUiStore } from '../store'
 import { useDebouncedValue } from '../use-debounced-value'
 import { useDialogFocus } from '../use-dialog-focus'
 import { Avatar } from './Avatar'
 import { WhatsAppContactDialog } from './WhatsAppContactDialog'
+import { ComboBoxField, IconButton, SelectField, Tooltip } from './ui-primitives'
 
 type CrmView = 'overview' | 'leads' | 'customers' | 'orders' | 'tasks' | 'catalog'
 type ContactTab = 'overview' | 'notes' | 'tasks' | 'orders' | 'activity'
@@ -86,14 +88,15 @@ export function CrmShell(): React.JSX.Element {
     if (next === 'catalog') void queryClient.prefetchQuery({ queryKey: ['crm', 'catalog'], queryFn: () => window.warish.crm.catalog.list(undefined, true), staleTime: 15_000 })
   }, [queryClient])
   const changeView = useCallback((next: CrmView): void => {
-    setView(next); setQuery(''); setStageId('')
+    runSurfaceTransition('crm', () => { setView(next); setQuery(''); setStageId('') })
   }, [])
 
   return <main className="crm-workspace">
     <header className="crm-topbar"><div><h1>{CRM_VIEWS.find((item) => item.id === view)?.label}</h1></div>
       <div className="crm-topbar-actions">
         {(view === 'leads' || view === 'customers') && <label className="crm-search" aria-busy={contactsQuery.isFetching}><span className="crm-search-icon">{contactsQuery.isFetching ? <LoaderCircle className="spin" /> : <Search />}</span><input value={query}
-          placeholder={`Search ${view}`} onChange={(event) => setQuery(event.target.value)} />{query && <button aria-label="Clear search" onClick={() => setQuery('')}><X /></button>}</label>}
+          placeholder={`Search ${view}`} onChange={(event) => setQuery(event.target.value)} />{query && <IconButton className="" label="Clear search"
+            onClick={() => setQuery('')}><X /></IconButton>}</label>}
         {view === 'tasks' && <button className="primary-button" disabled={!defaultContactId || allContactsQuery.isLoading}
           title={!allContactsQuery.isLoading && !defaultContactId ? 'Save a WhatsApp contact before creating a task' : undefined}
           onClick={() => { if (defaultContactId) setTaskDialogContactId(defaultContactId) }}><Plus />New task</button>}
@@ -109,7 +112,7 @@ export function CrmShell(): React.JSX.Element {
         onMouseEnter={() => prefetchView(item.id)} onFocus={() => prefetchView(item.id)} onClick={() => changeView(item.id)}>
         {item.icon}<span>{item.label}</span>{item.id === 'leads' && dashboardQuery.data?.openLeads ? <b>{dashboardQuery.data.openLeads}</b> : null}
       </button>)}</nav>
-      <section className="crm-content">
+      <section className="crm-content" key={view} data-surface-section={view}>
         {view === 'overview' && <CrmOverview query={dashboardQuery} onContact={(id) => openCrmContact(id)}
           onView={changeView} />}
         {(view === 'leads' || view === 'customers') && <ContactsView contacts={contactsQuery.data} loading={contactsQuery.isLoading}
@@ -297,7 +300,8 @@ function TaskRow({ task, contactName, pending, onComplete, onContact, virtualSta
 }): React.JSX.Element {
   return <article ref={measureElement} className={`crm-task ${task.status} ${isOverdue(task) ? 'overdue' : ''} ${virtualStart === undefined ? '' : 'crm-virtual-row'}`}
     data-index={virtualIndex} style={virtualStart === undefined ? undefined : { transform: `translateY(${virtualStart}px)` }}>
-    <button className="crm-task-check" disabled={task.status !== 'open' || pending} aria-label="Complete task" onClick={onComplete}>{task.status === 'completed' && <Check />}</button>
+    <IconButton className="crm-task-check" disabled={task.status !== 'open' || pending} label="Complete task"
+      onClick={onComplete}>{task.status === 'completed' && <Check />}</IconButton>
     <div><span><strong>{task.title}</strong><PriorityPill value={task.priority} /></span>{task.description && <p>{task.description}</p>}
       <button className="link-button" onClick={() => onContact(task.contactId)}>{contactName ?? 'Contact'} <ExternalLink /></button></div>
     <time className={isOverdue(task) ? 'danger-text' : ''}>{task.dueAt ? formatDateTime(task.dueAt) : 'No due date'}</time>
@@ -326,7 +330,7 @@ function CatalogView({ items, loading, onEdit, onError }: { items?: CrmCatalogIt
   if (!items?.length) return <CrmEmpty icon={<Package />} title="No catalog items" />
   return <div className="catalog-grid">{items.map((item) => <article key={item.id} className={`catalog-card ${item.active ? '' : 'inactive'}`}>
     <header><span className="catalog-icon">{item.type === 'product' ? <Package /> : <BriefcaseBusiness />}</span><div><small>{item.type}{item.sku ? ` · ${item.sku}` : ''}</small><strong>{item.name}</strong></div>
-      <button className="icon-button" aria-label={`Edit ${item.name}`} onClick={() => onEdit(item)}><Pencil /></button></header>
+      <IconButton label={`Edit ${item.name}`} onClick={() => onEdit(item)}><Pencil /></IconButton></header>
     {item.description && <p>{item.description}</p>}<footer><strong>{money(item.unitPrice, item.currency)}</strong>{item.active ? <button disabled={archive.isPending}
       onClick={() => archive.mutate(item.id)}><Trash2 />Archive</button> : <span>Archived</span>}</footer></article>)}</div>
 }
@@ -382,7 +386,7 @@ export function CrmContactPanel({ contactId, stages, onClose, inConversation = f
     setTab('overview'); setEditing(false); setContactSaveOpen(false); setTaskEditor(undefined); setOrderEditor(undefined)
   }, [contactId])
   return <><aside className={`crm-contact-panel ${inConversation ? 'in-conversation' : ''} ${persistent ? 'persistent-contact-panel' : ''} ${overlayOpen ? 'details-overlay-open' : ''}`} aria-label="CRM contact record"><header><div><span>{inConversation ? 'CRM customer' : 'Contact record'}</span><strong>{inConversation ? 'Customer workspace' : contact?.name ?? 'Loading…'}</strong></div>
-    <button className="icon-button contact-panel-close" aria-label="Close customer details" onClick={onClose}><X /></button></header>
+    <IconButton className="icon-button contact-panel-close" label="Close customer details" onClick={onClose}><X /></IconButton></header>
     {contactQuery.isError ? <CrmError label="Could not load this customer" onRetry={() => void contactQuery.refetch()} /> : !contact ? <CrmLoading label="Loading contact…" /> : <>
       <div className="crm-contact-hero"><Avatar title={contact.name} src={contact.avatarUrl} large /><div className="crm-contact-copy"><h2>{contact.name}</h2>
         {contact.whatsappName && contact.whatsappName !== contact.name && <span className="whatsapp-profile-pill">{contact.whatsappName}</span>}
@@ -391,8 +395,9 @@ export function CrmContactPanel({ contactId, stages, onClose, inConversation = f
         <button onClick={() => setTaskEditor(null)}><CalendarClock />Task</button><button onClick={() => setOrderEditor(null)}><ShoppingBag />Order</button>
         <button disabled={sessionQuery.data?.phase !== 'connected'} title={sessionQuery.data?.phase === 'connected' ? undefined : 'Connect WhatsApp to save this contact'}
           onClick={() => setContactSaveOpen(true)}><ContactRound />{whatsappDetailsQuery.data?.savedName ? 'Edit contact' : 'Save contact'}</button></div>
-      {!inConversation && <label className="crm-stage-select"><span>Pipeline stage</span><select value={contact.stageId} disabled={stage.isPending}
-        onChange={(event) => stage.mutate(event.target.value)}>{stages.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+      {!inConversation && <SelectField className="crm-stage-select" density="compact" label="Pipeline stage"
+        value={contact.stageId} disabled={stage.isPending} onChange={(value) => stage.mutate(value)}
+        options={stages.map((item) => ({ value: item.id, label: item.name }))} />
       }
       <nav className="crm-contact-tabs">{(['overview', 'notes', 'tasks', 'orders', 'activity'] as const).map((item) => <button key={item}
         className={tab === item ? 'active' : ''} onMouseEnter={() => prefetchTab(item)} onFocus={() => prefetchTab(item)}
@@ -456,8 +461,10 @@ function ContactEditForm({ contact, onDone }: { contact: CrmContactDetailsDto; o
     <FormField label="Address"><textarea value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} /></FormField>
     <FormField label="Preferences"><textarea value={form.preferences} onChange={(event) => setForm({ ...form, preferences: event.target.value })} /></FormField>
     <FormField label="Tags (comma separated)"><input value={form.tags} onChange={(event) => setForm({ ...form, tags: event.target.value })} /></FormField>
-    <div className="form-grid"><FormField label="Consent"><select value={form.consentStatus} onChange={(event) => setForm({ ...form, consentStatus: event.target.value as typeof form.consentStatus })}>
-      <option value="unknown">Unknown</option><option value="granted">Granted</option><option value="denied">Denied</option></select></FormField>
+    <div className="form-grid"><SelectField className="form-field" label="Consent" value={form.consentStatus}
+      onChange={(value) => setForm({ ...form, consentStatus: value as typeof form.consentStatus })} options={[
+        { value: 'unknown', label: 'Unknown' }, { value: 'granted', label: 'Granted' }, { value: 'denied', label: 'Denied' }
+      ]} />
       <label className="checkbox-field"><input type="checkbox" checked={form.doNotContact} onChange={(event) => setForm({ ...form, doNotContact: event.target.checked })} />Do not contact</label></div>
     <footer><button type="button" className="secondary-button" onClick={onDone}>Cancel</button><button className="primary-button" disabled={save.isPending}>{save.isPending ? 'Saving…' : 'Save contact'}</button></footer>
   </form>
@@ -485,8 +492,9 @@ function ContactNotes({ contactId, onJumpToMessage }: { contactId: string; onJum
       <button className="primary-button" disabled={!body.trim() || save.isPending}><NotebookPen />{editing ? 'Save note' : 'Add note'}</button></div></form>
     <div className="crm-note-list">{query.data?.map((note) => <article key={note.id}><p>{note.body}</p>
       {note.sourceMessage && <MessageReference reference={note.sourceMessage} onJump={onJumpToMessage} />}
-      <footer><time>{formatDateTime(note.createdAt)}</time><span><button className="icon-button" aria-label="Edit note" onClick={() => edit(note)}><Pencil /></button>
-        <button className="icon-button danger-text" aria-label="Delete note" disabled={remove.isPending} onClick={() => remove.mutate(note.id)}><Trash2 /></button></span></footer></article>)}
+      <footer><time>{formatDateTime(note.createdAt)}</time><span><IconButton label="Edit note" onClick={() => edit(note)}><Pencil /></IconButton>
+        <IconButton className="icon-button danger-text" label="Delete note" disabled={remove.isPending}
+          onClick={() => remove.mutate(note.id)}><Trash2 /></IconButton></span></footer></article>)}
       {!query.isLoading && !query.data?.length && <CrmEmpty icon={<FileText />} title="No notes" />}</div></div>
 }
 
@@ -511,10 +519,11 @@ function ContactTasks({ contactId, onNew, onEdit, onJumpToMessage }: { contactId
       ['crm', 'contact', contactId], ['crm', 'contacts'], ['crm', 'dashboard'])
   }, onError: (error) => pushNotice(errorMessage(error)) })
   return <div><button className="primary-button contact-tab-action" onClick={onNew}><Plus />New task</button>{query.data?.map((task) => <article className="contact-task" key={task.id}>
-    <button className={task.status === 'completed' ? 'checked' : ''} aria-label={task.status === 'completed' ? 'Reopen task' : 'Complete task'}
-      disabled={complete.isPending} onClick={() => complete.mutate(task)}>{task.status === 'completed' && <Check />}</button>
+    <IconButton className={task.status === 'completed' ? 'checked' : ''} label={task.status === 'completed' ? 'Reopen task' : 'Complete task'}
+      disabled={complete.isPending} onClick={() => complete.mutate(task)}>{task.status === 'completed' && <Check />}</IconButton>
     <button className="contact-task-copy" onClick={() => onEdit(task)}><strong>{task.title}</strong><small>{task.dueAt ? formatDateTime(task.dueAt) : 'No due date'}</small></button>
-    <PriorityPill value={task.priority} /><button className="icon-button danger-text" aria-label="Delete task" disabled={remove.isPending} onClick={() => remove.mutate(task.id)}><Trash2 /></button>
+    <PriorityPill value={task.priority} /><IconButton className="icon-button danger-text" label="Delete task" disabled={remove.isPending}
+      onClick={() => remove.mutate(task.id)}><Trash2 /></IconButton>
     {task.sourceMessage && <MessageReference reference={task.sourceMessage} onJump={onJumpToMessage} />}</article>)}
     {!query.isLoading && !query.data?.length && <CrmEmpty icon={<ListTodo />} title="No follow-ups" />}</div>
 }
@@ -527,8 +536,8 @@ function ContactActivity({ contactId }: { contactId: string }): React.JSX.Elemen
 
 function MessageReference({ reference, onJump }: { reference: CrmMessageReferenceDto; onJump?(messageId: string): void }): React.JSX.Element {
   return <div className="crm-message-reference"><MessageCircle /><span><small>{reference.fromMe ? 'You' : reference.senderName ?? 'Customer'} · {formatDateTime(reference.timestamp)}</small>
-    <strong>{reference.text ?? reference.kind}</strong></span>{onJump && <button className="icon-button" title="Show source message" aria-label="Show source message"
-      onClick={() => onJump(reference.messageId)}><ExternalLink /></button>}</div>
+    <strong>{reference.text ?? reference.kind}</strong></span>{onJump && <Tooltip label="Show source message"><button className="icon-button"
+      aria-label="Show source message" onClick={() => onJump(reference.messageId)}><ExternalLink /></button></Tooltip>}</div>
 }
 
 function TaskDialog({ initialContactId, contacts, task, onClose }: { initialContactId: string; contacts: CrmContactSummaryDto[]; task?: CrmTaskDto; onClose(): void }): React.JSX.Element {
@@ -551,12 +560,20 @@ function TaskDialog({ initialContactId, contacts, task, onClose }: { initialCont
       ['crm', 'contacts'], ['crm', 'dashboard']); onClose()
   }, onError: (error) => pushNotice(errorMessage(error)) })
   return <CrmDialog title={task ? 'Edit follow-up' : 'New follow-up'} eyebrow="Task" onClose={onClose}><form className="crm-form" onSubmit={(event) => { event.preventDefault(); save.mutate() }}>
-    <FormField label="Contact"><select value={contactId} disabled={Boolean(task)} onChange={(event) => setContactId(event.target.value)} required>{contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.name}{contact.phoneNumber ? ` · ${contact.phoneNumber}` : ''}</option>)}</select></FormField>
+    <ComboBoxField className="form-field" label="Contact" value={contactId} disabled={Boolean(task)} required
+      placeholder="Search contacts" onChange={setContactId} options={contacts.map((contact) => ({ value: contact.id,
+        label: `${contact.name}${contact.phoneNumber ? ` · ${contact.phoneNumber}` : ''}` }))} />
     <FormField label="Task"><input value={title} onChange={(event) => setTitle(event.target.value)} required autoFocus /></FormField>
     <FormField label="Notes"><textarea value={description} onChange={(event) => setDescription(event.target.value)} /></FormField>
     <div className="form-grid"><FormField label="Due"><input type="datetime-local" value={due} onChange={(event) => setDue(event.target.value)} /></FormField>
-      <FormField label="Priority"><select value={priority} onChange={(event) => setPriority(event.target.value as CrmTaskDto['priority'])}><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option></select></FormField></div>
-    {task && <FormField label="Status"><select value={status} onChange={(event) => setStatus(event.target.value as CrmTaskDto['status'])}><option value="open">Open</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select></FormField>}
+      <SelectField className="form-field" label="Priority" value={priority}
+        onChange={(value) => setPriority(value as CrmTaskDto['priority'])} options={[
+          { value: 'low', label: 'Low' }, { value: 'normal', label: 'Normal' }, { value: 'high', label: 'High' }
+        ]} /></div>
+    {task && <SelectField className="form-field" label="Status" value={status}
+      onChange={(value) => setStatus(value as CrmTaskDto['status'])} options={[
+        { value: 'open', label: 'Open' }, { value: 'completed', label: 'Completed' }, { value: 'cancelled', label: 'Cancelled' }
+      ]} />}
     <footer>{task && <button type="button" className="danger-button crm-delete-button" disabled={remove.isPending} onClick={() => remove.mutate()}><Trash2 />Delete</button>}
       <button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={!contactId || save.isPending}>{save.isPending ? 'Saving…' : task ? 'Save task' : 'Create task'}</button></footer>
   </form></CrmDialog>
@@ -593,18 +610,30 @@ function OrderDialog({ initialContactId, contacts, catalog, order, onClose }: { 
     updateLine(index, { catalogItemId: item.id, type: item.type, name: item.name, unitPrice: item.unitPrice })
   }
   return <CrmDialog title={order ? order.orderNumber : 'New order'} eyebrow={order ? 'Edit order' : 'Order'} onClose={onClose} wide><form className="crm-form order-form" onSubmit={(event) => { event.preventDefault(); save.mutate() }}>
-    <div className="form-grid"><FormField label="Customer"><select value={contactId} disabled={Boolean(order)} onChange={(event) => setContactId(event.target.value)} required>{contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.name}</option>)}</select></FormField>
-      <FormField label="Status"><select value={status} onChange={(event) => setStatus(event.target.value as CrmOrderInput['status'])}><option value="draft">Draft</option><option value="confirmed">Confirmed</option><option value="in-progress">In progress</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select></FormField></div>
+    <div className="form-grid"><ComboBoxField className="form-field" label="Customer" value={contactId} disabled={Boolean(order)} required
+      placeholder="Search customers" onChange={setContactId} options={contacts.map((contact) => ({ value: contact.id, label: contact.name }))} />
+      <SelectField className="form-field" label="Status" value={status}
+        onChange={(value) => setStatus(value as CrmOrderInput['status'])} options={[
+          { value: 'draft', label: 'Draft' }, { value: 'confirmed', label: 'Confirmed' },
+          { value: 'in-progress', label: 'In progress' }, { value: 'completed', label: 'Completed' },
+          { value: 'cancelled', label: 'Cancelled' }
+        ]} /></div>
     <div className="order-lines"><header><strong>Line items</strong><button type="button" onClick={() => setLines([...lines, { type: 'product', name: '', quantity: 1, unitPrice: 0, discount: 0, taxRate: 0 }])}><Plus />Add line</button></header>
-      {lines.map((line, index) => <div className="order-line" key={index}><select aria-label="Catalog item" value={line.catalogItemId ?? ''} onChange={(event) => chooseCatalog(index, event.target.value)}><option value="">Custom item</option>{catalog.map((item) => <option key={item.id} value={item.id}>{item.name} · {money(item.unitPrice)}</option>)}</select>
+      {lines.map((line, index) => <div className="order-line" key={index}><ComboBoxField className="order-line-choice catalog-choice" density="compact"
+        label="Catalog item" hideLabel value={line.catalogItemId ?? ''} placeholder="Search catalog"
+        onChange={(value) => chooseCatalog(index, value)} options={[{ value: '', label: 'Custom item' },
+          ...catalog.map((item) => ({ value: item.id, label: `${item.name} · ${money(item.unitPrice)}` }))]} />
         <input aria-label="Item name" placeholder="Product or service" value={line.name} onChange={(event) => updateLine(index, { name: event.target.value })} required />
-        <select aria-label="Item type" value={line.type} onChange={(event) => updateLine(index, { type: event.target.value as OrderLine['type'] })}><option value="product">Product</option><option value="service">Service</option></select>
+        <SelectField className="order-line-choice" density="compact" label="Item type" hideLabel value={line.type}
+          onChange={(value) => updateLine(index, { type: value as OrderLine['type'] })}
+          options={[{ value: 'product', label: 'Product' }, { value: 'service', label: 'Service' }]} />
         <label>Qty<input type="number" min="0.001" step="0.001" value={line.quantity} onChange={(event) => updateLine(index, { quantity: Number(event.target.value) })} /></label>
         <label>Rate<input type="number" min="0" step="0.01" value={line.unitPrice} onChange={(event) => updateLine(index, { unitPrice: Number(event.target.value) })} /></label>
         <label>Discount<input type="number" min="0" step="0.01" value={line.discount} onChange={(event) => updateLine(index, { discount: Number(event.target.value) })} /></label>
         <label>Tax %<input type="number" min="0" max="100" step="0.01" value={line.taxRate} onChange={(event) => updateLine(index, { taxRate: Number(event.target.value) })} /></label>
         <strong>{money(Math.max(0, line.quantity * line.unitPrice - line.discount) * (1 + line.taxRate / 100))}</strong>
-        <button type="button" className="icon-button" aria-label="Remove line" disabled={lines.length === 1} onClick={() => setLines(lines.filter((_, position) => position !== index))}><Trash2 /></button></div>)}</div>
+        <IconButton type="button" label="Remove line" disabled={lines.length === 1}
+          onClick={() => setLines(lines.filter((_, position) => position !== index))}><Trash2 /></IconButton></div>)}</div>
     <div className="order-footer-grid"><FormField label="Internal note"><textarea value={internalNote} onChange={(event) => setInternalNote(event.target.value)} /></FormField>
       <div><FormField label="Payment received"><input type="number" min="0" max={total} step="0.01" value={paidAmount}
         aria-invalid={paymentExceedsTotal} onChange={(event) => setPaidAmount(Number(event.target.value))} /></FormField>
@@ -630,7 +659,10 @@ function CatalogDialog({ item, onClose }: { item?: CrmCatalogItemDto; onClose():
     unitPrice, currency: 'INR', active }), onSuccess: () => { invalidateCrmQueries(queryClient, ['crm', 'catalog']); onClose() },
     onError: (error) => pushNotice(errorMessage(error)) })
   return <CrmDialog title={item ? 'Edit catalog item' : 'Add catalog item'} eyebrow="Catalog" onClose={onClose}><form className="crm-form" onSubmit={(event) => { event.preventDefault(); save.mutate() }}>
-    <div className="form-grid"><FormField label="Type"><select value={type} onChange={(event) => setType(event.target.value as typeof type)}><option value="product">Product</option><option value="service">Service</option></select></FormField>
+    <div className="form-grid"><SelectField className="form-field" label="Type" value={type}
+      onChange={(value) => setType(value as typeof type)} options={[
+        { value: 'product', label: 'Product' }, { value: 'service', label: 'Service' }
+      ]} />
       <FormField label="SKU / code"><input value={sku} onChange={(event) => setSku(event.target.value)} /></FormField></div>
     <FormField label="Name"><input value={name} onChange={(event) => setName(event.target.value)} required autoFocus /></FormField>
     <FormField label="Description"><textarea value={description} onChange={(event) => setDescription(event.target.value)} /></FormField>
@@ -644,7 +676,8 @@ function CrmDialog({ title, eyebrow, wide, onClose, children }: { title: string;
   const dialogRef = useDialogFocus<HTMLElement>(onClose)
   return <div className="modal-backdrop crm-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section ref={dialogRef}
     className={`modal crm-dialog ${wide ? 'wide' : ''}`} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1}>
-    <header><div><span>{eyebrow}</span><h2>{title}</h2></div><button className="icon-button" aria-label="Close" onClick={onClose}><X /></button></header><div className="crm-dialog-body">{children}</div></section></div>
+    <header><div><span>{eyebrow}</span><h2>{title}</h2></div><IconButton label="Close" onClick={onClose}><X /></IconButton></header>
+    <div className="crm-dialog-body">{children}</div></section></div>
 }
 
 function ContactCompactRow({ contact, onClick }: { contact: CrmContactSummaryDto; onClick(): void }): React.JSX.Element {

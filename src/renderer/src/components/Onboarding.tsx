@@ -3,7 +3,9 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { CalendarDays, KeyRound, LoaderCircle, QrCode, Settings } from 'lucide-react'
 import type { SessionState } from '../../../shared/contracts'
 import { useUiStore } from '../store'
+import { runSurfaceTransition } from '../surface-transition'
 import { BrandMark } from './BrandMark'
+import { Tooltip } from './ui-primitives'
 
 export function Onboarding({ session }: { session: SessionState }): React.JSX.Element {
   const [phone, setPhone] = useState('')
@@ -19,21 +21,21 @@ export function Onboarding({ session }: { session: SessionState }): React.JSX.El
   }
   const qrMutation = useMutation({
     mutationFn: async () => { await saveHistoryWindow(); return window.warish.session.startQr() },
-    onSuccess: (state) => queryClient.setQueryData(['session'], state)
+    onSuccess: (state) => runSurfaceTransition('session', () => queryClient.setQueryData(['session'], state))
   })
   const codeMutation = useMutation({
     mutationFn: async () => { await saveHistoryWindow(); return window.warish.session.requestPairingCode(phone) },
-    onSuccess: (state) => queryClient.setQueryData(['session'], state)
+    onSuccess: (state) => runSurfaceTransition('session', () => queryClient.setQueryData(['session'], state))
   })
   const error = qrMutation.error ?? codeMutation.error
   const visibleError = error instanceof Error ? error.message : session.message
 
   return (
     <main className="onboarding">
-      <button className="icon-button onboarding-settings" title="Settings" aria-label="Settings" onClick={() => setSettingsOpen(true)}><Settings size={20} /></button>
+      <Tooltip label="Settings"><button className="icon-button onboarding-settings" aria-label="Settings" onClick={() => setSettingsOpen(true)}><Settings size={20} /></button></Tooltip>
       <section className="onboarding-card">
         <div className="brand-lockup"><BrandMark /><div><h1>Welcome to WArish</h1><p>Your conversations stay on this computer.</p></div></div>
-        {session.phase === 'pairing' && session.qrDataUrl ? (
+        <div className="onboarding-step" key={session.qrDataUrl ? 'qr' : session.pairingCode ? 'code' : 'choices'}>{session.phase === 'pairing' && session.qrDataUrl ? (
           <div className="pairing-view">
             <img className="qr-code" src={session.qrDataUrl} alt="WhatsApp linked-device QR code" />
             <div><h2>Scan with your phone</h2><ol><li>Open WhatsApp on your phone</li><li>Open Linked devices</li><li>Choose Link a device and scan this code</li></ol></div>
@@ -61,7 +63,7 @@ export function Onboarding({ session }: { session: SessionState }): React.JSX.El
               <div className="phone-code-row"><input aria-label="International phone number" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="International number, e.g. 15551234567" /><button onClick={() => codeMutation.mutate()} disabled={!phone || codeMutation.isPending}>Get code</button></div>
             </div>
           </>
-        )}
+        )}</div>
         {visibleError && <p className="error-text">{visibleError}</p>}
       </section>
     </main>

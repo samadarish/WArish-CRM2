@@ -9,19 +9,19 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])'
 ].join(',')
 
-export function useDialogFocus<T extends HTMLElement>(onClose: () => void, closeOnEscape = true): RefObject<T | null> {
+export function useDialogFocus<T extends HTMLElement>(onClose: () => void, closeOnEscape = true,
+  returnFocusTarget?: HTMLElement): RefObject<T | null> {
   const dialogRef = useRef<T>(null)
   const onCloseRef = useRef(onClose)
   const closeOnEscapeRef = useRef(closeOnEscape)
-  const returnFocusRef = useRef<HTMLElement | undefined>(
-    document.activeElement instanceof HTMLElement ? document.activeElement : undefined
-  )
+  const returnFocusRef = useRef<HTMLElement | undefined>(returnFocusTarget ?? resolveReturnFocus())
 
   useEffect(() => { onCloseRef.current = onClose }, [onClose])
   useEffect(() => { closeOnEscapeRef.current = closeOnEscape }, [closeOnEscape])
 
   useEffect(() => {
     const returnFocus = returnFocusRef.current
+    const returnFocusId = returnFocus?.id
     const focusTimer = window.setTimeout(() => {
       const dialog = dialogRef.current
       if (!dialog || dialog.contains(document.activeElement)) return
@@ -33,6 +33,7 @@ export function useDialogFocus<T extends HTMLElement>(onClose: () => void, close
       const dialog = dialogRef.current
       if (!dialog || !isTopmostDialog(dialog)) return
       if (event.key === 'Escape' && closeOnEscapeRef.current) {
+        if (event.defaultPrevented || document.querySelector('.ui-popover')) return
         event.preventDefault()
         event.stopImmediatePropagation()
         onCloseRef.current()
@@ -59,13 +60,25 @@ export function useDialogFocus<T extends HTMLElement>(onClose: () => void, close
     return () => {
       window.clearTimeout(focusTimer)
       window.removeEventListener('keydown', handleKeyDown)
-      window.queueMicrotask(() => {
-        if (returnFocus?.isConnected) returnFocus.focus()
-      })
+      window.setTimeout(() => {
+        const target = returnFocus?.isConnected ? returnFocus
+          : returnFocusId ? document.getElementById(returnFocusId) : undefined
+        const focusGroup = target?.closest<HTMLElement>('[data-focus-return-group]')
+        if (focusGroup) focusGroup.dataset.focusRestoring = 'true'
+        target?.focus({ preventScroll: true })
+        if (focusGroup) window.requestAnimationFrame(() => { delete focusGroup.dataset.focusRestoring })
+      }, 0)
     }
   }, [])
 
   return dialogRef
+}
+
+function resolveReturnFocus(): HTMLElement | undefined {
+  const active = document.activeElement instanceof HTMLElement ? document.activeElement : undefined
+  if (!active?.matches('[role="menuitem"]')) return active
+  const expandedTriggers = [...document.querySelectorAll<HTMLElement>('[aria-haspopup][aria-expanded="true"]')]
+  return expandedTriggers.at(-1) ?? active
 }
 
 function isTopmostDialog(dialog: HTMLElement): boolean {

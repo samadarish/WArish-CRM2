@@ -7,7 +7,8 @@ import { ChatShell } from './components/ChatShell'
 import { Onboarding } from './components/Onboarding'
 import { resolveSessionSurface } from './session-surface'
 import { MotionPresence } from './motion'
-import { motionDuration } from './motion-preference'
+import { runSurfaceTransition } from './surface-transition'
+import { MOTION_MS, motionDuration, notifyMotionPreferenceChanged } from './motion-preference'
 import { useUiStore } from './store'
 import { destinationForChat } from './workspace-navigation'
 
@@ -55,7 +56,9 @@ export function App(): React.JSX.Element {
   const needsOnboarding = resolveSessionSurface(session) === 'onboarding'
   return (
     <div className="app-root">
-      <AppErrorBoundary>{needsOnboarding ? <Onboarding session={session} /> : <ChatShell session={session} />}</AppErrorBoundary>
+      <AppErrorBoundary><div className="app-surface" data-surface={needsOnboarding ? 'onboarding' : 'workspace'}>
+        {needsOnboarding ? <Onboarding session={session} /> : <ChatShell session={session} />}
+      </div></AppErrorBoundary>
       <MotionPresence show={settingsOpen}><Suspense fallback={<div className="modal-backdrop settings-backdrop"><div className="settings-loading"><div className="spinner" /><span>Opening settings…</span></div></div>}><SettingsPanel /></Suspense></MotionPresence>
       <ToastRegion />
     </div>
@@ -63,7 +66,13 @@ export function App(): React.JSX.Element {
 }
 
 function handleEvent(event: CoreEventEnvelope, queryClient: ReturnType<typeof useQueryClient>): void {
-  if (event.type === 'session.changed') queryClient.setQueryData(['session'], event.payload as SessionState)
+  if (event.type === 'session.changed') {
+    const next = event.payload as SessionState
+    const current = queryClient.getQueryData<SessionState>(['session'])
+    const update = (): void => { queryClient.setQueryData(['session'], next) }
+    if (current && resolveSessionSurface(current) !== resolveSessionSurface(next)) runSurfaceTransition('session', update)
+    else update()
+  }
   if (event.type === 'settings.changed') queryClient.setQueryData(['settings'], event.payload as AppSettings)
   if (event.type === 'chat.changed') {
     const payload = event.payload as { chatId?: string }
@@ -111,7 +120,7 @@ function handleEvent(event: CoreEventEnvelope, queryClient: ReturnType<typeof us
     const batch = event.payload as HistoryBatchEvent
     const affectedChats = new Set(batch.chatIds)
     scheduleChatRefresh(queryClient, batch.chatIds)
-    for (const chatId of affectedChats) void refreshLatestMessagePage(queryClient, chatId)
+    for (const chatId of affectedChats) void refreshLatestMessagePage(queryClient, chatId, true)
   }
   if (event.type === 'message.upserted') {
     const message = event.payload as MessageDto
@@ -120,12 +129,15 @@ function handleEvent(event: CoreEventEnvelope, queryClient: ReturnType<typeof us
   }
   if (event.type === 'message.changed') {
     const payload = event.payload as { message: MessageDto; replacedId?: string }
-    patchMessage(queryClient, payload.message, payload.replacedId)
+    const meaningfulOutgoing = !payload.replacedId && payload.message.fromMe
+      && (payload.message.status === 'queued' || payload.message.status === 'sending')
+      && !hasCachedMessage(queryClient, payload.message.chatId, payload.message.id)
+    patchMessage(queryClient, payload.message, payload.replacedId, !meaningfulOutgoing)
     scheduleChatRefresh(queryClient, [payload.message.chatId])
   }
   if (event.type === 'message.batch') {
     const payload = event.payload as { messages: MessageDto[] }
-    for (const message of payload.messages) patchMessage(queryClient, message)
+    for (const message of payload.messages) patchMessage(queryClient, message, undefined, true)
     scheduleChatRefresh(queryClient, [...new Set(payload.messages.map((message) => message.chatId))])
   }
   if (event.type === 'message.statusChanged') {
@@ -244,8 +256,16 @@ function compareChatSummaries(left: ChatSummary, right: ChatSummary): number {
     || right.id.localeCompare(left.id)
 }
 
-type MessagePages = InfiniteData<Page<MessageDto>, string | undefined>
-function patchMessage(queryClient: QueryClient, message: MessageDto, replacedId?: string): void {
+type MessagePages = InfiniteData<Page<MessageDto>, string | undefined> & {
+  motionUpdate?: { revision: number; quiet: boolean }
+}
+
+function hasCachedMessage(queryClient: QueryClient, chatId: string, messageId: string): boolean {
+  return queryClient.getQueryData<MessagePages>(['messages', chatId])?.pages
+    .some((page) => page.items.some((message) => message.id === messageId)) ?? false
+}
+
+function patchMessage(queryClient: QueryClient, message: MessageDto, replacedId?: string, quiet = false): void {
   queryClient.setQueryData<MessagePages>(['messages', message.chatId], (current) => {
     if (!current?.pages.length) return current
     let found = false
@@ -266,8 +286,16 @@ function patchMessage(queryClient: QueryClient, message: MessageDto, replacedId?
       changed = true
     }
     if (!changed) return current
-    return { ...current, pages }
+    return withMessageMotionUpdate(current, pages, quiet)
   })
+}
+
+function withMessageMotionUpdate(current: MessagePages, pages: MessagePages['pages'], quiet: boolean): MessagePages {
+  return {
+    ...current,
+    pages,
+    motionUpdate: { revision: (current.motionUpdate?.revision ?? 0) + 1, quiet }
+  }
 }
 
 function patchMessageStatus(queryClient: QueryClient, chatId: string, messageId: string, status: MessageDto['status']): void {
@@ -286,13 +314,13 @@ function patchMessageStatus(queryClient: QueryClient, chatId: string, messageId:
   })
 }
 
-async function refreshLatestMessagePage(queryClient: QueryClient, chatId: string): Promise<void> {
+async function refreshLatestMessagePage(queryClient: QueryClient, chatId: string, quiet = false): Promise<void> {
   const current = queryClient.getQueryData<MessagePages>(['messages', chatId])
   if (!current?.pages.length) return
   try {
     const latest = await window.warish.messages.list(chatId, undefined, 80)
     queryClient.setQueryData<MessagePages>(['messages', chatId], (value) => value?.pages.length
-      ? { ...value, pages: [latest, ...value.pages.slice(1)] }
+      ? withMessageMotionUpdate(value, [latest, ...value.pages.slice(1)], quiet)
       : value)
   } catch { /* The active query keeps its last usable page and exposes retry in the conversation. */ }
 }
@@ -317,7 +345,7 @@ function Toast({ notice, dismiss }: { notice: { id: number; message: string; ton
   }, [])
   useEffect(() => {
     if (!exiting) return
-    const timer = window.setTimeout(() => dismiss(notice.id), motionDuration(180))
+    const timer = window.setTimeout(() => dismiss(notice.id), motionDuration(MOTION_MS.slow))
     return () => window.clearTimeout(timer)
   }, [dismiss, exiting, notice.id])
   return <button role={notice.tone === 'error' ? 'alert' : 'status'} className={`toast ${notice.tone}`}
@@ -347,6 +375,7 @@ function applyAppearance(settings?: AppSettings): void {
   document.documentElement.dataset.navigation = settings.navigationMode
   document.documentElement.dataset.motion = settings.reduceMotion ? 'reduced' : 'system'
   document.documentElement.dataset.conversationBackground = settings.conversationBackground
+  notifyMotionPreferenceChanged()
 }
 
 const Splash = memo(function Splash({ label }: { label: string }): React.JSX.Element {

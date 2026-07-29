@@ -2,6 +2,7 @@
 import '@testing-library/jest-dom/vitest'
 import { useState } from 'react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { createPortal } from 'react-dom'
 import { afterEach, describe, expect, it } from 'vitest'
 import { useDialogFocus } from '../src/renderer/src/use-dialog-focus'
 
@@ -18,6 +19,14 @@ function Dialog({ onClose }: { onClose(): void }): React.JSX.Element {
 function Harness(): React.JSX.Element {
   const [open, setOpen] = useState(false)
   return <><button onClick={() => setOpen(true)}>Open dialog</button>{open && <Dialog onClose={() => setOpen(false)} />}</>
+}
+
+function NestedOverlayHarness(): React.JSX.Element {
+  const [open, setOpen] = useState(true)
+  const [popoverOpen, setPopoverOpen] = useState(true)
+  return <>{open && <Dialog onClose={() => setOpen(false)} />}{popoverOpen && createPortal(
+    <div className="ui-popover"><button onClick={() => setPopoverOpen(false)}>Popover action</button></div>, document.body
+  )}</>
 }
 
 describe('useDialogFocus', () => {
@@ -40,5 +49,14 @@ describe('useDialogFocus', () => {
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     await waitFor(() => expect(opener).toHaveFocus())
+  })
+
+  it('leaves the parent dialog open while a portaled child overlay handles Escape', () => {
+    render(<NestedOverlayHarness />)
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.getByRole('dialog', { name: 'Test dialog' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Popover action' }))
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: 'Test dialog' })).not.toBeInTheDocument()
   })
 })

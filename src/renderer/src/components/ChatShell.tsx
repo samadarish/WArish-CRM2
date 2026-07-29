@@ -1,6 +1,6 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query'
-import { useVirtualizer } from '@tanstack/react-virtual'
+import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual'
 import { format, isSameDay, isToday, isYesterday } from 'date-fns'
 import {
   Archive, ArchiveRestore, ArrowDown, ArrowUp, BadgeIndianRupee, BriefcaseBusiness, Check, CheckCheck, ChevronDown, ChevronRight,
@@ -13,12 +13,15 @@ import { shouldSubmitComposer } from '../composer-keyboard'
 import { contactIdentityPresentation, type ContactIdentityPresentation } from '../contact-identity'
 import { messageGroupPositions } from '../message-grouping'
 import { MotionPresence } from '../motion'
+import { runSurfaceTransition } from '../surface-transition'
+import { MOTION_MS, motionDuration, subscribeToReducedMotion } from '../motion-preference'
 import { useDebouncedValue } from '../use-debounced-value'
 import { useDialogFocus } from '../use-dialog-focus'
 import { Avatar } from './Avatar'
 import { MessageBubble } from './MessageBubble'
 import { NavigationRail, type SidebarDestination } from './NavigationRail'
 import { SalesLifecyclePath } from './SalesLifecyclePath'
+import { DropdownMenu, IconButton, SelectField, Tooltip } from './ui-primitives'
 
 const ContactDrawer = lazy(async () => {
   const module = await import('./ContactDrawer')
@@ -42,7 +45,8 @@ const COMPOSER_EMOJIS = [
 export const ChatShell = memo(function ChatShell({ session }: { session: SessionState }): React.JSX.Element {
   const destination = useUiStore((state) => state.destination)
   const navigate = useUiStore((state) => state.navigate)
-  if (destination === 'crm') return <div className="crm-shell-frame"><NavigationRail current={destination} onNavigate={navigate} />
+  const navigateWithTransition = useCallback((next: SidebarDestination): void => runSurfaceTransition('workspace', () => navigate(next)), [navigate])
+  if (destination === 'crm') return <div className="crm-shell-frame"><NavigationRail current={destination} onNavigate={navigateWithTransition} />
     <Suspense fallback={<div className="crm-state"><LoaderCircle className="spin" />Opening CRM…</div>}><CrmShell /></Suspense></div>
   return <ConversationShell session={session} />
 })
@@ -53,6 +57,8 @@ function ConversationShell({ session }: { session: SessionState }): React.JSX.El
   const [expandedCommunities, setExpandedCommunities] = useState<Set<string>>(() => new Set())
   const [sidebarMenuOpen, setSidebarMenuOpen] = useState(false)
   const [relinkOpen, setRelinkOpen] = useState(false)
+  const [enteringChatRows, setEnteringChatRows] = useState<Map<string, number>>(() => new Map())
+  const [pendingSelectedChatId, setPendingSelectedChatId] = useState<string>()
   const debouncedChatQuery = useDebouncedValue(chatQuery, 220)
   const selectedChatId = useUiStore((state) => state.selectedChatId)
   const destination = useUiStore((state) => state.destination)
@@ -64,6 +70,9 @@ function ConversationShell({ session }: { session: SessionState }): React.JSX.El
   const category: ChatCategory = showArchived || destination === 'crm' ? 'all' : destination
   const chatListRef = useRef<HTMLDivElement>(null)
   const hydratedContactIdsRef = useRef<Set<string>>(new Set())
+  const knownSidebarIdsRef = useRef<Set<string>>(new Set())
+  const revealedSidebarListsRef = useRef<Set<string>>(new Set())
+  const chatRowEnterTimerRef = useRef<number | undefined>(undefined)
   const queryClient = useQueryClient()
   const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: () => window.warish.settings.get() })
   const showChatPreviews = settingsQuery.data?.showChatPreviews ?? true
@@ -209,13 +218,19 @@ function ConversationShell({ session }: { session: SessionState }): React.JSX.El
     }) : current)
   }, [pushNotice, queryClient])
   const selectChatRow = useCallback((chatId: string): void => {
-    selectChat(chatId)
+    setPendingSelectedChatId(chatId)
+    runSurfaceTransition('chat', () => selectChat(chatId))
     markRead(chatId)
   }, [markRead, selectChat])
+  useLayoutEffect(() => {
+    if (pendingSelectedChatId === selectedChatId) setPendingSelectedChatId(undefined)
+  }, [pendingSelectedChatId, selectedChatId])
   const changeDestination = useCallback((next: SidebarDestination): void => {
-    navigate(next)
-    setSidebarMenuOpen(false)
-    setChatQuery('')
+    runSurfaceTransition('workspace', () => {
+      navigate(next)
+      setSidebarMenuOpen(false)
+      setChatQuery('')
+    })
   }, [navigate])
   const toggleCommunity = useCallback((communityId: string): void => setExpandedCommunities((current) => {
     const next = new Set(current)
@@ -252,25 +267,54 @@ function ConversationShell({ session }: { session: SessionState }): React.JSX.El
   useEffect(() => {
     if (chatListRef.current) chatListRef.current.scrollTop = 0
   }, [destination])
-  useEffect(() => {
-    const closeMenu = (event: KeyboardEvent): void => { if (event.key === 'Escape') setSidebarMenuOpen(false) }
-    window.addEventListener('keydown', closeMenu)
-    return () => window.removeEventListener('keydown', closeMenu)
-  }, [])
   const sidebarPending = destination === 'community' ? communitiesQuery.isPending : chatsQuery.isPending
   const sidebarError = destination === 'community' ? communitiesQuery.isError : chatsQuery.isError
+  const sidebarRevealKey = destination
+  const sidebarSearchActive = Boolean(debouncedChatQuery.trim())
+  const visibleSidebarKey = visibleContactIds.join('|')
+  useLayoutEffect(() => {
+    if (sidebarPending || sidebarError) return
+    const firstReveal = !revealedSidebarListsRef.current.has(sidebarRevealKey)
+    const enteringIds = (firstReveal ? visibleContactIds
+      : sidebarSearchActive ? []
+        : visibleContactIds.filter((id) => !knownSidebarIdsRef.current.has(id))).slice(0, 6)
+    revealedSidebarListsRef.current.add(sidebarRevealKey)
+    for (const item of sidebarItems) if (item.type === 'chat') knownSidebarIdsRef.current.add(item.chat.id)
+    if (!enteringIds.length) return
+    if (motionDuration(MOTION_MS.fast) === 0) {
+      setEnteringChatRows((current) => current.size ? new Map() : current)
+      return
+    }
+    setEnteringChatRows(new Map(enteringIds.map((id, index) => [id, index])))
+    if (chatRowEnterTimerRef.current !== undefined) window.clearTimeout(chatRowEnterTimerRef.current)
+    chatRowEnterTimerRef.current = window.setTimeout(() => {
+      chatRowEnterTimerRef.current = undefined
+      setEnteringChatRows(new Map())
+    }, MOTION_MS.slow + 100)
+  // `visibleSidebarKey` keeps metadata refreshes and list reordering visually quiet.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sidebarError, sidebarItems, sidebarPending, sidebarRevealKey, sidebarSearchActive, visibleSidebarKey])
+  useEffect(() => () => {
+    if (chatRowEnterTimerRef.current !== undefined) window.clearTimeout(chatRowEnterTimerRef.current)
+  }, [])
+  useEffect(() => subscribeToReducedMotion(() => {
+    if (chatRowEnterTimerRef.current !== undefined) window.clearTimeout(chatRowEnterTimerRef.current)
+    chatRowEnterTimerRef.current = undefined
+    setEnteringChatRows((current) => current.size ? new Map() : current)
+  }), [])
 
   return (
     <div className="chat-shell">
       <NavigationRail current={destination} onNavigate={changeDestination} />
       <aside className={`chat-list-panel ${showChatPreviews ? '' : 'chat-previews-hidden'}`}>
-        <header className="panel-header"><h1>{destinationLabel(destination)}</h1><button className="icon-button" title="Chat list menu" aria-label="Chat list menu" aria-haspopup="menu" aria-expanded={sidebarMenuOpen} onClick={() => setSidebarMenuOpen((open) => !open)}><Menu /></button>
-          <MotionPresence show={sidebarMenuOpen}>{sidebarMenuOpen && <><button className="menu-dismiss" aria-label="Close menu" onClick={() => setSidebarMenuOpen(false)} /><div className="header-menu sidebar-header-menu" role="menu">
-            <button role="menuitem" onClick={() => changeDestination(showArchived ? 'all' : 'archived')}>{showArchived ? <MessageCircle /> : <Archive />}{showArchived ? 'All conversations' : 'Archived'}</button>
-            <button role="menuitem" onClick={() => { setSidebarMenuOpen(false); setSettingsOpen(true) }}><Settings />Settings</button>
-          </div></>}</MotionPresence>
+        <header className="panel-header"><h1>{destinationLabel(destination)}</h1><DropdownMenu label="Chat list menu" icon={<Menu />}
+          isOpen={sidebarMenuOpen} onOpenChange={setSidebarMenuOpen} items={[
+            { id: 'archive', label: showArchived ? 'All conversations' : 'Archived',
+              icon: showArchived ? <MessageCircle /> : <Archive />, onAction: () => changeDestination(showArchived ? 'all' : 'archived') },
+            { id: 'settings', label: 'Settings', icon: <Settings />, onAction: () => { setSidebarMenuOpen(false); setSettingsOpen(true) } }
+          ]} />
         </header>
-        <label className="search-box"><Search /><input value={chatQuery} onChange={(event) => setChatQuery(event.target.value)} placeholder={`Search ${destinationLabel(destination).toLowerCase()}`} />{chatQuery && <button aria-label="Clear chat search" onClick={() => setChatQuery('')}><X /></button>}</label>
+        <label className="search-box"><Search /><input value={chatQuery} onChange={(event) => setChatQuery(event.target.value)} placeholder={`Search ${destinationLabel(destination).toLowerCase()}`} />{chatQuery && <IconButton className="" label="Clear chat search" onClick={() => setChatQuery('')}><X /></IconButton>}</label>
         <div className="chat-list" ref={chatListRef}>
           {sidebarPending && <SkeletonRows />}
           {!sidebarPending && !sidebarError && sidebarItems.length === 0 && <EmptyChatList destination={destination} />}
@@ -285,8 +329,8 @@ function ConversationShell({ session }: { session: SessionState }): React.JSX.El
                   expanded={Boolean(debouncedChatQuery.trim()) || expandedCommunities.has(item.community.id)}
                   onToggle={toggleCommunity} />
                   : item?.type === 'chat' ? <ChatRow chat={item.chat} nested={item.nested}
-                    active={item.chat.id === selectedChatId} showPreview={showChatPreviews} onSelect={selectChatRow}
-                    onPrefetch={prefetchChat} />
+                    active={item.chat.id === (pendingSelectedChatId ?? selectedChatId)} showPreview={showChatPreviews} onSelect={selectChatRow}
+                    enterIndex={enteringChatRows.get(item.chat.id)} onPrefetch={prefetchChat} />
                     : <LoadingRow label={destination === 'community' ? 'Loading more communities…' : 'Loading more conversations…'} />}
               </div>
             })}
@@ -300,7 +344,9 @@ function ConversationShell({ session }: { session: SessionState }): React.JSX.El
           <div className="connection-banner history-sync-banner"><LoaderCircle className="spin" />Syncing recent history — {Math.round(session.historySync.progress)}%</div>}
         {selectedChatQuery.isError ? <QueryError label="Could not open this conversation" onRetry={() => void selectedChatQuery.refetch()} />
           : selectedChat ? <Conversation key={selectedChat.id} chat={selectedChat} session={session} enterToSend={enterToSend}
-            onForward={setForwardMessage} onChatHidden={clearSelectedChat} /> : <WelcomePanel />}
+            onForward={setForwardMessage} onChatHidden={clearSelectedChat} />
+            : selectedChatId && selectedChatQuery.isPending ? <div className="conversation-uncached-skeleton"><MessageHistorySkeleton /></div>
+              : <WelcomePanel />}
       </main>
       <MotionPresence show={Boolean(forwardMessage)}>{forwardMessage && <ForwardDialog message={forwardMessage} onClose={() => setForwardMessage(undefined)} />}</MotionPresence>
       <MotionPresence show={relinkOpen}>{relinkOpen && <RelinkDialog session={session} onClose={() => setRelinkOpen(false)} />}</MotionPresence>
@@ -344,7 +390,8 @@ function RelinkDialog({ session, onClose }: { session: SessionState; onClose(): 
   const pending = qrMutation.isPending || codeMutation.isPending
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section ref={dialogRef}
     className="modal relink-dialog" role="dialog" aria-modal="true" aria-labelledby="relink-title" tabIndex={-1}>
-    <header><div><h2 id="relink-title">Relink WhatsApp</h2><p>Your local conversations and preferences will remain unchanged.</p></div><button className="icon-button" aria-label="Close relink dialog" onClick={onClose}><X /></button></header>
+    <header><div><h2 id="relink-title">Relink WhatsApp</h2><p>Your local conversations and preferences will remain unchanged.</p></div>
+      <IconButton label="Close relink dialog" onClick={onClose}><X /></IconButton></header>
     <div className="relink-content">{session.qrDataUrl ? <div className="relink-qr"><img className="qr-code" src={session.qrDataUrl} alt="WhatsApp linked-device QR code" /><div><strong>Scan with your phone</strong><ol><li>Open WhatsApp</li><li>Open Linked devices</li><li>Choose Link a device</li></ol></div></div>
       : session.pairingCode ? <div className="code-view"><strong>{formatPairingCode(session.pairingCode)}</strong><p>Enter this code from WhatsApp → Linked devices → Link a device.</p></div>
         : session.phase === 'pairing' ? <div className="loading-row"><LoaderCircle className="spin" />Preparing a secure pairing code…</div>
@@ -382,12 +429,14 @@ const CommunityParentRow = memo(function CommunityParentRow({ community, expande
     </button>
 })
 
-const ChatRow = memo(function ChatRow({ chat, active, showPreview, nested = false, onSelect, onPrefetch }: {
+const ChatRow = memo(function ChatRow({ chat, active, showPreview, nested = false, enterIndex, onSelect, onPrefetch }: {
   chat: ChatSummary; active: boolean; showPreview: boolean; nested?: boolean
+  enterIndex?: number
   onSelect(chatId: string): void; onPrefetch(chat: ChatSummary): void
 }): React.JSX.Element {
   const identity = contactIdentityPresentation(chat)
-  return <button className={`chat-row ${chat.kind === 'direct' ? 'direct' : ''} ${identity.hasSecondary ? 'has-identity' : ''} ${chat.crm ? 'has-crm' : ''} ${nested ? 'nested' : ''} ${active ? 'active' : ''}`}
+  return <button className={`chat-row ${chat.kind === 'direct' ? 'direct' : ''} ${identity.hasSecondary ? 'has-identity' : ''} ${chat.crm ? 'has-crm' : ''} ${nested ? 'nested' : ''} ${active ? 'active' : ''} ${enterIndex === undefined ? '' : 'chat-row-enter'}`}
+    style={enterIndex === undefined ? undefined : { '--row-enter-delay': `${Math.min(100, enterIndex * 20)}ms` } as React.CSSProperties}
     onMouseEnter={() => onPrefetch(chat)} onFocus={() => onPrefetch(chat)} onClick={() => onSelect(chat.id)}>
     <Avatar title={identity.primary} src={chat.avatarUrl} /><span className="chat-row-copy"><span className="chat-row-top"><strong title={identity.primary}>{identity.primary}</strong>{chat.lastMessageAt && <time>{chatTime(chat.lastMessageAt)}</time>}{!showPreview && chat.unreadCount > 0 && <b>{chat.unreadCount > 99 ? '99+' : chat.unreadCount}</b>}</span>
       {(identity.hasSecondary || chat.crm) && <span className="chat-row-metadata">
@@ -479,6 +528,8 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
   const [restrictedSendOpen, setRestrictedSendOpen] = useState(false)
   const [attachment, setAttachment] = useState<PickedAttachment>()
   const [attachmentKind, setAttachmentKind] = useState<'image' | 'video' | 'document' | 'audio' | 'voice' | 'sticker'>()
+  const showPersistentDetails = useMediaQuery('(min-width: 1180px)')
+  const showContactDetails = contactDrawerOpen || (chat.kind === 'direct' && showPersistentDetails)
   const emojiToolRef = useRef<HTMLDivElement>(null)
   const recorder = useRef<MediaRecorder | undefined>(undefined)
   const recordingTimer = useRef<number | undefined>(undefined)
@@ -489,6 +540,7 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
   const activeChatRef = useRef<string | undefined>(undefined)
   const previousMessagesRef = useRef<MessageDto[]>([])
   const anchorRef = useRef<{ id: string; viewportOffset: number } | undefined>(undefined)
+  const pendingHistoryAnchorRef = useRef<{ id: string; viewportOffset: number } | undefined>(undefined)
   const scrollFrameRef = useRef<number | undefined>(undefined)
   const scrollStateFrameRef = useRef<number | undefined>(undefined)
   const rowResizeFrameRef = useRef<number | undefined>(undefined)
@@ -504,6 +556,10 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (page) => page.nextCursor
   })
+  const messageHistoryWasPendingRef = useRef(messageQuery.isPending)
+  const messageHistoryReadyFrameRef = useRef<number | undefined>(undefined)
+  const [messageHistoryReady, setMessageHistoryReady] = useState(!messageQuery.isPending)
+  const [animateMessageHistoryReady, setAnimateMessageHistoryReady] = useState(false)
   const draftQuery = useQuery({
     queryKey: ['draft', chat.id],
     queryFn: () => window.warish.drafts.get(chat.id),
@@ -534,6 +590,25 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
     }, 350)
     return () => window.clearTimeout(timer)
   }, [attachment, attachmentKind, chat.id, chat.readOnly, pushNotice, text])
+  useEffect(() => {
+    if (messageQuery.isPending || messageHistoryReady) return
+    if (motionDuration(1) === 0) {
+      setMessageHistoryReady(true)
+      return
+    }
+    messageHistoryReadyFrameRef.current = window.requestAnimationFrame(() => {
+      messageHistoryReadyFrameRef.current = undefined
+      setAnimateMessageHistoryReady(messageHistoryWasPendingRef.current)
+      setMessageHistoryReady(true)
+    })
+    return () => {
+      if (messageHistoryReadyFrameRef.current !== undefined) window.cancelAnimationFrame(messageHistoryReadyFrameRef.current)
+      messageHistoryReadyFrameRef.current = undefined
+    }
+  }, [messageHistoryReady, messageQuery.isPending])
+  const messageMotionUpdate = (messageQuery.data as (InfiniteData<Page<MessageDto>, string | undefined> & {
+    motionUpdate?: { revision: number; quiet: boolean }
+  }) | undefined)?.motionUpdate
   const messages = useMemo(() => {
     const unique = new Map<string, MessageDto>()
     const local = [...(messageQuery.data?.pages ?? [])].reverse().flatMap((page) => page.items)
@@ -551,33 +626,38 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
     }
     return result
   }, [chat.kind, groupPositionById, messages])
+  const extractMessageRange = useCallback((range: Range): number[] => {
+    const indexes = defaultRangeExtractor(range)
+    const pendingId = pendingHistoryAnchorRef.current?.id
+    if (!pendingId) return indexes
+    const timelineIndex = timeline.findIndex((item) => item.type === 'message' && item.message.id === pendingId)
+    const virtualIndex = timelineIndex + 1
+    if (timelineIndex < 0 || indexes.includes(virtualIndex)) return indexes
+    return [...indexes, virtualIndex].sort((left, right) => left - right)
+  }, [timeline])
   const virtualizer = useVirtualizer({
     count: timeline.length + 1,
     getScrollElement: () => parentRef.current,
     estimateSize: (index) => index === 0 ? 52 : timeline[index - 1]?.type === 'date' ? 38 : 76,
     getItemKey: (index) => index === 0 ? `history-controls:${chat.id}` : timeline[index - 1]?.key ?? `message:${index}`,
+    rangeExtractor: extractMessageRange,
     useAnimationFrameWithResizeObserver: true,
     overscan: 8
   })
   const virtualMessageHeight = virtualizer.getTotalSize()
   const virtualMessageOffset = Math.max(0, messageViewportHeight - virtualMessageHeight)
-  const captureAnchor = useCallback((): void => {
+  const captureAnchor = useCallback((): { id: string; viewportOffset: number } | undefined => {
     const element = parentRef.current
-    if (!element) return
-    const item = virtualizer.getVirtualItems().find((candidate) => {
-      if (candidate.index === 0) return false
-      if (timeline[candidate.index - 1]?.type !== 'message') return false
-      return candidate.end >= element.scrollTop
-    })
-    const timelineItem = item ? timeline[item.index - 1] : undefined
-    const message = timelineItem?.type === 'message' ? timelineItem.message : undefined
-    if (item && message) {
-      anchorRef.current = {
-        id: message.id,
-        viewportOffset: item.start + virtualMessageOffset - element.scrollTop
-      }
-    }
-  }, [timeline, virtualMessageOffset, virtualizer])
+    if (!element) return undefined
+    const viewport = element.getBoundingClientRect()
+    const row = [...element.querySelectorAll<HTMLElement>('.message-item[data-message-id]')]
+      .find((candidate) => candidate.getBoundingClientRect().bottom >= viewport.top)
+    const id = row?.dataset.messageId
+    if (!row || !id) return undefined
+    const anchor = { id, viewportOffset: row.getBoundingClientRect().top - viewport.top }
+    anchorRef.current = anchor
+    return anchor
+  }, [])
   const measureRenderedRows = useCallback((): void => {
     const element = parentRef.current
     if (!element) return
@@ -587,24 +667,30 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
   }, [virtualizer])
   const restoreAnchor = useCallback((anchor: { id: string; viewportOffset: number }): void => {
     if (scrollFrameRef.current !== undefined) cancelAnimationFrame(scrollFrameRef.current)
-    scrollFrameRef.current = requestAnimationFrame(() => {
+    const index = timeline.findIndex((item) => item.type === 'message' && item.message.id === anchor.id)
+    if (index < 0) {
+      if (pendingHistoryAnchorRef.current?.id === anchor.id) pendingHistoryAnchorRef.current = undefined
+      return
+    }
+    const alignAnchor = (remainingFrames: number): void => {
       measureRenderedRows()
-      const index = timeline.findIndex((item) => item.type === 'message' && item.message.id === anchor.id)
-      if (index < 0) {
-        scrollFrameRef.current = undefined
+      const element = parentRef.current
+      const row = element && [...element.querySelectorAll<HTMLElement>('.message-item[data-message-id]')]
+        .find((candidate) => candidate.dataset.messageId === anchor.id)
+      if (element && row) {
+        const currentOffset = row.getBoundingClientRect().top - element.getBoundingClientRect().top
+        element.scrollTop += currentOffset - anchor.viewportOffset
+      } else {
+        virtualizer.scrollToIndex(index + 1, { align: 'start' })
+      }
+      if (remainingFrames > 0) {
+        scrollFrameRef.current = requestAnimationFrame(() => alignAnchor(remainingFrames - 1))
         return
       }
-      virtualizer.scrollToIndex(index + 1, { align: 'start' })
-      scrollFrameRef.current = requestAnimationFrame(() => {
-        const element = parentRef.current
-        const row = element?.querySelector<HTMLElement>(`[data-index="${index + 1}"]`)
-        if (element && row) {
-          const currentOffset = row.getBoundingClientRect().top - element.getBoundingClientRect().top
-          element.scrollTop += currentOffset - anchor.viewportOffset
-        }
-        scrollFrameRef.current = undefined
-      })
-    })
+      if (pendingHistoryAnchorRef.current?.id === anchor.id) pendingHistoryAnchorRef.current = undefined
+      scrollFrameRef.current = undefined
+    }
+    scrollFrameRef.current = requestAnimationFrame(() => alignAnchor(5))
   }, [measureRenderedRows, timeline, virtualizer])
   const scrollToNewest = useCallback((clearNotice = true): void => {
     if (!messages.length) return
@@ -691,6 +777,7 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
     setNewMessageCount(0)
     nearBottomRef.current = true
     anchorRef.current = undefined
+    pendingHistoryAnchorRef.current = undefined
     setConversationMenuOpen(false)
     setContactDrawerOpen(false)
     setSearchOpen(false)
@@ -805,7 +892,10 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
     const newerCount = previousNewest
       ? added.filter((message) => compareMessages(message, previousNewest) > 0).length
       : added.length
-    const entering = previousNewest ? added.filter((message) => compareMessages(message, previousNewest) > 0) : []
+    const enteringCandidates = previousNewest ? added.filter((message) => compareMessages(message, previousNewest) > 0) : []
+    const entering = !messageMotionUpdate?.quiet && enteringCandidates.length <= 4 && motionDuration(MOTION_MS.slow) > 0
+      ? enteringCandidates
+      : []
     if (entering.length) {
       setEnteringMessageIds((current) => new Set([...current, ...entering.map((message) => message.id)]))
       for (const message of entering) {
@@ -819,13 +909,16 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
             next.delete(message.id)
             return next
           })
-        }, 260)
+        }, MOTION_MS.slow)
         messageEnterTimersRef.current.set(message.id, timer)
       }
     }
+    const historyAnchor = pendingHistoryAnchorRef.current
     const shouldFollow = nearBottomRef.current || pendingOwnSendRef.current
 
-    if (added.length && shouldFollow) {
+    if (added.length && historyAnchor) {
+      restoreAnchor(historyAnchor)
+    } else if (added.length && shouldFollow) {
       scrollToNewest()
     } else if (added.length && anchorRef.current) {
       restoreAnchor(anchorRef.current)
@@ -834,7 +927,7 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
       setNewMessageCount((count) => count + newerCount)
     }
     previousMessagesRef.current = messages
-  }, [chat.id, messages, restoreAnchor, scrollToNewest, virtualizer])
+  }, [chat.id, messageMotionUpdate?.quiet, messageMotionUpdate?.revision, messages, restoreAnchor, scrollToNewest, virtualizer])
 
   useEffect(() => {
     activeRef.current = true
@@ -855,6 +948,17 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
       }
     }
   }, [])
+  useEffect(() => subscribeToReducedMotion(() => {
+    for (const timer of messageEnterTimersRef.current.values()) window.clearTimeout(timer)
+    messageEnterTimersRef.current.clear()
+    setEnteringMessageIds((current) => current.size ? new Set() : current)
+    if (!messageQuery.isPending) {
+      if (messageHistoryReadyFrameRef.current !== undefined) window.cancelAnimationFrame(messageHistoryReadyFrameRef.current)
+      messageHistoryReadyFrameRef.current = undefined
+      setAnimateMessageHistoryReady(false)
+      setMessageHistoryReady(true)
+    }
+  }), [messageQuery.isPending])
 
   const chooseAttachment = async (): Promise<void> => {
     try {
@@ -989,24 +1093,32 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
         {conversationIdentity.profileName && <span className="whatsapp-profile-pill">{conversationIdentity.profileName}</span>}</span>
       : <span>{chatSubtitle(chat)}</span>}</span></button>
       {chat.kind === 'direct' && <CustomerSummaryStrip chat={chat} onOpenDetails={openContactDetails} />}
-      <button className={`icon-button ${searchOpen ? 'active' : ''}`} title="Search this conversation" aria-label="Search this conversation" aria-expanded={searchOpen} onClick={() => { setConversationMenuOpen(false); setContactDrawerOpen(false); setSearchOpen((open) => !open) }}><Search /></button>
-      <button className="icon-button" title="Conversation menu" aria-label="Conversation menu" aria-haspopup="menu" aria-expanded={conversationMenuOpen} onClick={() => { setSearchOpen(false); setContactDrawerOpen(false); setConversationMenuOpen((open) => !open) }}><Menu /></button>
-      <MotionPresence show={conversationMenuOpen}>{conversationMenuOpen && <><button className="menu-dismiss" aria-label="Close menu" onClick={() => setConversationMenuOpen(false)} /><div className="header-menu conversation-header-menu" role="menu">
-        <button role="menuitem" disabled={chatAction.isPending} onClick={() => chatAction.mutate({ patch: { pinned: !chat.pinned } })}>{chat.pinned ? <PinOff /> : <Pin />}{chat.pinned ? 'Unpin chat' : 'Pin chat'}</button>
-        <button role="menuitem" onClick={() => { void window.warish.chats.markRead(chat.id).catch((error) => pushNotice(errorMessage(error))); setConversationMenuOpen(false) }}><CheckCheck />Mark as read</button>
-        <button role="menuitem" disabled={chatAction.isPending} onClick={() => chatAction.mutate({ patch: { archived: !chat.archived }, hide: true })}>{chat.archived ? <ArchiveRestore /> : <Archive />}{chat.archived ? 'Unarchive chat' : 'Archive chat'}</button>
-      </div></>}</MotionPresence>
+      <Tooltip label="Search this conversation"><button className={`icon-button ${searchOpen ? 'active' : ''}`}
+        aria-label="Search this conversation" aria-expanded={searchOpen}
+        onClick={() => { setConversationMenuOpen(false); setContactDrawerOpen(false); setSearchOpen((open) => !open) }}><Search /></button></Tooltip>
+      <DropdownMenu label="Conversation menu" icon={<Menu />} isOpen={conversationMenuOpen}
+        onOpenChange={(open) => { if (open) { setSearchOpen(false); setContactDrawerOpen(false) }; setConversationMenuOpen(open) }} items={[
+          { id: 'pin', label: chat.pinned ? 'Unpin chat' : 'Pin chat', icon: chat.pinned ? <PinOff /> : <Pin />,
+            disabled: chatAction.isPending, onAction: () => chatAction.mutate({ patch: { pinned: !chat.pinned } }) },
+          { id: 'read', label: 'Mark as read', icon: <CheckCheck />,
+            onAction: () => { void window.warish.chats.markRead(chat.id).catch((error) => pushNotice(errorMessage(error))) } },
+          { id: 'archive', label: chat.archived ? 'Unarchive chat' : 'Archive chat',
+            icon: chat.archived ? <ArchiveRestore /> : <Archive />, disabled: chatAction.isPending,
+            onAction: () => chatAction.mutate({ patch: { archived: !chat.archived }, hide: true }) }
+        ]} />
     </header>
     {chat.kind === 'direct' && <SalesLifecyclePath chat={chat} />}
     <div className="message-scroller" ref={parentRef}>
       {messageQuery.isError && <QueryError label="Could not load messages" onRetry={() => void messageQuery.refetch()} />}
-      <div className="virtual-message-list" style={{ height: Math.max(virtualMessageHeight, messageViewportHeight) }}>
+      {!messageHistoryReady && <MessageHistorySkeleton />}
+      <div className={`virtual-message-list ${animateMessageHistoryReady ? 'message-history-ready' : ''}`}
+        aria-hidden={!messageHistoryReady || undefined} style={{ height: Math.max(virtualMessageHeight, messageViewportHeight) }}>
         {virtualizer.getVirtualItems().map((item) => {
           if (item.index === 0) return <div key={String(item.key)} ref={virtualizer.measureElement} data-index={item.index} className="virtual-message history-controls" style={{ transform: `translateY(${item.start + virtualMessageOffset}px)` }}>
             {messageQuery.hasNextPage
-              ? <button className="load-older" onClick={() => { captureAnchor(); void messageQuery.fetchNextPage() }}>{messageQuery.isFetchingNextPage ? <LoaderCircle className="spin" /> : <ArrowUp />} Load older messages</button>
+              ? <button className="load-older" onClick={() => { pendingHistoryAnchorRef.current = captureAnchor(); void messageQuery.fetchNextPage() }}>{messageQuery.isFetchingNextPage ? <LoaderCircle className="spin" /> : <ArrowUp />} Load older messages</button>
               : !chat.readOnly && remoteHasMore && messages.length > 0
-                ? <button className="load-older" disabled={earlierMutation.isPending} onClick={() => { captureAnchor(); earlierMutation.mutate() }}>{earlierMutation.isPending ? <LoaderCircle className="spin" /> : <ArrowUp />} {earlierMutation.isPending ? 'Requesting earlier messages…' : 'Load earlier messages from phone'}</button>
+                ? <button className="load-older" disabled={earlierMutation.isPending} onClick={() => { pendingHistoryAnchorRef.current = captureAnchor(); earlierMutation.mutate() }}>{earlierMutation.isPending ? <LoaderCircle className="spin" /> : <ArrowUp />} {earlierMutation.isPending ? 'Requesting earlier messages…' : 'Load earlier messages from phone'}</button>
                 : messages.length > 0 && <div className="history-start">Beginning of available conversation</div>}
           </div>
           const timelineItem = timeline[item.index - 1]!
@@ -1026,8 +1138,9 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
       </div>
     </div>
     <MotionPresence show={searchOpen}>{searchOpen && <aside className="conversation-search-panel">
-      <header><strong>Search messages</strong><button className="icon-button" title="Close search" onClick={() => setSearchOpen(false)}><X /></button></header>
-      <label className="search-box conversation-search-box"><Search /><input autoFocus value={messageSearch} onChange={(event) => setMessageSearch(event.target.value)} placeholder="Search this conversation" />{messageSearch && <button onClick={() => setMessageSearch('')}><X /></button>}</label>
+      <header><strong>Search messages</strong><Tooltip label="Close search"><button className="icon-button" aria-label="Close search"
+        onClick={() => setSearchOpen(false)}><X /></button></Tooltip></header>
+      <label className="search-box conversation-search-box"><Search /><input autoFocus value={messageSearch} onChange={(event) => setMessageSearch(event.target.value)} placeholder="Search this conversation" />{messageSearch && <IconButton className="" label="Clear message search" onClick={() => setMessageSearch('')}><X /></IconButton>}</label>
       <div className="conversation-search-results" onScroll={(event) => {
         const element = event.currentTarget
         if (element.scrollHeight - element.scrollTop - element.clientHeight < 160 && messageSearchQuery.hasNextPage && !messageSearchQuery.isFetchingNextPage) void messageSearchQuery.fetchNextPage()
@@ -1040,7 +1153,7 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
         {messageSearchQuery.isFetchingNextPage && <LoadingRow label="Loading more matches…" />}
       </div>
     </aside>}</MotionPresence>
-    <MotionPresence show={chat.kind === 'direct' || contactDrawerOpen}>{(chat.kind === 'direct' || contactDrawerOpen) && <Suspense fallback={<aside className={`${chat.kind === 'direct' ? 'crm-contact-panel in-conversation persistent-contact-panel' : 'contact-drawer'} ${contactDrawerOpen ? 'details-overlay-open' : ''}`}><LoadingRow label="Loading customer details…" /></aside>}><ContactDrawer chat={chat}
+    <MotionPresence show={showContactDetails}>{showContactDetails && <Suspense fallback={<aside className={`${chat.kind === 'direct' ? 'crm-contact-panel in-conversation persistent-contact-panel' : 'contact-drawer'} ${contactDrawerOpen ? 'details-overlay-open' : ''}`}><LoadingRow label="Loading customer details…" /></aside>}><ContactDrawer chat={chat}
       persistent={chat.kind === 'direct'} overlayOpen={contactDrawerOpen} onClose={closeContactDetails}
       onArchived={handleContactArchived} onJumpToMessage={handleJumpToMessage} /></Suspense>}</MotionPresence>
     <MotionPresence show={Boolean(crmCapture)}>{crmCapture && <CrmCaptureDialog chat={chat} capture={crmCapture} onClose={() => setCrmCapture(undefined)} />}</MotionPresence>
@@ -1053,27 +1166,31 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
     {newMessageCount > 0 && <button className="new-messages-button" onClick={() => scrollToNewest()}><ArrowDown />{newMessageCount} new {newMessageCount === 1 ? 'message' : 'messages'}</button>}
     {!chat.readOnly && (replyTo || attachment) && <div className="composer-context">
       <div>{replyTo && <><strong>Replying to {replyTo.senderName ?? (replyTo.fromMe ? 'yourself' : chat.title)}</strong><span>{replyTo.text ?? replyTo.kind}</span></>}{attachment && <><strong>{attachmentKind === 'voice' ? 'Voice message' : attachment.name}</strong><span>{formatBytes(attachment.size)}</span></>}</div>
-      <button aria-label="Clear reply or attachment" onClick={() => {
+      <IconButton className="" label="Clear reply or attachment" onClick={() => {
         setReplyTo(undefined)
         if (attachment) void window.warish.media.discardDraft(attachment.token)
         setAttachment(undefined)
         setAttachmentKind(undefined)
-      }}><X /></button>
+      }}><X /></IconButton>
     </div>}
     {chat.readOnly ? <footer className="read-only-composer"><Radio /><span>Channels are read-only in WArish</span></footer> : <footer className="composer">
-      <div className="composer-tool" ref={emojiToolRef}><button className={`icon-button ${emojiOpen ? 'active' : ''}`} title="Emoji"
+      <div className="composer-tool" ref={emojiToolRef}><Tooltip label="Emoji"><button className={`icon-button ${emojiOpen ? 'active' : ''}`}
         aria-label="Choose an emoji" aria-haspopup="dialog" aria-expanded={emojiOpen} disabled={isRecording}
-        onClick={() => setEmojiOpen((open) => !open)}><Smile /></button>
+        onClick={() => setEmojiOpen((open) => !open)}><Smile /></button></Tooltip>
         <MotionPresence show={emojiOpen}>{emojiOpen && <EmojiPicker onSelect={insertEmoji} onClose={() => setEmojiOpen(false)} />}</MotionPresence></div>
-      <button className="icon-button" title="Attach" aria-label="Attach a file" disabled={isRecording} onClick={() => void chooseAttachment()}><Paperclip /></button>
+      <Tooltip label="Attach a file"><button className="icon-button" aria-label="Attach a file" disabled={isRecording}
+        onClick={() => void chooseAttachment()}><Paperclip /></button></Tooltip>
       <textarea ref={composerRef} value={text} rows={1} aria-label="Message" placeholder={isRecording ? `Recording… ${formatDuration(recordingSeconds)}` : session.phase === 'connected' ? 'Type a message' : 'Type a draft — reconnect to send'} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => {
         if (shouldSubmitComposer(event, enterToSend)) { event.preventDefault(); submitMessage() }
       }} />
-      {isRecording ? <><button className="icon-button recording" title="Cancel recording" aria-label="Cancel recording" onClick={() => stopRecording(true)}><X /></button>
-        <button className="send-button" title="Finish recording" aria-label="Finish recording" onClick={() => stopRecording(false)}><Square /></button></>
-        : !text.trim() && !attachment ? <button className="icon-button" title="Voice message" aria-label="Record a voice message" onClick={() => void toggleRecording()}><Mic /></button>
-          : <button className="send-button" title={session.phase === 'connected' ? 'Send' : 'Reconnect to send'} aria-label="Send message"
-            disabled={sendMutation.isPending || session.phase !== 'connected'} onClick={submitMessage}>{sendMutation.isPending ? <LoaderCircle className="spin" /> : <Send />}</button>}
+      {isRecording ? <><Tooltip label="Cancel recording"><button className="icon-button recording" aria-label="Cancel recording"
+        onClick={() => stopRecording(true)}><X /></button></Tooltip>
+        <Tooltip label="Finish recording"><button className="send-button" aria-label="Finish recording"
+          onClick={() => stopRecording(false)}><Square /></button></Tooltip></>
+        : !text.trim() && !attachment ? <Tooltip label="Voice message"><button className="icon-button" aria-label="Record a voice message"
+          onClick={() => void toggleRecording()}><Mic /></button></Tooltip>
+          : <Tooltip label={session.phase === 'connected' ? 'Send' : 'Reconnect to send'}><button className="send-button" aria-label="Send message"
+            disabled={sendMutation.isPending || session.phase !== 'connected'} onClick={submitMessage}>{sendMutation.isPending ? <LoaderCircle className="spin" /> : <Send />}</button></Tooltip>}
     </footer>}
   </>
 }
@@ -1089,9 +1206,9 @@ function EmojiPicker({ onSelect, onClose }: { onSelect(emoji: string): void; onC
     buttons?.[next]?.focus()
   }
   return <div className="emoji-picker" role="dialog" aria-label="Choose an emoji">
-    <header><strong>Emoji</strong><button aria-label="Close emoji picker" onClick={onClose}><X /></button></header>
-    <div className="emoji-grid">{COMPOSER_EMOJIS.map(([emoji, label], index) => <button key={emoji} title={label} aria-label={label}
-      onMouseDown={(event) => event.preventDefault()} onKeyDown={(event) => moveFocus(event, index)} onClick={() => onSelect(emoji)}>{emoji}</button>)}</div>
+    <header><strong>Emoji</strong><IconButton className="" label="Close emoji picker" onClick={onClose}><X /></IconButton></header>
+    <div className="emoji-grid">{COMPOSER_EMOJIS.map(([emoji, label], index) => <Tooltip key={emoji} label={label}><button aria-label={label}
+      onMouseDown={(event) => event.preventDefault()} onKeyDown={(event) => moveFocus(event, index)} onClick={() => onSelect(emoji)}>{emoji}</button></Tooltip>)}</div>
   </div>
 }
 
@@ -1109,7 +1226,7 @@ function ConfirmationDialog({ title, description, confirmLabel, pending = false,
   }}><section ref={dialogRef} className="modal action-dialog confirmation-dialog" role="alertdialog" aria-modal="true"
     aria-label={title} tabIndex={-1}>
     <header><div className="dialog-icon warning"><CircleAlert /></div><h2>{title}</h2>
-      <button className="icon-button" aria-label="Cancel" disabled={pending} onClick={onClose}><X /></button></header>
+      <IconButton label="Cancel" disabled={pending} onClick={onClose}><X /></IconButton></header>
     <div className="action-dialog-content"><p>{description}</p><footer><button disabled={pending} onClick={onClose}>Cancel</button>
       <button className="primary-button" disabled={pending} onClick={onConfirm}>{pending ? 'Working…' : confirmLabel}</button></footer></div>
   </section></div>
@@ -1158,13 +1275,17 @@ function CrmCaptureDialog({ chat, capture, onClose }: {
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section ref={dialogRef}
     className="modal crm-capture-dialog" role="dialog" aria-modal="true" tabIndex={-1}
     aria-label={capture.kind === 'note' ? 'Add CRM note' : 'Create follow-up task'}>
-    <header><div><span>{capture.kind === 'note' ? 'CRM note' : 'Follow-up task'}</span><h2>{capture.kind === 'note' ? 'Add message to notes' : 'Create task from message'}</h2></div><button className="icon-button" aria-label="Close" onClick={onClose}><X /></button></header>
+    <header><div><span>{capture.kind === 'note' ? 'CRM note' : 'Follow-up task'}</span><h2>{capture.kind === 'note' ? 'Add message to notes' : 'Create task from message'}</h2></div>
+      <IconButton label="Close" onClick={onClose}><X /></IconButton></header>
     <form onSubmit={(event) => { event.preventDefault(); save.mutate() }}><div className="crm-capture-source"><MessageCircle /><span><small>{capture.message.fromMe ? 'You' : capture.message.senderName ?? chat.title}</small><strong>{preview}</strong></span></div>
       {capture.kind === 'note' ? <label><span>Note</span><textarea autoFocus value={body} onChange={(event) => setBody(event.target.value)} required /></label>
         : <><label><span>Task</span><input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} required /></label>
           <label><span>Notes</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} /></label>
           <div className="form-grid"><label><span>Due</span><input type="datetime-local" value={due} onChange={(event) => setDue(event.target.value)} /></label>
-            <label><span>Priority</span><select value={priority} onChange={(event) => setPriority(event.target.value as CrmTaskDto['priority'])}><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option></select></label></div></>}
+            <SelectField className="form-field" label="Priority" value={priority}
+              onChange={(value) => setPriority(value as CrmTaskDto['priority'])} options={[
+                { value: 'low', label: 'Low' }, { value: 'normal', label: 'Normal' }, { value: 'high', label: 'High' }
+              ]} /></div></>}
       <footer><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button"
         disabled={save.isPending || (capture.kind === 'note' ? !body.trim() : !title.trim())}>{save.isPending ? 'Saving…' : capture.kind === 'note' ? <><NotebookPen />Add note</> : <><ListTodo />Create task</>}</button></footer>
     </form>
@@ -1196,8 +1317,10 @@ function ForwardDialog({ message, onClose }: { message: MessageDto; onClose(): v
     mutation.mutate(restricted.map((chat) => chat.id))
   }
   return <><div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section ref={dialogRef}
-    className="modal forward-dialog" role="dialog" aria-modal="true" aria-labelledby="forward-title" tabIndex={-1}><header><h2 id="forward-title">Forward message</h2><button className="icon-button" aria-label="Close forward dialog" onClick={onClose}><X /></button></header>
-    <label className="search-box"><Search /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search conversations" aria-label="Search conversations" />{query && <button aria-label="Clear search" onClick={() => setQuery('')}><X /></button>}</label>
+    className="modal forward-dialog" role="dialog" aria-modal="true" aria-labelledby="forward-title" tabIndex={-1}><header><h2 id="forward-title">Forward message</h2>
+      <IconButton label="Close forward dialog" onClick={onClose}><X /></IconButton></header>
+    <label className="search-box"><Search /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search conversations" aria-label="Search conversations" />
+      {query && <IconButton className="" label="Clear search" onClick={() => setQuery('')}><X /></IconButton>}</label>
     <div className="forward-list" onScroll={(event) => {
       const element = event.currentTarget
       if (element.scrollHeight - element.scrollTop - element.clientHeight < 180 && chatsQuery.hasNextPage && !chatsQuery.isFetchingNextPage) void chatsQuery.fetchNextPage()
@@ -1220,6 +1343,10 @@ function LoadingRow({ label }: { label: string }): React.JSX.Element { return <d
 function SkeletonRows(): React.JSX.Element {
   return <div className="skeleton-list" aria-label="Loading conversations">{Array.from({ length: 8 }, (_, index) =>
     <div className="skeleton-row" key={index}><i /><span><b /><b /></span></div>)}</div>
+}
+function MessageHistorySkeleton(): React.JSX.Element {
+  return <div className="message-history-skeleton" aria-label="Loading messages">{Array.from({ length: 6 }, (_, index) =>
+    <div className={index % 3 === 1 ? 'mine' : ''} key={index}><i /><span /></div>)}</div>
 }
 function QueryError({ label, onRetry }: { label: string; onRetry(): void }): React.JSX.Element {
   return <div className="query-error" role="alert"><span>{label}</span><button className="secondary-button" onClick={onRetry}>Try again</button></div>
@@ -1289,4 +1416,16 @@ function inferAttachmentKind(file: PickedAttachment): 'image' | 'video' | 'docum
   if (file.mimeType.startsWith('audio/')) return 'audio'
   return 'document'
 }
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() => window.matchMedia(query).matches)
+  useEffect(() => {
+    const media = window.matchMedia(query)
+    const update = (): void => setMatches(media.matches)
+    update()
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [query])
+  return matches
+}
+
 function formatBytes(bytes: number): string { if (bytes < 1024) return `${bytes} B`; if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`; return `${(bytes / 1024 ** 2).toFixed(1)} MB` }

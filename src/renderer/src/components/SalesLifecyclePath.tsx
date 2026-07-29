@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, CircleAlert, LoaderCircle, RefreshCw } from 'lucide-react'
 import type { ChatSummary, CrmContactDetailsDto, CrmStageDto } from '../../../shared/contracts'
 import { useUiStore } from '../store'
+import { Tooltip } from './ui-primitives'
 
 export function SalesLifecyclePath({ chat }: { chat: ChatSummary }): React.JSX.Element {
   const queryClient = useQueryClient()
@@ -54,7 +55,8 @@ export function SalesLifecyclePath({ chat }: { chat: ChatSummary }): React.JSX.E
         {Array.from({ length: 5 }, (_, index) => <i key={index} />)}
       </div>}
       {stagesQuery.isError && <div className="sales-lifecycle-error"><CircleAlert /><span>Lifecycle unavailable</span>
-        <button aria-label="Retry loading sales lifecycle" title="Retry" onClick={() => void stagesQuery.refetch()}><RefreshCw /></button></div>}
+        <Tooltip label="Retry"><button aria-label="Retry loading sales lifecycle"
+          onClick={() => void stagesQuery.refetch()}><RefreshCw /></button></Tooltip></div>}
       {!stagesQuery.isLoading && !stagesQuery.isError && stages.length === 0 && <div className="sales-lifecycle-error"><CircleAlert /><span>No pipeline stages</span></div>}
       {stages.length > 0 && <div className="sales-lifecycle-path" role="group" aria-label="Pipeline stages">{stages.map((stage, index) => {
         const current = stage.id === activeStageId
@@ -62,7 +64,7 @@ export function SalesLifecyclePath({ chat }: { chat: ChatSummary }): React.JSX.E
         const pending = stageMutation.isPending && stageMutation.variables?.id === stage.id
         return <button key={stage.id} className={`${current ? 'current' : ''} ${completed ? 'completed' : ''} outcome-${stage.outcome}`}
           style={{ '--stage-color': stage.color } as CSSProperties} aria-current={current ? 'step' : undefined}
-          aria-label={`Set sales stage to ${stage.name}`} title={stage.name} disabled={stageMutation.isPending}
+          aria-label={`Set sales stage to ${stage.name}`} disabled={stageMutation.isPending}
           onClick={() => { if (!current || !chat.crm) stageMutation.mutate(stage) }}>
           <span className="sales-lifecycle-state">{pending ? <LoaderCircle className="spin" /> : completed ? <Check /> : null}</span>
           <span>{stage.name}</span>

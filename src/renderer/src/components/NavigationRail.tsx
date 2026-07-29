@@ -7,6 +7,7 @@ import type { AppSettings } from '../../../shared/contracts'
 import { useUiStore, type WorkspaceDestination } from '../store'
 import { WORKSPACE_DESTINATIONS } from '../workspace-navigation'
 import { BrandMark } from './BrandMark'
+import { Tooltip } from './ui-primitives'
 
 export type SidebarDestination = WorkspaceDestination
 
@@ -31,15 +32,11 @@ export function NavigationRail({ current, onNavigate }: {
   return <nav className={`nav-rail ${expanded ? 'expanded' : 'collapsed'}`} aria-label="Primary navigation">
     <div className="nav-brand"><BrandMark variant="compact" size="small" /><strong>WArish</strong></div>
     {WORKSPACE_DESTINATIONS.map((destination) => <RailButton key={destination} destination={destination} current={current}
-      label={destinationLabel(destination)} onClick={onNavigate}>{destinationIcon(destination)}</RailButton>)}
+      expanded={expanded} label={destinationLabel(destination)} onClick={onNavigate}>{destinationIcon(destination)}</RailButton>)}
     <div className="nav-spacer" />
-    <button className="nav-button" title={expanded ? 'Collapse navigation' : 'Expand navigation'}
-      aria-label={expanded ? 'Collapse navigation' : 'Expand navigation'} disabled={update.isPending} onClick={toggle}>
-      {expanded ? <PanelLeftClose /> : <PanelLeftOpen />}<span>{expanded ? 'Collapse' : 'Expand'}</span>
-    </button>
-    <button className="nav-button" title="Settings" aria-label="Settings" onClick={() => setSettingsOpen(true)}>
-      <Settings /><span>Settings</span>
-    </button>
+    <RailControl expanded={expanded} label={expanded ? 'Collapse navigation' : 'Expand navigation'} disabled={update.isPending}
+      onClick={toggle}>{expanded ? <PanelLeftClose /> : <PanelLeftOpen />}<span>{expanded ? 'Collapse' : 'Expand'}</span></RailControl>
+    <RailControl expanded={expanded} label="Settings" onClick={() => setSettingsOpen(true)}><Settings /><span>Settings</span></RailControl>
   </nav>
 }
 
@@ -60,16 +57,25 @@ function destinationIcon(destination: SidebarDestination): React.ReactNode {
   return <Inbox />
 }
 
-function RailButton({ destination, current, label, onClick, children }: {
+function RailButton({ destination, current, expanded, label, onClick, children }: {
   destination: SidebarDestination
   current: SidebarDestination
+  expanded: boolean
   label: string
   onClick(destination: SidebarDestination): void
   children: React.ReactNode
 }): React.JSX.Element {
   const active = destination === current
-  return <button className={`nav-button ${active ? 'active' : ''}`} title={label} aria-label={label}
+  const button = <button className={`nav-button ${active ? 'active' : ''}`} aria-label={label}
     aria-current={active ? 'page' : undefined} onClick={() => onClick(destination)}>{children}<span>{label}</span></button>
+  return expanded ? button : <Tooltip label={label} placement="right">{button}</Tooltip>
+}
+
+function RailControl({ expanded, label, disabled, onClick, children }: {
+  expanded: boolean; label: string; disabled?: boolean; onClick(): void; children: React.ReactNode
+}): React.JSX.Element {
+  const button = <button className="nav-button" aria-label={label} disabled={disabled} onClick={onClick}>{children}</button>
+  return expanded ? button : <Tooltip label={label} placement="right">{button}</Tooltip>
 }
 
 function useMediaQuery(query: string): boolean {

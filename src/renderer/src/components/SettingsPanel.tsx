@@ -6,7 +6,11 @@ import {
   Trash2, TriangleAlert, X
 } from 'lucide-react'
 import type { AppSettings, ContactSyncState, DiagnosticsDto, LogEntryDto } from '../../../shared/contracts'
+import { MotionPresence } from '../motion'
+import { runSurfaceTransition } from '../surface-transition'
 import { useUiStore } from '../store'
+import { useDialogFocus } from '../use-dialog-focus'
+import { IconButton, SelectField } from './ui-primitives'
 
 type SettingsSection = 'appearance' | 'messaging' | 'notifications' | 'storage' | 'diagnostics' | 'account'
 
@@ -35,8 +39,17 @@ export function SettingsPanel(): React.JSX.Element {
   const logsQuery = useQuery({ queryKey: ['diagnostic-logs'], queryFn: () => window.warish.diagnostics.logs(200), enabled: logsOpen })
   const update = useMutation({
     mutationFn: (patch: Partial<AppSettings>) => window.warish.settings.update(patch),
+    onMutate: (patch) => {
+      const previous = queryClient.getQueryData<AppSettings>(['settings'])
+      void queryClient.cancelQueries({ queryKey: ['settings'] })
+      queryClient.setQueryData<AppSettings>(['settings'], (current) => current ? { ...current, ...patch } : current)
+      return { previous }
+    },
     onSuccess: (settings) => queryClient.setQueryData(['settings'], settings),
-    onError: (error) => pushNotice(error instanceof Error ? error.message : 'Could not save settings')
+    onError: (error, _patch, context) => {
+      if (context?.previous) queryClient.setQueryData(['settings'], context.previous)
+      pushNotice(error instanceof Error ? error.message : 'Could not save settings')
+    }
   })
   const refreshContacts = useMutation({
     mutationFn: () => window.warish.contacts.refresh(),
@@ -54,6 +67,11 @@ export function SettingsPanel(): React.JSX.Element {
   const settings = settingsQuery.data
   const contactRefreshAvailable = diagnosticsQuery.data?.sessionPhase === 'connected'
   const sectionLabel = SETTINGS_SECTIONS.find((section) => section.id === activeSection)?.label ?? 'Settings'
+  const settingsRef = useDialogFocus<HTMLElement>(() => close(false), false)
+  const changeSection = (section: SettingsSection): void => runSurfaceTransition('settings', () => {
+    setActiveSection(section)
+    setLogsOpen(false)
+  })
 
   const logout = async (): Promise<void> => {
     setAccountPending(true)
@@ -83,8 +101,8 @@ export function SettingsPanel(): React.JSX.Element {
   useEffect(() => {
     const escape = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape') return
-      if (confirmAction) setConfirmAction(undefined)
-      else if (logsOpen) setLogsOpen(false)
+      if (confirmAction) return
+      if (logsOpen) runSurfaceTransition('settings', () => setLogsOpen(false))
       else close(false)
     }
     window.addEventListener('keydown', escape)
@@ -95,11 +113,12 @@ export function SettingsPanel(): React.JSX.Element {
   }, [close, confirmAction, logsOpen])
 
   return <div className="modal-backdrop settings-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) close(false) }}>
-    <aside className="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <aside ref={settingsRef} className="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabIndex={-1}>
       <header>
-        {logsOpen && <button className="icon-button settings-back-button" onClick={() => setLogsOpen(false)} aria-label="Back to settings"><ArrowLeft /></button>}
+        {logsOpen && <IconButton className="icon-button settings-back-button" onClick={() => runSurfaceTransition('settings', () => setLogsOpen(false))}
+          label="Back to settings"><ArrowLeft /></IconButton>}
         <div><span className="settings-eyebrow">Settings</span><h2 id="settings-title">{logsOpen ? 'Error logs' : sectionLabel}</h2></div>
-        <button className="icon-button" onClick={() => close(false)} aria-label="Close settings"><X /></button>
+        <IconButton onClick={() => close(false)} label="Close settings"><X /></IconButton>
       </header>
       {logsOpen ? <LogViewer query={logsQuery} copyStatus={copyStatus} onCopy={() => void copyLogs()} />
         : settingsQuery.isError ? <div className="settings-query-state query-error" role="alert"><TriangleAlert /><span>Could not load settings.</span><button className="secondary-button" onClick={() => void settingsQuery.refetch()}>Try again</button></div>
@@ -107,8 +126,8 @@ export function SettingsPanel(): React.JSX.Element {
             : <div className="settings-layout">
               <nav className="settings-nav" aria-label="Settings categories">{SETTINGS_SECTIONS.map((section) =>
                 <button key={section.id} className={activeSection === section.id ? 'active' : ''} aria-current={activeSection === section.id ? 'page' : undefined}
-                  onClick={() => setActiveSection(section.id)}>{section.icon}<span>{section.label}</span></button>)}</nav>
-              <div className="settings-content">
+                  onClick={() => changeSection(section.id)}>{section.icon}<span>{section.label}</span></button>)}</nav>
+              <div className="settings-content" key={activeSection} data-surface-section={activeSection}>
                 {activeSection === 'appearance' && <AppearanceSettings settings={settings} pending={update.isPending} update={(patch) => update.mutate(patch)} />}
                 {activeSection === 'messaging' && <MessagingSettings settings={settings} update={(patch) => update.mutate(patch)} />}
                 {activeSection === 'notifications' && <NotificationSettings settings={settings} update={(patch) => update.mutate(patch)} />}
@@ -117,19 +136,35 @@ export function SettingsPanel(): React.JSX.Element {
                   onRefresh={() => refreshContacts.mutate()} onUpdate={(patch) => update.mutate(patch)}
                   onClearCache={() => void window.warish.media.clearCache().then(() => { pushNotice('Downloaded media cleared', 'info'); void diagnosticsQuery.refetch() })
                     .catch((error) => pushNotice(error instanceof Error ? error.message : 'Could not clear downloaded media'))} />}
-                {activeSection === 'diagnostics' && <DiagnosticsSettings diagnostics={diagnosticsQuery.data} onOpenLogs={() => setLogsOpen(true)} />}
+                {activeSection === 'diagnostics' && <DiagnosticsSettings diagnostics={diagnosticsQuery.data}
+                  onOpenLogs={() => runSurfaceTransition('settings', () => setLogsOpen(true))} />}
                 {activeSection === 'account' && <AccountSettings onUnlink={() => setConfirmAction('unlink')} onReset={() => setConfirmAction('reset')} />}
               </div>
             </div>}
-      {confirmAction && <div className="modal-backdrop nested-confirm"><section className="modal action-dialog" role="alertdialog" aria-modal="true" aria-labelledby="account-confirm-title">
-        <header><div className="dialog-icon danger"><TriangleAlert /></div><h2 id="account-confirm-title">{confirmAction === 'reset' ? 'Reset WArish completely?' : 'Unlink this account?'}</h2><button className="icon-button" aria-label="Cancel" onClick={() => setConfirmAction(undefined)}><X /></button></header>
-        <div className="action-dialog-content"><p>{confirmAction === 'reset'
-          ? 'This removes the account, history, media, drafts, backups, logs, and preferences, then restarts WArish.'
-          : 'WhatsApp will be unlinked, but local history and preferences will remain on this computer.'}</p>
-          <footer><button onClick={() => setConfirmAction(undefined)}>Cancel</button><button className={confirmAction === 'reset' ? 'danger-button' : 'primary-button'} disabled={accountPending} onClick={() => void logout()}>{accountPending ? 'Working…' : confirmAction === 'reset' ? 'Erase and restart' : 'Unlink account'}</button></footer></div>
-      </section></div>}
+      <MotionPresence show={Boolean(confirmAction)}>{confirmAction && <AccountConfirmationDialog action={confirmAction}
+        pending={accountPending} onClose={() => setConfirmAction(undefined)} onConfirm={() => void logout()} />}</MotionPresence>
     </aside>
   </div>
+}
+
+function AccountConfirmationDialog({ action, pending, onClose, onConfirm }: {
+  action: 'unlink' | 'reset'
+  pending: boolean
+  onClose(): void
+  onConfirm(): void
+}): React.JSX.Element {
+  const dialogRef = useDialogFocus<HTMLElement>(onClose, !pending)
+  return <div className="modal-backdrop nested-confirm"><section ref={dialogRef} className="modal action-dialog"
+    role="alertdialog" aria-modal="true" aria-labelledby="account-confirm-title" tabIndex={-1}>
+    <header><div className="dialog-icon danger"><TriangleAlert /></div><h2 id="account-confirm-title">
+      {action === 'reset' ? 'Reset WArish completely?' : 'Unlink this account?'}</h2>
+      <IconButton label="Cancel" disabled={pending} onClick={onClose}><X /></IconButton></header>
+    <div className="action-dialog-content"><p>{action === 'reset'
+      ? 'This removes the account, history, media, drafts, backups, logs, and preferences, then restarts WArish.'
+      : 'WhatsApp will be unlinked, but local history and preferences will remain on this computer.'}</p>
+      <footer><button disabled={pending} onClick={onClose}>Cancel</button><button className={action === 'reset' ? 'danger-button' : 'primary-button'}
+        disabled={pending} onClick={onConfirm}>{pending ? 'Working…' : action === 'reset' ? 'Erase and restart' : 'Unlink account'}</button></footer></div>
+  </section></div>
 }
 
 function AppearanceSettings({ settings, pending, update }: { settings: AppSettings; pending: boolean; update(patch: Partial<AppSettings>): void }): React.JSX.Element {
@@ -197,7 +232,12 @@ function StorageSettings({ settings, contactSync, contactRefreshAvailable, refre
   return <>
     <SettingsHeading title="Storage & contacts" />
     <SettingGroup title="Media storage">
-      <label className="select-setting settings-card"><span><strong>Media cache limit</strong><small>Older downloaded media is removed automatically.</small></span><select value={settings.cacheLimitBytes} onChange={(event) => onUpdate({ cacheLimitBytes: Number(event.target.value) })}><option value={1024 ** 3}>1 GB</option><option value={5 * 1024 ** 3}>5 GB</option><option value={10 * 1024 ** 3}>10 GB</option></select></label>
+      <SelectField className="select-setting settings-card" label="Media cache limit"
+        description="Older downloaded media is removed automatically." value={String(settings.cacheLimitBytes)}
+        onChange={(value) => onUpdate({ cacheLimitBytes: Number(value) })} options={[
+          { value: String(1024 ** 3), label: '1 GB' }, { value: String(5 * 1024 ** 3), label: '5 GB' },
+          { value: String(10 * 1024 ** 3), label: '10 GB' }
+        ]} />
       <button className="secondary-button" onClick={onClearCache}><Trash2 />Clear downloaded media</button>
     </SettingGroup>
     <SettingGroup title="Contact directory">

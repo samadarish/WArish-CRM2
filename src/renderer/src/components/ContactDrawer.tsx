@@ -10,6 +10,7 @@ import { useUiStore } from '../store'
 import { Avatar } from './Avatar'
 import { CrmContactPanel } from './CrmShell'
 import { WhatsAppContactDialog } from './WhatsAppContactDialog'
+import { IconButton } from './ui-primitives'
 
 export const ContactDrawer = memo(function ContactDrawer({ chat, onClose, onArchived, onJumpToMessage, persistent = false, overlayOpen = false }: {
   chat: ChatSummary
@@ -66,11 +67,12 @@ export const ContactDrawer = memo(function ContactDrawer({ chat, onClose, onArch
 
   if (details.kind === 'direct' && crmQuery.isFetching && !crmQuery.isError) return <aside className={`crm-contact-panel in-conversation ${persistentClasses}`}
     aria-label="CRM contact record"><header><div><span>Customer details</span><strong>{details.title}</strong></div>
-      <button className="icon-button contact-panel-close" aria-label="Close customer details" onClick={onClose}><X /></button></header>
+      <IconButton className="icon-button contact-panel-close" label="Close customer details" onClick={onClose}><X /></IconButton></header>
     <div className="crm-state"><LoaderCircle className="spin" /><span>Loading customer details…</span></div></aside>
 
   if (details.kind === 'direct') return <><aside className={`crm-contact-panel in-conversation crm-untracked-contact ${persistentClasses}`} aria-label="CRM contact record">
-    <header><div><span>WhatsApp contact</span><strong>Customer workspace</strong></div><button className="icon-button contact-panel-close" aria-label="Close customer details" onClick={onClose}><X /></button></header>
+    <header><div><span>WhatsApp contact</span><strong>Customer workspace</strong></div><IconButton className="icon-button contact-panel-close"
+      label="Close customer details" onClick={onClose}><X /></IconButton></header>
     <div className="crm-contact-hero"><Avatar title={details.title} src={details.avatarUrl} large /><div className="crm-contact-copy"><h2>{details.title}</h2>
       {details.whatsappName && details.whatsappName !== details.title && <span className="whatsapp-profile-pill">{details.whatsappName}</span>}
       {details.phoneNumber && <p>{details.phoneNumber}</p>}</div></div>
@@ -88,7 +90,7 @@ export const ContactDrawer = memo(function ContactDrawer({ chat, onClose, onArch
     saved={Boolean(details.savedName)} onClose={() => setContactSaveOpen(false)} />}</MotionPresence></>
 
   return <aside className="contact-drawer" aria-label="Conversation details">
-    <header><strong>Conversation info</strong><button className="icon-button" aria-label="Close conversation info" onClick={onClose}><X /></button></header>
+    <header><strong>Conversation info</strong><IconButton label="Close conversation info" onClick={onClose}><X /></IconButton></header>
     {detailsQuery.isFetching && !details ? <div className="loading-row"><LoaderCircle className="spin" />Loading details…</div> : <>
       <div className="contact-profile"><Avatar title={details.title} src={details.avatarUrl} large /><h2>{details.title}</h2></div>
       <div className="contact-actions">

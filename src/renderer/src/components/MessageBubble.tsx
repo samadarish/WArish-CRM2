@@ -7,6 +7,7 @@ import type { MessageGroupPosition } from '../message-grouping'
 import { useMotionPhase } from '../motion-context'
 import { MotionPresence } from '../motion'
 import { useDialogFocus } from '../use-dialog-focus'
+import { DropdownMenu, IconButton, Tooltip, type DropdownMenuItem } from './ui-primitives'
 
 export const MessageBubble = memo(function MessageBubble({ message, groupPosition = 'single', readOnly = false, showSender, onReply, onForward, onAddNote, onAddTask, onOpenQuote, onResize, onRetry, onError }: {
   message: MessageDto
@@ -29,8 +30,8 @@ export const MessageBubble = memo(function MessageBubble({ message, groupPositio
   const [editOpen, setEditOpen] = useState(false)
   const [editText, setEditText] = useState(message.text ?? '')
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [dialogReturnFocus, setDialogReturnFocus] = useState<HTMLElement>()
   const [moreOpen, setMoreOpen] = useState(false)
-  const actionsRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const token = message.attachment?.cacheToken
     const draftToken = message.attachment?.draftToken
@@ -38,21 +39,6 @@ export const MessageBubble = memo(function MessageBubble({ message, groupPositio
       ? { url: `warish-media://cache/${encodeURIComponent(token)}`, token }
       : draftToken ? { url: `warish-media://drafts/${encodeURIComponent(draftToken)}`, token: draftToken } : undefined)
   }, [message.attachment?.cacheToken, message.attachment?.draftToken])
-  useEffect(() => {
-    if (!moreOpen) return
-    const closeOnOutsidePointer = (event: PointerEvent): void => {
-      if (!actionsRef.current?.contains(event.target as Node)) setMoreOpen(false)
-    }
-    const closeOnEscape = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setMoreOpen(false)
-    }
-    document.addEventListener('pointerdown', closeOnOutsidePointer)
-    window.addEventListener('keydown', closeOnEscape)
-    return () => {
-      document.removeEventListener('pointerdown', closeOnOutsidePointer)
-      window.removeEventListener('keydown', closeOnEscape)
-    }
-  }, [moreOpen])
   const download = async (): Promise<void> => {
     setDownloading(true)
     try {
@@ -81,6 +67,17 @@ export const MessageBubble = memo(function MessageBubble({ message, groupPositio
     if (!message.text) return
     try { await navigator.clipboard.writeText(message.text) } catch (error) { onError(error) }
   }
+  const moreItems: DropdownMenuItem[] = []
+  if (message.text) moreItems.push({ id: 'copy', label: 'Copy text', icon: <Copy />, onAction: () => { void copy() } })
+  if (onAddNote) moreItems.push({ id: 'note', label: 'Add to CRM notes', icon: <NotebookPen />, onAction: () => onAddNote(message) })
+  if (onAddTask) moreItems.push({ id: 'task', label: 'Create follow-up', icon: <ListTodo />, onAction: () => onAddTask(message) })
+  moreItems.push({ id: 'forward', label: 'Forward', icon: <Forward />, onAction: () => onForward(message) })
+  if (message.fromMe && message.kind === 'text') moreItems.push({ id: 'edit', label: 'Edit message', icon: <Pencil />,
+    onAction: (returnFocus) => { setDialogReturnFocus(returnFocus); setEditText(message.text ?? ''); setEditOpen(true) } })
+  moreItems.push({ id: 'delete', label: 'Delete message', icon: <Trash2 />, danger: true, onAction: (returnFocus) => {
+    setDialogReturnFocus(returnFocus)
+    setDeleteOpen(true)
+  } })
 
   return (
     <article className={`message-row group-${groupPosition} ${message.fromMe ? 'mine' : ''} ${message.reactions.length ? 'has-reactions' : ''}`}>
@@ -100,31 +97,23 @@ export const MessageBubble = memo(function MessageBubble({ message, groupPositio
         <div className="message-meta">{message.edited && <span>edited</span>}<time>{format(message.timestamp, 'HH:mm')}</time>{message.fromMe && <DeliveryIcon status={message.status} />}</div>
         {!readOnly && message.status === 'failed' && onRetry && <button className="message-failed" onClick={() => onRetry(message.id)}><RefreshCw />Retry</button>}
         {message.reactions.length > 0 && <div className="reaction-pill">{message.reactions.map((reaction) => reaction.emoji).join(' ')}</div>}
-        <div className="message-actions" ref={actionsRef}>
-          {!readOnly && <button title="Reply" aria-label="Reply" onClick={() => onReply(message)}><Reply /></button>}
-          {!readOnly && <button title="React with heart" aria-label="React with heart" onClick={() => void react()}><Heart /></button>}
-          {readOnly && message.text && <button title="Copy text" aria-label="Copy message text" onClick={() => void copy()}><Copy /></button>}
-          {readOnly && <button title="Forward" aria-label="Forward" onClick={() => onForward(message)}><Forward /></button>}
-          {!readOnly && <div className="message-action-overflow"><button title="More actions" aria-label="More message actions" aria-haspopup="menu"
-            aria-expanded={moreOpen} onClick={() => setMoreOpen((open) => !open)}><EllipsisVertical /></button>
-            {moreOpen && <div className="message-action-menu" role="menu">
-              {message.text && <button role="menuitem" onClick={() => { setMoreOpen(false); void copy() }}><Copy />Copy text</button>}
-              {onAddNote && <button role="menuitem" onClick={() => { setMoreOpen(false); onAddNote(message) }}><NotebookPen />Add to CRM notes</button>}
-              {onAddTask && <button role="menuitem" onClick={() => { setMoreOpen(false); onAddTask(message) }}><ListTodo />Create follow-up</button>}
-              <button role="menuitem" onClick={() => { setMoreOpen(false); onForward(message) }}><Forward />Forward</button>
-              {message.fromMe && message.kind === 'text' && <button role="menuitem" onClick={() => {
-                setMoreOpen(false); setEditText(message.text ?? ''); setEditOpen(true)
-              }}><Pencil />Edit message</button>}
-              <button role="menuitem" className="danger-text" onClick={() => { setMoreOpen(false); setDeleteOpen(true) }}><Trash2 />Delete message</button>
-            </div>}
-          </div>}
+        <div className="message-actions" data-focus-return-group>
+          {!readOnly && <Tooltip label="Reply"><button aria-label="Reply" onClick={() => onReply(message)}><Reply /></button></Tooltip>}
+          {!readOnly && <Tooltip label="React with heart"><button aria-label="React with heart" onClick={() => void react()}><Heart /></button></Tooltip>}
+          {readOnly && message.text && <Tooltip label="Copy text"><button aria-label="Copy message text" onClick={() => void copy()}><Copy /></button></Tooltip>}
+          {readOnly && <Tooltip label="Forward"><button aria-label="Forward" onClick={() => onForward(message)}><Forward /></button></Tooltip>}
+          {!readOnly && <div className="message-action-overflow"><DropdownMenu className="message-action-trigger"
+            label="More message actions" icon={<EllipsisVertical />} items={moreItems} placement="bottom end"
+            isOpen={moreOpen} onOpenChange={setMoreOpen} /></div>}
         </div>
       </div>
-      <MotionPresence show={editOpen}>{editOpen && <ActionDialog title="Edit message" onClose={() => setEditOpen(false)}>
+      <MotionPresence show={editOpen}>{editOpen && <ActionDialog title="Edit message" returnFocus={dialogReturnFocus}
+        onClose={() => setEditOpen(false)}>
         <textarea autoFocus value={editText} onChange={(event) => setEditText(event.target.value)} aria-label="Edited message" />
         <footer><button onClick={() => setEditOpen(false)}>Cancel</button><button className="primary-button" disabled={!editText.trim()} onClick={() => void edit()}>Save</button></footer>
       </ActionDialog>}</MotionPresence>
-      <MotionPresence show={deleteOpen}>{deleteOpen && <ActionDialog title="Delete message" onClose={() => setDeleteOpen(false)}>
+      <MotionPresence show={deleteOpen}>{deleteOpen && <ActionDialog title="Delete message" returnFocus={dialogReturnFocus}
+        onClose={() => setDeleteOpen(false)}>
         <p>Choose how this message should be deleted.</p>
         <footer><button onClick={() => setDeleteOpen(false)}>Cancel</button><button className="secondary-button" onClick={() => void remove('for-me')}>Delete for me</button>
           {message.fromMe && <button className="danger-button" onClick={() => void remove('for-everyone')}>Delete for everyone</button>}</footer>
@@ -217,14 +206,15 @@ function DeliveryIcon({ status }: { status: MessageDto['status'] }): React.JSX.E
   return status === 'read' || status === 'delivered' ? <CheckCheck className={status === 'read' ? 'read' : ''} /> : <Check />
 }
 
-function ActionDialog({ title, onClose, children }: { title: string; onClose(): void; children: React.ReactNode }): React.JSX.Element {
+function ActionDialog({ title, returnFocus, onClose, children }: { title: string; returnFocus?: HTMLElement;
+  onClose(): void; children: React.ReactNode }): React.JSX.Element {
   const motionPhase = useMotionPhase()
-  const dialogRef = useDialogFocus<HTMLElement>(onClose)
+  const dialogRef = useDialogFocus<HTMLElement>(onClose, true, returnFocus)
   return createPortal(<div className="modal-backdrop" data-motion-state={motionPhase} role="presentation"
     aria-hidden={motionPhase === 'exiting' ? true : undefined} inert={motionPhase === 'exiting' ? true : undefined}
     onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
     <section ref={dialogRef} className="modal action-dialog" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1}>
-      <header><h2>{title}</h2><button className="icon-button" aria-label={`Close ${title}`} onClick={onClose}><X /></button></header>
+      <header><h2>{title}</h2><IconButton label={`Close ${title}`} onClick={onClose}><X /></IconButton></header>
       <div className="action-dialog-content">{children}</div>
     </section>
   </div>, document.body)

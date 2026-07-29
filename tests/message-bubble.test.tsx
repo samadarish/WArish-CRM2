@@ -153,9 +153,9 @@ describe('MessageBubble', () => {
     const bubble = within(container)
 
     fireEvent.click(bubble.getByRole('button', { name: 'More message actions' }))
-    fireEvent.click(bubble.getByRole('menuitem', { name: 'Add to CRM notes' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Add to CRM notes' }))
     fireEvent.click(bubble.getByRole('button', { name: 'More message actions' }))
-    fireEvent.click(bubble.getByRole('menuitem', { name: 'Create follow-up' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Create follow-up' }))
     expect(onAddNote).toHaveBeenCalledWith(message)
     expect(onAddTask).toHaveBeenCalledWith(message)
   })

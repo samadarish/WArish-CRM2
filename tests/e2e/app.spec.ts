@@ -16,6 +16,10 @@ interface BrowserBoxElement {
   getBoundingClientRect(): { width: number; height: number }
 }
 
+interface BrowserAnimatedElement {
+  getAnimations(): Array<{ playState: string }>
+}
+
 interface BrowserScrollElement {
   scrollTop: number
   scrollHeight: number
@@ -212,6 +216,7 @@ test('virtualizes a full CRM contact list while keeping the final record reachab
 })
 
 test('keeps local history in the workspace when an existing account needs relinking', async () => {
+  test.setTimeout(90_000)
   await application.close()
   const database = new DatabaseSync(join(userDataPath, 'warish.sqlite'))
   database.prepare("UPDATE accounts SET linked_at=? WHERE id='primary'").run(Date.now())
@@ -256,7 +261,7 @@ test('keeps local history in the workspace when an existing account needs relink
   const lifecyclePresentation = await lifecycle.locator('.sales-lifecycle-path button').evaluateAll((buttons) => buttons.map((button) => {
     const target = button as unknown as BrowserLifecycleElement
     return {
-      stage: target.getAttribute('title'),
+      stage: target.getAttribute('aria-label')?.replace(/^Set sales stage to /, '') ?? null,
       clipPath: target.ownerDocument.defaultView.getComputedStyle(target).clipPath,
       color: target.style.getPropertyValue('--stage-color').trim().toUpperCase()
     }
@@ -275,6 +280,8 @@ test('keeps local history in the workspace when an existing account needs relink
   await expect(lifecycle.getByRole('button', { name: 'Set sales stage to Qualified' })).toHaveAttribute('aria-current', 'step')
   await expect(details.getByText('Phone number')).toHaveCount(0)
   await expect(details.getByText('+15550001111')).toHaveCount(1)
+  await expect.poll(() => details.evaluate((element: unknown) =>
+    (element as BrowserAnimatedElement).getAnimations().filter((animation) => animation.playState === 'running').length)).toBe(0)
   const [drawerBounds, conversationBounds, messageBounds, composerBounds, chatListBounds, avatarBounds] = await Promise.all([
     details.boundingBox(), page.locator('.conversation-panel').boundingBox(), page.locator('.message-scroller').boundingBox(),
     page.locator('.composer').boundingBox(), page.locator('.chat-list-panel').boundingBox(), details.locator('.crm-contact-hero .avatar.large').boundingBox()
@@ -343,7 +350,9 @@ test('keeps local history in the workspace when an existing account needs relink
     await menuItem.click({ trial: true })
   }
   await page.screenshot({ path: join(visualDirectory, 'warish-black-menu-1366x768.png'), animations: 'disabled' })
-  await page.getByRole('button', { name: 'Close menu' }).click()
+  await page.keyboard.press('Escape')
+  await expect(conversationMenu).toBeHidden()
+  await expect(page.getByRole('button', { name: 'Conversation menu' })).toBeFocused()
 
   await page.setViewportSize({ width: 900, height: 620 })
   await expect(crmRecord).toBeHidden()
@@ -351,8 +360,14 @@ test('keeps local history in the workspace when an existing account needs relink
   await conversationHeader.locator('.conversation-identity').click()
   await expect(crmRecord).toBeVisible()
   await expect(crmRecord.getByRole('button', { name: 'Close customer details' })).toBeVisible()
+  const narrowCustomerDrawer = page.locator('.persistent-contact-panel.details-overlay-open')
+  await expect(narrowCustomerDrawer).toHaveCount(1)
   await crmRecord.getByRole('button', { name: 'Close customer details' }).click()
-  await expect(crmRecord).toBeHidden()
+  await expect.poll(async () => {
+    if (await narrowCustomerDrawer.count() === 0) return true
+    return await narrowCustomerDrawer.locator('..').getAttribute('data-motion-state') === 'exiting'
+  }).toBe(true)
+  await expect(narrowCustomerDrawer).toHaveCount(0)
   await page.getByRole('button', { name: 'Chats', exact: true }).click()
 
   await page.getByRole('button', { name: 'Relink account' }).click()

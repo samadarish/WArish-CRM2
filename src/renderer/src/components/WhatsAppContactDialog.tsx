@@ -4,6 +4,7 @@ import { ContactRound, LoaderCircle, Save, X } from 'lucide-react'
 import type { ContactDetails } from '../../../shared/contracts'
 import { useUiStore } from '../store'
 import { useDialogFocus } from '../use-dialog-focus'
+import { IconButton } from './ui-primitives'
 
 export function WhatsAppContactDialog({ chatId, initialName, phoneNumber, saved, onClose }: {
   chatId: string
@@ -35,7 +36,7 @@ export function WhatsAppContactDialog({ chatId, initialName, phoneNumber, saved,
   }}><section ref={dialogRef} className="modal crm-dialog whatsapp-contact-dialog" role="dialog" aria-modal="true"
     aria-labelledby="whatsapp-contact-title" tabIndex={-1}>
     <header><div><span>WhatsApp contact</span><h2 id="whatsapp-contact-title">{saved ? 'Edit saved contact' : 'Save new contact'}</h2></div>
-      <button className="icon-button" aria-label="Close contact dialog" disabled={save.isPending} onClick={onClose}><X /></button></header>
+      <IconButton label="Close contact dialog" disabled={save.isPending} onClick={onClose}><X /></IconButton></header>
     <div className="crm-dialog-body"><form className="crm-form" onSubmit={(event) => { event.preventDefault(); if (fullName.trim()) save.mutate() }}>
       <div className="whatsapp-contact-summary"><ContactRound /><div><strong>{phoneNumber ?? 'WhatsApp contact'}</strong><span>Saved names sync through your linked WhatsApp account.</span></div></div>
       <label className="form-field"><span>Contact name</span><input autoFocus maxLength={160} value={fullName}
