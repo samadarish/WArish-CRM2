@@ -513,6 +513,8 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .relink-dialog > header h2 { margin: 0; }
 .relink-dialog > header p { margin: 4px 0 0; color: var(--muted); }
 .relink-content { padding: 24px; }
+.relink-status { display: flex; align-items: flex-start; gap: 9px; margin-bottom: 16px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border)); border-radius: 8px; color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, var(--panel)); font-size: 12px; line-height: 1.45; }
+.relink-status svg { width: 17px; height: 17px; flex: 0 0 auto; margin-top: 1px; }
 .relink-callout { display: flex; align-items: center; gap: 13px; margin-bottom: 20px; padding: 15px; border-radius: 11px; background: var(--panel-soft); }
 .relink-callout > svg { flex: 0 0 auto; color: var(--accent-strong); }
 .relink-callout strong, .relink-callout span { display: block; }

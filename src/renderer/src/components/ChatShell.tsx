@@ -372,7 +372,7 @@ function SessionBanner({ session, retryPending, onRetry, onRelink, onSettings }:
   return <div className="connection-banner session-banner info" role="status"><LoaderCircle className="spin" /><span><strong>Connecting to WhatsApp</strong><small>{session.message ?? 'Your local conversations are ready while the secure connection starts.'}</small></span></div>
 }
 
-function RelinkDialog({ session, onClose }: { session: SessionState; onClose(): void }): React.JSX.Element {
+export function RelinkDialog({ session, onClose }: { session: SessionState; onClose(): void }): React.JSX.Element {
   const [phone, setPhone] = useState('')
   const dialogRef = useDialogFocus<HTMLElement>(onClose)
   const queryClient = useQueryClient()
@@ -388,14 +388,18 @@ function RelinkDialog({ session, onClose }: { session: SessionState; onClose(): 
     onError: (error) => pushNotice(errorMessage(error))
   })
   const pending = qrMutation.isPending || codeMutation.isPending
+  const mutationError = qrMutation.error ?? codeMutation.error
+  const statusMessage = mutationError ? errorMessage(mutationError)
+    : (session.phase === 'offline' || session.phase === 'error') ? session.message : undefined
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section ref={dialogRef}
     className="modal relink-dialog" role="dialog" aria-modal="true" aria-labelledby="relink-title" tabIndex={-1}>
     <header><div><h2 id="relink-title">Relink WhatsApp</h2><p>Your local conversations and preferences will remain unchanged.</p></div>
       <IconButton label="Close relink dialog" onClick={onClose}><X /></IconButton></header>
     <div className="relink-content">{session.qrDataUrl ? <div className="relink-qr"><img className="qr-code" src={session.qrDataUrl} alt="WhatsApp linked-device QR code" /><div><strong>Scan with your phone</strong><ol><li>Open WhatsApp</li><li>Open Linked devices</li><li>Choose Link a device</li></ol></div></div>
       : session.pairingCode ? <div className="code-view"><strong>{formatPairingCode(session.pairingCode)}</strong><p>Enter this code from WhatsApp → Linked devices → Link a device.</p></div>
-        : session.phase === 'pairing' ? <div className="loading-row"><LoaderCircle className="spin" />Preparing a secure pairing code…</div>
-          : <><div className="relink-callout"><Link2 /><div><strong>Reconnect this device</strong><span>Choose QR for the quickest setup, or request a phone-number pairing code.</span></div></div>
+        : session.phase === 'pairing' && !mutationError ? <div className="loading-row"><LoaderCircle className="spin" />Preparing a secure pairing code…</div>
+          : <>{statusMessage && <div className="relink-status" role="alert"><CircleAlert /><span>{statusMessage}</span></div>}
+            <div className="relink-callout"><Link2 /><div><strong>Reconnect this device</strong><span>Choose QR for the quickest setup, or request a phone-number pairing code.</span></div></div>
             <button className="primary-button large" disabled={pending} onClick={() => qrMutation.mutate()}>{qrMutation.isPending ? <LoaderCircle className="spin" /> : <Link2 />}Continue with QR code</button>
             <div className="divider"><span>or use your phone number</span></div>
             <div className="phone-code-row"><input aria-label="International phone number" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="International number, e.g. 15551234567" /><button disabled={!phone.trim() || pending} onClick={() => codeMutation.mutate()}>{codeMutation.isPending ? 'Preparing…' : 'Get code'}</button></div></>}

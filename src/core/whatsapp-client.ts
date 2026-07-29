@@ -26,8 +26,10 @@ import { CrmRepository } from './crm-repository'
 import { WarishDatabase } from './database'
 import { MediaManager } from './media-manager'
 import { deserializeRawMessage, isVisibleChatJid, normalizeWhatsAppMessage } from './normalizer'
+import { WhatsAppWebVersionResolver } from './whatsapp-version'
 
 type EmitEvent = (event: CoreEventEnvelope) => void
+const CLIENT_VERSION_REJECTED_STATUS = 405
 
 interface PendingHistoryRequest {
   chatId: string
@@ -52,8 +54,10 @@ export class WhatsAppClient {
   readonly #logger: Logger
   readonly #emit: EmitEvent
   readonly #auth: PersistentAuthState
+  readonly #webVersion: WhatsAppWebVersionResolver
   readonly media: MediaManager
   #socket?: WASocket
+  #connectPromise?: Promise<SessionState>
   #state: SessionState
   #reconnectAttempt = 0
   #reconnectTimer?: NodeJS.Timeout
@@ -79,6 +83,7 @@ export class WhatsAppClient {
     this.media = media
     this.#emit = emit
     this.#auth = createPersistentAuthState(database)
+    this.#webVersion = new WhatsAppWebVersionResolver(logger)
     const hasStoredSession = hasLinkedAuth(this.#auth.state.creds)
     this.#state = {
       phase: hasStoredSession ? 'starting' : 'unlinked',
@@ -105,6 +110,14 @@ export class WhatsAppClient {
 
   async connect(): Promise<SessionState> {
     if (this.#socket && ['connecting', 'pairing', 'connected'].includes(this.#state.phase)) return this.state
+    if (this.#connectPromise) return this.#connectPromise
+    const operation = this.#openSocket()
+    this.#connectPromise = operation
+    try { return await operation }
+    finally { if (this.#connectPromise === operation) this.#connectPromise = undefined }
+  }
+
+  async #openSocket(): Promise<SessionState> {
     clearTimeout(this.#reconnectTimer)
     this.#reconnectTimer = undefined
     this.#manualLogout = false
@@ -117,8 +130,11 @@ export class WhatsAppClient {
     this.#socket = undefined
     const generation = ++this.#socketGeneration
     void previousSocket?.end(undefined)
+    const version = await this.#webVersion.resolve()
+    if (this.#manualLogout || this.#socketGeneration !== generation) return this.state
     const requestFullHistory = historyDays > 7
     const socket = makeWASocket({
+      version,
       auth: this.#auth.state,
       logger: this.#logger.child({ component: 'baileys' }),
       browser: Browsers.windows(requestFullHistory ? 'Desktop' : 'Chrome'),
@@ -144,13 +160,16 @@ export class WhatsAppClient {
     const normalized = phoneNumber.replace(/\D/g, '')
     if (normalized.length < 7 || normalized.length > 15) throw new Error('Enter a valid international phone number')
     if (!this.#socket) await this.connect()
-    const pairingCode = await this.#socket!.requestPairingCode(normalized)
+    const socket = this.#socket
+    if (!socket) throw new Error('WhatsApp pairing could not be prepared. Try again.')
+    const pairingCode = await socket.requestPairingCode(normalized)
     this.#setState({ phase: 'pairing', pairingCode, qrDataUrl: undefined })
     return this.state
   }
 
   async prepareRelink(): Promise<SessionState> {
     this.#manualLogout = true
+    this.#connectPromise = undefined
     clearTimeout(this.#reconnectTimer)
     this.#reconnectTimer = undefined
     const previousSocket = this.#socket
@@ -168,6 +187,8 @@ export class WhatsAppClient {
 
   async logout(): Promise<void> {
     this.#manualLogout = true
+    this.#connectPromise = undefined
+    this.#socketGeneration += 1
     clearTimeout(this.#reconnectTimer)
     this.#reconnectTimer = undefined
     try { await this.#socket?.logout() } catch (error) { this.#logger.warn({ error }, 'remote logout failed') }
@@ -917,6 +938,14 @@ export class WhatsAppClient {
       this.#auth.state.creds = initAuthCreds()
       this.#setState({ phase: 'logged-out', accountState: this.#database.hasLinkedAccount() ? 'relink-required' : 'never-linked',
         message: 'This linked device was logged out.', qrDataUrl: undefined, pairingCode: undefined })
+      return
+    }
+    if (statusCode === CLIENT_VERSION_REJECTED_STATUS) {
+      this.#webVersion.invalidate()
+      this.#logger.warn({ statusCode }, 'WhatsApp rejected the current Web client version')
+      this.#setState({ phase: 'offline', message: 'WhatsApp compatibility changed. Refreshing and trying again...',
+        qrDataUrl: undefined, pairingCode: undefined })
+      this.#scheduleReconnect()
       return
     }
     this.#setState({ phase: 'offline', message: 'Connection lost. Reconnecting…', qrDataUrl: undefined, pairingCode: undefined })
