@@ -147,6 +147,16 @@ describe('MessageBubble', () => {
     expect(onRetry).toHaveBeenCalledWith('message-1')
   })
 
+  it('shows a read receipt only for an outgoing message', () => {
+    const props = { showSender: false, onReply: vi.fn(), onForward: vi.fn(), onOpenQuote: vi.fn(),
+      onResize: vi.fn(), onError: vi.fn() }
+    const { container, rerender } = render(<MessageBubble message={createMessage({ fromMe: true, status: 'read' })} {...props} />)
+
+    expect(screen.getByRole('img', { name: 'Read' })).toHaveClass('delivery-receipt', 'read')
+    rerender(<MessageBubble message={createMessage({ fromMe: false, status: 'read' })} {...props} />)
+    expect(container.querySelector('.delivery-receipt')).not.toBeInTheDocument()
+  })
+
   it('keeps channel posts read-only while retaining copy and forward actions', () => {
     const { container } = render(<MessageBubble message={createMessage()} readOnly showSender={false} onReply={vi.fn()} onForward={vi.fn()}
       onOpenQuote={vi.fn()} onResize={vi.fn()} onError={vi.fn()} />)

@@ -19,6 +19,7 @@
   --hover: #f0f2f5;
   --active: #e9edef;
   --danger: #d64545;
+  --delivery-read: #b45309;
   --shadow: 0 18px 55px rgb(11 20 26 / 14%);
   --motion-fast: 100ms;
   --motion-medium: 160ms;
@@ -55,6 +56,7 @@
   --hover: #202c33;
   --active: #2a3942;
   --shadow: 0 18px 55px rgb(0 0 0 / 40%);
+  --delivery-read: #ffb454;
 }
 
 :root[data-theme='black'] {
@@ -79,6 +81,7 @@
   --active: #242424;
   --danger: #e05252;
   --shadow: 0 18px 55px rgb(0 0 0 / 80%);
+  --delivery-read: #ffb454;
 }
 
 :root[data-theme='salesforce-black'] {
@@ -103,6 +106,7 @@
   --active: #24384d;
   --danger: #fe5c5c;
   --shadow: 0 18px 55px rgb(0 0 0 / 82%);
+  --delivery-read: #ffb454;
 }
 
 * { box-sizing: border-box; }
@@ -176,16 +180,18 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .chat-row-metadata { display: contents; }
 .virtual-chat-row:last-child .chat-row-copy, .chat-row.active .chat-row-copy { border-color: transparent; }
 .chat-row-top, .chat-row-bottom { display: flex; gap: 8px; align-items: center; }
-.chat-row-top strong, .chat-row-bottom span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-row-top strong, .chat-preview-text { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-row-top strong { font-size: 14px; font-weight: 650; }
 .chat-row-top time, .chat-row-bottom { color: var(--muted); font-size: 12px; }
 .chat-row-bottom { margin-top: 5px; font-size: 13px; }
+.chat-preview { display: flex; min-width: 0; flex: 1; align-items: center; gap: 3px; overflow: hidden; }
+.chat-delivery-receipt.delivery-receipt { width: 14px; height: 14px; }
 .contact-identity-details { display: flex; min-width: 0; align-items: center; gap: 6px; overflow: hidden; color: var(--muted); white-space: nowrap; }
 .chat-row-identity { margin-top: 3px; font-size: 11px; }
 .whatsapp-profile-pill { min-width: 0; max-width: 58%; overflow: hidden; padding: 2px 7px; border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border)); border-radius: 999px; color: var(--accent-strong); background: color-mix(in srgb, var(--accent) 8%, var(--panel)); font-size: 11px; font-weight: 600; line-height: 1.2; text-overflow: ellipsis; }
 .chat-row-top b, .chat-row-bottom b { min-width: 20px; padding: 3px 6px; border-radius: 10px; text-align: center; color: white; background: var(--accent); font-size: 10px; }
-.chat-row-bottom span:first-child { line-height: 1.3; }
-.chat-row-bottom span:first-child:not(:only-child) { padding-right: 2px; }
+.chat-row-bottom > .chat-preview { line-height: 1.3; }
+.chat-row-bottom > .chat-preview:not(:only-child) { padding-right: 2px; }
 .chat-crm-signal { display: flex; min-width: 0; align-items: center; gap: 8px; margin-top: 3px; overflow: hidden; color: var(--muted); font-size: 9px; line-height: 14px; white-space: nowrap; }
 .chat-crm-signal > span { display: inline-flex; min-width: 0; align-items: center; gap: 4px; overflow: hidden; text-overflow: ellipsis; }
 .chat-crm-signal > span:first-child { flex: 0 1 auto; color: color-mix(in srgb, var(--stage-color) 72%, var(--text)); font-weight: 650; }
@@ -359,7 +365,10 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .deleted-message { color: var(--muted); }
 .message-meta { display: flex; min-height: 15px; align-items: center; justify-content: flex-end; gap: 3px; margin: 2px 0 -1px 40px; color: var(--muted); font-size: 10px; }
 .message-meta svg { width: 15px; height: 15px; }
-.message-meta svg.read { color: #53bdeb; }
+.delivery-receipt { display: inline-flex; width: 15px; height: 15px; flex: 0 0 auto; align-items: center; justify-content: center; color: var(--muted); }
+.delivery-receipt svg { width: 100%; height: 100%; }
+.delivery-receipt.read { color: var(--delivery-read); }
+.delivery-receipt.failed { color: var(--danger); }
 .message-actions { position: absolute; top: -18px; right: 5px; z-index: 3; display: none; padding: 3px; border: 1px solid var(--border); border-radius: 16px; background: var(--panel); box-shadow: 0 3px 12px rgb(0 0 0 / 12%); }
 .message-actions button { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 50%; color: var(--muted); background: transparent; }
 .message-actions svg { width: 15px; height: 15px; }
@@ -369,7 +378,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .message-actions .message-action-menu button svg { width: 15px; height: 15px; flex: 0 0 auto; }
 .message-failed { display: flex; align-items: center; gap: 4px; margin: 4px 0 1px auto; padding: 3px 7px; border-radius: 10px; color: var(--danger); background: transparent; font-size: 10px; }
 .message-failed svg { width: 12px; height: 12px; }
-.delivery-failed { color: var(--danger); }
 .reaction-pill { position: absolute; right: 8px; bottom: -13px; padding: 2px 7px; border: 2px solid var(--conversation); border-radius: 12px; background: var(--panel-soft); box-shadow: 0 1px 2px rgb(0 0 0 / 10%); font-size: 12px; }
 .rich-message-card { min-width: 220px; max-width: 430px; margin-bottom: 5px; overflow: hidden; border: 1px solid rgb(0 0 0 / 8%); border-radius: 7px; background: rgb(0 0 0 / 4%); }
 .rich-message-heading { display: flex; align-items: center; gap: 9px; padding: 10px 11px 7px; }

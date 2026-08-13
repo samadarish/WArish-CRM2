@@ -422,6 +422,31 @@ describe('WarishDatabase', () => {
     database.close()
   })
 
+  it('exposes and refreshes latest-message delivery metadata in every chat query', () => {
+    const { database } = createDatabase()
+    const chatId = '15550006667@s.whatsapp.net'
+
+    database.storeMessage({ id: 'outgoing-latest', chatId, fromMe: true, kind: 'text', text: 'On its way',
+      timestamp: 2_000, status: 'delivered', incrementUnread: false })
+    const delivered = { lastMessageId: 'outgoing-latest', lastMessageFromMe: true, lastMessageStatus: 'delivered' }
+    expect(database.getChat(chatId)).toMatchObject(delivered)
+    expect(database.getChats([chatId])).toEqual([expect.objectContaining(delivered)])
+    expect(database.listChats({}).items).toEqual([expect.objectContaining(delivered)])
+
+    database.updateMessageStatus('outgoing-latest', 'read')
+    const read = { ...delivered, lastMessageStatus: 'read' }
+    expect(database.getChat(chatId)).toMatchObject(read)
+    expect(database.getChats([chatId])).toEqual([expect.objectContaining(read)])
+    expect(database.listChats({}).items).toEqual([expect.objectContaining(read)])
+
+    database.storeMessage({ id: 'incoming-latest', chatId, fromMe: false, kind: 'text', text: 'Reply',
+      timestamp: 3_000, status: 'read', incrementUnread: false })
+    expect(database.getChat(chatId)).toMatchObject({
+      lastMessageId: 'incoming-latest', lastMessageFromMe: false, lastMessageStatus: 'read'
+    })
+    database.close()
+  })
+
   it('paginates pinned and unpinned chats without duplicates at equal timestamps', () => {
     const { database } = createDatabase()
     const expected = [
@@ -652,8 +677,8 @@ describe('WarishDatabase', () => {
     database.upsertChat({ id: announcementId, title: 'Announcements', kind: 'group', communityId,
       isAnnouncement: true, classificationKnown: true })
     database.upsertChat({ id: childId, title: 'Design group', kind: 'group', communityId, classificationKnown: true })
-    database.storeMessage({ id: 'community-message', chatId: childId, fromMe: false, kind: 'text', text: 'Community child',
-      timestamp: 3_000, status: 'read', incrementUnread: false })
+    database.storeMessage({ id: 'community-message', chatId: childId, fromMe: true, kind: 'text', text: 'Community child',
+      timestamp: 3_000, status: 'delivered', incrementUnread: false })
     database.upsertChat({ id: channelId, title: 'Product news', kind: 'channel', description: 'Official updates',
       classificationKnown: true })
 
@@ -666,7 +691,8 @@ describe('WarishDatabase', () => {
     expect(database.listCommunities({}).items).toEqual([
       expect.objectContaining({ id: communityId, title: 'Builders community', children: [
         expect.objectContaining({ id: announcementId, isAnnouncement: true, communityId }),
-        expect.objectContaining({ id: childId, communityId })
+        expect.objectContaining({ id: childId, communityId, lastMessageId: 'community-message',
+          lastMessageFromMe: true, lastMessageStatus: 'delivered' })
       ] })
     ])
     database.close()

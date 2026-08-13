@@ -43,6 +43,8 @@ const CONTROL_PLACEHOLDER_TEXT = [
   'Unsupported message: messageContextInfo'
 ] as const
 const SQL_RESOLVED_CHAT_COLUMNS = `chats.*,
+  latest_message.from_me AS last_message_from_me,
+  latest_message.status AS last_message_status,
   identity.saved_name AS contact_saved_name,
   identity.whatsapp_name AS contact_whatsapp_name,
   identity.phone_number AS contact_phone_number,
@@ -61,6 +63,7 @@ const SQL_RESOLVED_CHAT_COLUMNS = `chats.*,
   crm_next_task.priority AS crm_next_task_priority,
   CASE WHEN crm.do_not_contact=1 OR crm.consent_status='denied' THEN 1 ELSE 0 END AS crm_restricted`
 const SQL_RESOLVED_CHAT_FROM = `FROM chats
+  LEFT JOIN messages latest_message ON latest_message.id=chats.last_message_id
   LEFT JOIN contact_identity_aliases identity_alias ON identity_alias.alias_id=chats.id
   LEFT JOIN contact_identities identity ON identity.identity_id=identity_alias.identity_id
   LEFT JOIN crm_contacts crm ON crm.identity_id=identity.identity_id
@@ -1771,8 +1774,10 @@ function mapChat(row: Record<string, unknown>): ChatSummary {
   return { id, title, kind, savedName, whatsappName, phoneNumber,
     communityId: nullableString(row.community_id), isAnnouncement: Boolean(row.is_community_announcement),
     readOnly: kind === 'channel' || kind === 'community', description: nullableString(row.description),
-    avatarUrl, lastMessage: nullableString(row.last_message),
-    lastMessageAt: nullableNumber(row.last_message_at), unreadCount: Number(row.unread_count ?? 0),
+    avatarUrl, lastMessage: nullableString(row.last_message), lastMessageAt: nullableNumber(row.last_message_at),
+    lastMessageId: nullableString(row.last_message_id), lastMessageFromMe: nullableBoolean(row.last_message_from_me),
+    lastMessageStatus: nullableString(row.last_message_status) as DeliveryState | undefined,
+    unreadCount: Number(row.unread_count ?? 0),
     archived: Boolean(row.archived), pinned: Boolean(row.pinned), mutedUntil: nullableNumber(row.muted_until), crm }
 }
 

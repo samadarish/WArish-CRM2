@@ -404,6 +404,93 @@ test('opens at the first unseen message and returns to a read chat at the newest
   }
 })
 
+test('keeps latest outgoing delivery receipts in sync across the chat list and conversation', async () => {
+  await seedAndRelaunch((database) => {
+    linkAccount(database)
+    const chat = database.prepare(`INSERT INTO chats(
+      id, account_id, title, kind, last_message, last_message_at, last_message_id, unread_count, archived, pinned, updated_at
+    ) VALUES (?, 'primary', ?, 'direct', ?, ?, ?, 0, 0, 0, ?)`)
+    const identity = database.prepare(`INSERT INTO contact_identities(
+      identity_id, phone_jid, phone_number, saved_name, whatsapp_name, avatar_failures, updated_at
+    ) VALUES (?, ?, ?, ?, ?, 0, ?)`)
+    const alias = database.prepare('INSERT INTO contact_identity_aliases(alias_id, identity_id, updated_at) VALUES (?, ?, ?)')
+    const message = database.prepare(`INSERT INTO messages(
+      id, account_id, chat_id, sender_id, sender_name, from_me, kind, text, timestamp, status, updated_at
+    ) VALUES (?, 'primary', ?, ?, ?, ?, 'text', ?, ?, ?, ?)`)
+    const now = Date.now()
+    const receiptChatId = fixtureChatId(211)
+    const incomingChatId = fixtureChatId(212)
+    database.exec('BEGIN')
+    identity.run('receipt-identity', receiptChatId, '1888000211', 'Receipt Contact', 'Receipt Contact', now)
+    identity.run('incoming-identity', incomingChatId, '1888000212', 'Incoming Contact', 'Incoming Contact', now)
+    alias.run(receiptChatId, 'receipt-identity', now)
+    alias.run(incomingChatId, 'incoming-identity', now)
+    chat.run(receiptChatId, 'Receipt Contact', 'Latest outgoing preview', now, 'receipt-latest', now)
+    chat.run(incomingChatId, 'Incoming Contact', 'Latest incoming preview', now - 1_000, 'incoming-latest', now - 1_000)
+    message.run('receipt-older', receiptChatId, 'me', null, 1, 'Older outgoing message', now - 2_000, 'sent', now - 2_000)
+    message.run('receipt-latest', receiptChatId, 'me', null, 1, 'Latest outgoing preview', now, 'delivered', now)
+    message.run('incoming-latest', incomingChatId, incomingChatId, 'Incoming Contact', 0,
+      'Latest incoming preview', now - 1_000, 'read', now - 1_000)
+    database.exec('COMMIT')
+  })
+  await page.setViewportSize({ width: 900, height: 620 })
+  await page.locator('html').evaluate((element: unknown) =>
+    (element as BrowserStyledElement).ownerDocument.defaultView.warish.settings.update({ density: 'ultra-dense', theme: 'light' }))
+  await expect.poll(() => page.locator('html').getAttribute('data-density-mode')).toBe('ultra-dense')
+
+  const chatList = page.locator('.chat-list')
+  const receiptRow = chatList.getByRole('button', { name: /Receipt Contact/ })
+  const incomingRow = chatList.getByRole('button', { name: /Incoming Contact/ })
+  const rowReceipt = receiptRow.locator('.chat-delivery-receipt')
+  await expect(rowReceipt).toHaveAttribute('aria-label', 'Delivered')
+  await expect(incomingRow.locator('.chat-delivery-receipt')).toHaveCount(0)
+
+  await receiptRow.click()
+  await expect(page.locator('.conversation-identity > span > strong')).toHaveText('Receipt Contact')
+  const latestMessage = page.locator('[data-message-id="receipt-latest"]')
+  const olderMessage = page.locator('[data-message-id="receipt-older"]')
+  await expect(latestMessage.locator('.delivery-receipt')).toHaveAttribute('aria-label', 'Delivered')
+
+  await emitCoreEvent({ type: 'message.statusChanged', payload: {
+    chatId: fixtureChatId(211), messageId: 'receipt-older', status: 'read'
+  } })
+  await expect(olderMessage.locator('.delivery-receipt')).toHaveAttribute('aria-label', 'Read')
+  await expect(rowReceipt).toHaveAttribute('aria-label', 'Delivered')
+
+  const database = new DatabaseSync(join(userDataPath, 'warish.sqlite'))
+  database.prepare("UPDATE messages SET status='read', updated_at=? WHERE id='receipt-latest'").run(Date.now())
+  database.close()
+  await emitCoreEvent({ type: 'message.statusChanged', payload: {
+    chatId: fixtureChatId(211), messageId: 'receipt-latest', status: 'read'
+  } })
+  const bubbleReceipt = latestMessage.locator('.delivery-receipt')
+  await expect(rowReceipt).toHaveAttribute('aria-label', 'Read')
+  await expect(bubbleReceipt).toHaveAttribute('aria-label', 'Read')
+
+  const themes = [
+    ['light', 'rgb(180, 83, 9)'],
+    ['dark', 'rgb(255, 180, 84)'],
+    ['black', 'rgb(255, 180, 84)'],
+    ['salesforce-black', 'rgb(255, 180, 84)']
+  ] as const
+  for (const [theme, color] of themes) {
+    await page.locator('html').evaluate((element: unknown, nextTheme: string) =>
+      (element as BrowserStyledElement).ownerDocument.defaultView.warish.settings.update({ theme: nextTheme }), theme)
+    await expect.poll(() => page.locator('html').getAttribute('data-theme')).toBe(theme)
+    await expect(rowReceipt).toHaveCSS('color', color)
+    await expect(bubbleReceipt).toHaveCSS('color', color)
+  }
+
+  const rowBox = await receiptRow.boundingBox()
+  const receiptBox = await rowReceipt.boundingBox()
+  const previewBox = await receiptRow.locator('.chat-preview-text').boundingBox()
+  if (!rowBox || !receiptBox || !previewBox) throw new Error('The chat receipt preview has missing geometry')
+  expect(receiptBox.width).toBe(14)
+  expect(receiptBox.x).toBeGreaterThanOrEqual(rowBox.x)
+  expect(receiptBox.x + receiptBox.width).toBeLessThanOrEqual(previewBox.x)
+  expect(previewBox.x + previewBox.width).toBeLessThanOrEqual(rowBox.x + rowBox.width)
+})
+
 test('keeps chat and message motion meaningful under rapid updates and reduced motion', async () => {
   test.setTimeout(90_000)
   await seedAndRelaunch((database) => {

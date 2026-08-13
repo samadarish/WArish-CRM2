@@ -1,13 +1,14 @@
 import { memo, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { format } from 'date-fns'
-import { Check, CheckCheck, Clock3, Copy, Download, EllipsisVertical, File, Forward, Heart, Images, List, ListTodo, MessageSquareText, NotebookPen, Package, Pencil, RefreshCw, Reply, Trash2, Vote, X } from 'lucide-react'
+import { Copy, Download, EllipsisVertical, File, Forward, Heart, Images, List, ListTodo, MessageSquareText, NotebookPen, Package, Pencil, RefreshCw, Reply, Trash2, Vote, X } from 'lucide-react'
 import type { MessageDto } from '../../../shared/contracts'
 import type { MessageGroupPosition } from '../message-grouping'
 import { useMotionPhase } from '../motion-context'
 import { MotionPresence } from '../motion'
 import { useDialogFocus } from '../use-dialog-focus'
 import { DropdownMenu, IconButton, Tooltip, type DropdownMenuItem } from './ui-primitives'
+import { DeliveryReceipt } from './DeliveryReceipt'
 
 export const MessageBubble = memo(function MessageBubble({ message, groupPosition = 'single', readOnly = false, showSender, onReply, onForward, onAddNote, onAddTask, onOpenQuote, onResize, onRetry, onError }: {
   message: MessageDto
@@ -94,7 +95,7 @@ export const MessageBubble = memo(function MessageBubble({ message, groupPositio
             onBroken={() => { setMedia(undefined); onError(new Error('The cached media file is unavailable. Download it again.')) }} />
           {message.text && !message.rich && <p className="message-text">{linkifyMessageText(message.text)}</p>}
         </>}
-        <div className="message-meta">{message.edited && <span>edited</span>}<time>{format(message.timestamp, 'HH:mm')}</time>{message.fromMe && <DeliveryIcon status={message.status} />}</div>
+        <div className="message-meta">{message.edited && <span>edited</span>}<time>{format(message.timestamp, 'HH:mm')}</time>{message.fromMe && <DeliveryReceipt status={message.status} />}</div>
         {!readOnly && message.status === 'failed' && onRetry && <button className="message-failed" onClick={() => onRetry(message.id)}><RefreshCw />Retry</button>}
         {message.reactions.length > 0 && <div className="reaction-pill">{message.reactions.map((reaction) => reaction.emoji).join(' ')}</div>}
         <div className="message-actions" data-focus-return-group data-focus-restoring={moreOpen || undefined}>
@@ -230,12 +231,6 @@ function messageKindLabel(kind?: MessageDto['kind']): string {
     location: 'Location', contact: 'Contact card', poll: 'Poll', rich: 'Rich message', unsupported: 'Referenced message'
   }
   return kind ? labels[kind] ?? 'Message' : 'Referenced message'
-}
-
-function DeliveryIcon({ status }: { status: MessageDto['status'] }): React.JSX.Element {
-  if (status === 'queued' || status === 'sending') return <Clock3 />
-  if (status === 'failed') return <RefreshCw className="delivery-failed" />
-  return status === 'read' || status === 'delivered' ? <CheckCheck className={status === 'read' ? 'read' : ''} /> : <Check />
 }
 
 function ActionDialog({ title, returnFocus, onClose, children }: { title: string; returnFocus?: HTMLElement;

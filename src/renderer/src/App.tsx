@@ -143,6 +143,7 @@ function handleEvent(event: CoreEventEnvelope, queryClient: ReturnType<typeof us
   if (event.type === 'message.statusChanged') {
     const payload = event.payload as { chatId: string; messageId: string; status: MessageDto['status'] }
     patchMessageStatus(queryClient, payload.chatId, payload.messageId, payload.status)
+    patchChatDeliveryStatus(queryClient, payload.chatId, payload.messageId, payload.status)
   }
   if (event.type === 'crm.changed') {
     const payload = event.payload
@@ -376,6 +377,20 @@ function applyAppearance(settings?: AppSettings): void {
   document.documentElement.dataset.motion = settings.reduceMotion ? 'reduced' : 'system'
   document.documentElement.dataset.conversationBackground = settings.conversationBackground
   notifyMotionPreferenceChanged()
+}
+
+function patchChatDeliveryStatus(queryClient: QueryClient, chatId: string, messageId: string, status: MessageDto['status']): void {
+  const update = (chat: ChatSummary): ChatSummary => chat.id === chatId && chat.lastMessageId === messageId
+    && chat.lastMessageFromMe && chat.lastMessageStatus !== status ? { ...chat, lastMessageStatus: status } : chat
+  queryClient.setQueryData<ChatSummary>(['chat', chatId], (current) => current ? update(current) : current)
+  queryClient.setQueriesData<InfiniteData<Page<ChatSummary>, string | undefined>>({ queryKey: ['chats'] }, (current) => current ? ({
+    ...current, pages: current.pages.map((page) => ({ ...page, items: page.items.map(update) }))
+  }) : current)
+  queryClient.setQueriesData<InfiniteData<Page<CommunitySummary>, string | undefined>>({ queryKey: ['communities'] }, (current) => current ? ({
+    ...current, pages: current.pages.map((page) => ({ ...page, items: page.items.map((community) => ({
+      ...community, children: community.children.map(update)
+    })) }))
+  }) : current)
 }
 
 const Splash = memo(function Splash({ label }: { label: string }): React.JSX.Element {

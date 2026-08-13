@@ -18,6 +18,7 @@ import { MOTION_MS, motionDuration, subscribeToReducedMotion } from '../motion-p
 import { useDebouncedValue } from '../use-debounced-value'
 import { useDialogFocus } from '../use-dialog-focus'
 import { Avatar } from './Avatar'
+import { DeliveryReceipt } from './DeliveryReceipt'
 import { MessageBubble } from './MessageBubble'
 import { NavigationRail, type SidebarDestination } from './NavigationRail'
 import { SalesLifecyclePath } from './SalesLifecyclePath'
@@ -455,7 +456,10 @@ const ChatRow = memo(function ChatRow({ chat, active, showPreview, nested = fals
         {identity.hasSecondary && <ContactIdentityDetails identity={identity} />}
         {chat.crm && <ChatCrmSignal crm={chat.crm} />}
       </span>}
-      {showPreview && <span className="chat-row-bottom"><span>{chat.typing ? 'typing…' : chat.lastMessage ?? 'No messages yet'}</span>{chat.unreadCount > 0 && <b>{chat.unreadCount > 99 ? '99+' : chat.unreadCount}</b>}</span>}</span>
+      {showPreview && <span className="chat-row-bottom"><span className="chat-preview">
+        {!chat.typing && chat.lastMessageFromMe && chat.lastMessageStatus && <DeliveryReceipt className="chat-delivery-receipt" status={chat.lastMessageStatus} />}
+        <span className="chat-preview-text">{chat.typing ? 'typing…' : chat.lastMessage ?? 'No messages yet'}</span>
+      </span>{chat.unreadCount > 0 && <b>{chat.unreadCount > 99 ? '99+' : chat.unreadCount}</b>}</span>}</span>
   </button>
 })
 

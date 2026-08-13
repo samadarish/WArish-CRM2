@@ -193,6 +193,9 @@ export interface ChatSummary {
   avatarUrl?: string
   lastMessage?: string
   lastMessageAt?: number
+  lastMessageId?: string
+  lastMessageFromMe?: boolean
+  lastMessageStatus?: DeliveryState
   unreadCount: number
   archived: boolean
   pinned: boolean
