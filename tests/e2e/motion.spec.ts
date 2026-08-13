@@ -815,6 +815,28 @@ test('keeps virtual CRM records reachable and portaled choices inside every view
   await scrollToEnd(orderTable)
   await expect(page.getByText('E2E-001', { exact: true })).toBeVisible()
 
+  await page.setViewportSize({ width: 1547, height: 705 })
+  await page.locator('html').evaluate((element: unknown) =>
+    (element as BrowserStyledElement).ownerDocument.defaultView.warish.settings.update({ density: 'ultra-dense' }))
+  await expect.poll(() => page.locator('html').getAttribute('data-density-mode')).toBe('ultra-dense')
+  await page.getByRole('button', { name: 'New order' }).click()
+  const orderDialog = page.getByRole('dialog', { name: 'New order' })
+  const orderDialogBody = orderDialog.locator('.crm-dialog-body')
+  await expect(orderDialog).toBeVisible()
+  await expectInsideViewport(orderDialog)
+  const orderDialogOverflow = await orderDialogBody.evaluate((element: unknown) => {
+    const target = element as { clientWidth: number; scrollWidth: number; clientHeight: number; scrollHeight: number }
+    return { horizontal: target.scrollWidth - target.clientWidth, vertical: target.scrollHeight - target.clientHeight }
+  })
+  expect(orderDialogOverflow.horizontal).toBeLessThanOrEqual(1)
+  expect(orderDialogOverflow.vertical).toBeLessThanOrEqual(1)
+  await expect(orderDialog.getByRole('button', { name: 'Save order' })).toBeVisible()
+  await orderDialog.getByRole('button', { name: 'Cancel' }).click()
+  await expect(orderDialog).toBeHidden()
+  await page.locator('html').evaluate((element: unknown) =>
+    (element as BrowserStyledElement).ownerDocument.defaultView.warish.settings.update({ density: 'comfortable' }))
+  await expect.poll(() => page.locator('html').getAttribute('data-density-mode')).toBe('comfortable')
+
   await tasksButton.click()
   await page.getByRole('button', { name: 'New task' }).click()
   const dialog = page.getByRole('dialog', { name: 'New follow-up' })

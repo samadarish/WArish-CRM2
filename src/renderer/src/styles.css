@@ -1047,12 +1047,12 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .contact-crm-entry > svg { width: 15px; height: 15px; flex: 0 0 auto; color: var(--muted); }
 
 .crm-dialog-backdrop { z-index: 70; place-items: center; padding: 22px; }
-.crm-dialog { display: grid; width: min(560px, 100%); max-height: min(820px, calc(100vh - 44px)); grid-template-rows: 62px minmax(0, 1fr); overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: var(--panel); box-shadow: 0 28px 80px rgb(4 17 23 / 28%); }
+.crm-dialog { --crm-dialog-body-padding: 18px; display: grid; width: min(560px, 100%); max-height: min(820px, calc(100vh - 44px)); grid-template-rows: 62px minmax(0, 1fr); overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: var(--panel); box-shadow: 0 28px 80px rgb(4 17 23 / 28%); }
 .crm-dialog.wide { width: min(1050px, 100%); }
 .crm-dialog > header { display: flex; min-width: 0; align-items: center; gap: 12px; padding: 8px 12px 8px 18px; border-bottom: 1px solid var(--border); }
 .crm-dialog > header > div { min-width: 0; flex: 1; }
 .crm-dialog h2 { margin: 0; overflow: hidden; font-size: 18px; letter-spacing: 0; text-overflow: ellipsis; white-space: nowrap; }
-.crm-dialog-body { min-height: 0; padding: 18px; overflow-y: auto; scrollbar-color: var(--muted) transparent; scrollbar-width: thin; }
+.crm-dialog-body { min-height: 0; padding: var(--crm-dialog-body-padding); overflow-y: auto; scrollbar-color: var(--muted) transparent; scrollbar-width: thin; }
 .crm-form { display: grid; gap: 13px; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
 .form-field { display: grid; min-width: 0; gap: 5px; }
@@ -1062,7 +1062,7 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .form-field input:focus, .form-field select:focus, .form-field textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 9%, transparent); }
 .checkbox-field { display: flex; min-height: 37px; align-items: center; gap: 8px; align-self: end; padding: 0 9px; border: 1px solid var(--border); border-radius: 7px; color: var(--muted); font-size: 10px; }
 .checkbox-field input { accent-color: var(--accent); }
-.crm-form > footer { display: flex; justify-content: flex-end; gap: 8px; margin: 3px -18px -18px; padding: 13px 18px; border-top: 1px solid var(--border); background: var(--panel-soft); }
+.crm-form > footer { display: flex; justify-content: flex-end; gap: 8px; margin: 3px calc(-1 * var(--crm-dialog-body-padding)) calc(-1 * var(--crm-dialog-body-padding)); padding: 13px var(--crm-dialog-body-padding); border-top: 1px solid var(--border); background: var(--panel-soft); }
 .crm-form > footer button { min-height: 36px; padding: 7px 13px; font-size: 11px; }
 .crm-delete-button { margin-right: auto; color: var(--danger); }
 .contact-edit-form > footer { margin-inline: 0; margin-bottom: 0; border: 0; border-radius: 8px; }
@@ -1311,12 +1311,11 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 :root[data-density='dense'] .crm-stage-select select { height: 29px; }
 :root[data-density='dense'] .crm-contact-tabs { padding-inline: 8px; }
 :root[data-density='dense'] .crm-contact-body { padding: 10px 13px 18px; }
-:root[data-density='dense'] .crm-dialog { grid-template-rows: 50px minmax(0, 1fr); border-radius: 8px; }
+:root[data-density='dense'] .crm-dialog { --crm-dialog-body-padding: 12px; grid-template-rows: 50px minmax(0, 1fr); border-radius: 8px; }
 :root[data-density='dense'] .crm-dialog > header { padding: 6px 10px 6px 13px; }
 :root[data-density='dense'] .crm-dialog h2 { font-size: 16px; }
-:root[data-density='dense'] .crm-dialog-body { padding: 12px; }
 :root[data-density='dense'] .crm-form { gap: 9px; }
-:root[data-density='dense'] .crm-form > footer { margin: 2px -12px -12px; padding: 9px 12px; }
+:root[data-density='dense'] .crm-form > footer { margin-top: 2px; padding-block: 9px; }
 :root[data-density='dense'] .form-field input,
 :root[data-density='dense'] .form-field select,
 :root[data-density='dense'] .form-field textarea { min-height: 34px; }
@@ -1408,8 +1407,7 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 :root[data-density-mode='ultra-dense'] .crm-contact-body { padding: 8px 11px 14px; }
 :root[data-density-mode='ultra-dense'] .crm-profile-section dl > div { min-height: 48px; padding: 8px 9px; }
 :root[data-density-mode='ultra-dense'] .conversation-overview .contact-actions button { min-height: 40px; }
-:root[data-density-mode='ultra-dense'] .crm-dialog { grid-template-rows: 44px minmax(0, 1fr); }
-:root[data-density-mode='ultra-dense'] .crm-dialog-body { padding: 10px; }
+:root[data-density-mode='ultra-dense'] .crm-dialog { --crm-dialog-body-padding: 10px; grid-template-rows: 44px minmax(0, 1fr); }
 :root[data-density-mode='ultra-dense'] .crm-form { gap: 7px; }
 :root[data-density-mode='ultra-dense'] .form-field input,
 :root[data-density-mode='ultra-dense'] .form-field select,
