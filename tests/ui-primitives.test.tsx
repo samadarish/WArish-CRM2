@@ -130,6 +130,20 @@ describe('DropdownMenu', () => {
     expect(actionFocus).toBe(trigger)
   })
 
+  it('anchors the popover to the actual dropdown button while tooltip support is enabled', async () => {
+    render(<DropdownMenu label="Message actions" icon={<span>+</span>} items={[
+      { id: 'copy', label: 'Copy', onAction: vi.fn() }
+    ]} />)
+    const trigger = screen.getByRole('button', { name: 'Message actions' })
+    vi.spyOn(trigger, 'getBoundingClientRect').mockReturnValue({
+      x: 480, y: 320, top: 320, right: 508, bottom: 348, left: 480, width: 28, height: 28, toJSON: () => ({})
+    })
+
+    fireEvent.click(trigger)
+    const menu = await screen.findByRole('menu')
+    await waitFor(() => expect(menu.closest('.ui-menu-popover')).toHaveStyle({ '--trigger-width': '28px' }))
+  })
+
 })
 
 describe('Tooltip', () => {
@@ -137,32 +151,80 @@ describe('Tooltip', () => {
     vi.useFakeTimers()
     render(<Tooltip label="Attach a file"><button aria-label="Attach"><span>+</span></button></Tooltip>)
     fireEvent.mouseMove(document)
-    fireEvent.mouseEnter(screen.getByRole('button', { name: 'Attach' }))
-    act(() => { vi.advanceTimersByTime(449) })
-    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
-    act(() => { vi.advanceTimersByTime(1) })
+    const trigger = screen.getByRole('button', { name: 'Attach' })
+    fireEvent.mouseEnter(trigger)
+    act(() => { vi.advanceTimersByTime(450) })
     const tooltip = screen.getByRole('tooltip')
     expect(tooltip).toHaveTextContent('Attach a file')
-    expect(screen.getByRole('button', { name: 'Attach' })).toHaveAttribute('aria-describedby', tooltip.id)
+    expect(trigger).toHaveAttribute('aria-describedby', tooltip.id)
+    fireEvent.mouseLeave(trigger)
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+    act(() => { vi.advanceTimersByTime(500) })
   })
 
-  it('uses the same delay for keyboard focus and cancels pending timers', () => {
+  it('cancels abandoned hovers and opens only the final sibling trigger', () => {
     vi.useFakeTimers()
-    const view = render(<Tooltip label="Search this conversation"><button aria-label="Search"><span>+</span></button></Tooltip>)
-    const trigger = screen.getByRole('button', { name: 'Search' })
-    fireEvent.keyDown(document.body, { key: 'Tab' })
-    trigger.focus()
+    render(<>
+      <Tooltip label="Grinning face"><button aria-label="Grinning face">😀</button></Tooltip>
+      <Tooltip label="Smiling face"><button aria-label="Smiling face">😊</button></Tooltip>
+    </>)
+    fireEvent.mouseMove(document)
+    const grinning = screen.getByRole('button', { name: 'Grinning face' })
+    const smiling = screen.getByRole('button', { name: 'Smiling face' })
+    fireEvent.mouseEnter(grinning)
+    act(() => { vi.advanceTimersByTime(100) })
+    fireEvent.mouseLeave(grinning)
+    fireEvent.mouseEnter(smiling)
+    act(() => { vi.advanceTimersByTime(100) })
+    fireEvent.mouseLeave(smiling)
+    act(() => { vi.advanceTimersByTime(500) })
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+
+    fireEvent.mouseEnter(smiling)
     act(() => { vi.advanceTimersByTime(449) })
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
     act(() => { vi.advanceTimersByTime(1) })
-    expect(screen.getByRole('tooltip')).toHaveTextContent('Search this conversation')
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Smiling face')
+    fireEvent.mouseLeave(smiling)
+    act(() => { vi.advanceTimersByTime(500) })
+  })
 
-    fireEvent.blur(trigger)
+  it('keeps one tooltip open while moving across warmed sibling triggers', () => {
+    vi.useFakeTimers()
+    render(<>
+      <Tooltip label="Reply"><button aria-label="Reply">R</button></Tooltip>
+      <Tooltip label="Forward"><button aria-label="Forward">F</button></Tooltip>
+    </>)
+    fireEvent.mouseMove(document)
+    const reply = screen.getByRole('button', { name: 'Reply' })
+    const forward = screen.getByRole('button', { name: 'Forward' })
+    fireEvent.mouseEnter(reply)
+    act(() => { vi.advanceTimersByTime(450) })
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Reply')
+    fireEvent.mouseLeave(reply)
+    fireEvent.mouseEnter(forward)
+    expect(screen.getAllByRole('tooltip')).toHaveLength(1)
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Forward')
+    fireEvent.mouseLeave(forward)
+    act(() => { vi.advanceTimersByTime(500) })
+  })
+
+  it('opens immediately for keyboard focus and closes on Escape or blur', () => {
+    vi.useFakeTimers()
+    render(<Tooltip label="Search this conversation"><button aria-label="Search"><span>+</span></button></Tooltip>)
+    const trigger = screen.getByRole('button', { name: 'Search' })
+    fireEvent.keyDown(document.body, { key: 'Tab', code: 'Tab' })
+    act(() => { trigger.focus() })
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Search this conversation')
+    act(() => { trigger.blur() })
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
-    fireEvent.focus(trigger)
-    view.unmount()
-    act(() => { vi.runOnlyPendingTimers() })
+
+    fireEvent.keyDown(document.body, { key: 'Tab', code: 'Tab' })
+    act(() => { trigger.focus() })
+    expect(screen.getByRole('tooltip')).toBeInTheDocument()
+    fireEvent.keyDown(trigger, { key: 'Escape' })
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+    act(() => { vi.advanceTimersByTime(500) })
   })
 
   it('keeps disabled icon controls labeled without registering an unusable tooltip trigger', () => {

@@ -59,6 +59,7 @@ function ConversationShell({ session }: { session: SessionState }): React.JSX.El
   const [relinkOpen, setRelinkOpen] = useState(false)
   const [enteringChatRows, setEnteringChatRows] = useState<Map<string, number>>(() => new Map())
   const [pendingSelectedChatId, setPendingSelectedChatId] = useState<string>()
+  const conversationEntryRef = useRef<{ chatId: string; unreadCount: number } | undefined>(undefined)
   const debouncedChatQuery = useDebouncedValue(chatQuery, 220)
   const selectedChatId = useUiStore((state) => state.selectedChatId)
   const destination = useUiStore((state) => state.destination)
@@ -131,7 +132,10 @@ function ConversationShell({ session }: { session: SessionState }): React.JSX.El
   useEffect(() => {
     if (selectedChatId) return
     const first = destination === 'community' ? communities[0]?.children[0] : chats[0]
-    if (first) selectChat(first.id)
+    if (first) {
+      conversationEntryRef.current = { chatId: first.id, unreadCount: first.unreadCount }
+      selectChat(first.id)
+    }
   }, [chats, communities, destination, selectChat, selectedChatId])
   const listHasNextPage = destination === 'community' ? communitiesQuery.hasNextPage : chatsQuery.hasNextPage
   const listIsFetchingNextPage = destination === 'community' ? communitiesQuery.isFetchingNextPage : chatsQuery.isFetchingNextPage
@@ -217,10 +221,11 @@ function ConversationShell({ session }: { session: SessionState }): React.JSX.El
       }) }))
     }) : current)
   }, [pushNotice, queryClient])
-  const selectChatRow = useCallback((chatId: string): void => {
-    setPendingSelectedChatId(chatId)
-    runSurfaceTransition('chat', () => selectChat(chatId))
-    markRead(chatId)
+  const selectChatRow = useCallback((chat: ChatSummary): void => {
+    setPendingSelectedChatId(chat.id)
+    conversationEntryRef.current = { chatId: chat.id, unreadCount: chat.unreadCount }
+    runSurfaceTransition('chat', () => selectChat(chat.id))
+    markRead(chat.id)
   }, [markRead, selectChat])
   useLayoutEffect(() => {
     if (pendingSelectedChatId === selectedChatId) setPendingSelectedChatId(undefined)
@@ -343,7 +348,10 @@ function ConversationShell({ session }: { session: SessionState }): React.JSX.El
         {session.phase === 'connected' && session.historySync?.state === 'running' &&
           <div className="connection-banner history-sync-banner"><LoaderCircle className="spin" />Syncing recent history — {Math.round(session.historySync.progress)}%</div>}
         {selectedChatQuery.isError ? <QueryError label="Could not open this conversation" onRetry={() => void selectedChatQuery.refetch()} />
-          : selectedChat ? <Conversation key={selectedChat.id} chat={selectedChat} session={session} enterToSend={enterToSend}
+          : selectedChat ? <Conversation key={selectedChat.id} chat={selectedChat}
+            initialUnreadCount={conversationEntryRef.current?.chatId === selectedChat.id
+              ? conversationEntryRef.current.unreadCount : selectedChat.unreadCount}
+            session={session} enterToSend={enterToSend}
             onForward={setForwardMessage} onChatHidden={clearSelectedChat} />
             : selectedChatId && selectedChatQuery.isPending ? <div className="conversation-uncached-skeleton"><MessageHistorySkeleton /></div>
               : <WelcomePanel />}
@@ -436,12 +444,12 @@ const CommunityParentRow = memo(function CommunityParentRow({ community, expande
 const ChatRow = memo(function ChatRow({ chat, active, showPreview, nested = false, enterIndex, onSelect, onPrefetch }: {
   chat: ChatSummary; active: boolean; showPreview: boolean; nested?: boolean
   enterIndex?: number
-  onSelect(chatId: string): void; onPrefetch(chat: ChatSummary): void
+  onSelect(chat: ChatSummary): void; onPrefetch(chat: ChatSummary): void
 }): React.JSX.Element {
   const identity = contactIdentityPresentation(chat)
   return <button className={`chat-row ${chat.kind === 'direct' ? 'direct' : ''} ${identity.hasSecondary ? 'has-identity' : ''} ${chat.crm ? 'has-crm' : ''} ${nested ? 'nested' : ''} ${active ? 'active' : ''} ${enterIndex === undefined ? '' : 'chat-row-enter'}`}
     style={enterIndex === undefined ? undefined : { '--row-enter-delay': `${Math.min(100, enterIndex * 20)}ms` } as React.CSSProperties}
-    onMouseEnter={() => onPrefetch(chat)} onFocus={() => onPrefetch(chat)} onClick={() => onSelect(chat.id)}>
+    onMouseEnter={() => onPrefetch(chat)} onFocus={() => onPrefetch(chat)} onClick={() => onSelect(chat)}>
     <Avatar title={identity.primary} src={chat.avatarUrl} /><span className="chat-row-copy"><span className="chat-row-top"><strong title={identity.primary}>{identity.primary}</strong>{chat.lastMessageAt && <time>{chatTime(chat.lastMessageAt)}</time>}{!showPreview && chat.unreadCount > 0 && <b>{chat.unreadCount > 99 ? '99+' : chat.unreadCount}</b>}</span>
       {(identity.hasSecondary || chat.crm) && <span className="chat-row-metadata">
         {identity.hasSecondary && <ContactIdentityDetails identity={identity} />}
@@ -504,8 +512,9 @@ function formatHeaderMoney(value: number): string {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(value)
 }
 
-function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
+function Conversation({ chat, initialUnreadCount, session, enterToSend, onForward, onChatHidden }: {
   chat: ChatSummary
+  initialUnreadCount: number
   session: SessionState
   enterToSend: AppSettings['enterToSend']
   onForward(message: MessageDto): void
@@ -541,7 +550,9 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
   const focusTimerRef = useRef<number | undefined>(undefined)
   const nearBottomRef = useRef(true)
   const pendingOwnSendRef = useRef(false)
-  const activeChatRef = useRef<string | undefined>(undefined)
+  const initialScrollPendingRef = useRef(true)
+  const initialScrollStableFramesRef = useRef(0)
+  const initialScrollAttemptsRef = useRef(0)
   const previousMessagesRef = useRef<MessageDto[]>([])
   const anchorRef = useRef<{ id: string; viewportOffset: number } | undefined>(undefined)
   const pendingHistoryAnchorRef = useRef<{ id: string; viewportOffset: number } | undefined>(undefined)
@@ -619,6 +630,14 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
     for (const message of [...remoteHistory, ...local]) unique.set(message.id, message)
     return [...unique.values()].sort((left, right) => left.timestamp - right.timestamp || left.id.localeCompare(right.id))
   }, [messageQuery.data, remoteHistory])
+  const incomingMessageCount = useMemo(() => messages.reduce((count, message) => count + Number(!message.fromMe), 0), [messages])
+  const unreadBoundaryPending = initialUnreadCount > 0 && incomingMessageCount < initialUnreadCount &&
+    (messageQuery.isPending || messageQuery.isFetchingNextPage || Boolean(messageQuery.hasNextPage))
+  const initialUnreadMessageId = useMemo(() => {
+    if (initialUnreadCount <= 0 || unreadBoundaryPending) return undefined
+    const incoming = messages.filter((message) => !message.fromMe)
+    return incoming.length >= initialUnreadCount ? incoming.at(-initialUnreadCount)?.id : undefined
+  }, [initialUnreadCount, messages, unreadBoundaryPending])
   const timeline = useMemo(() => buildTimeline(messages), [messages])
   const groupPositionById = useMemo(() => messageGroupPositions(messages), [messages])
   const showSenderById = useMemo(() => {
@@ -630,15 +649,19 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
     }
     return result
   }, [chat.kind, groupPositionById, messages])
+  useEffect(() => {
+    if (initialUnreadCount <= 0 || incomingMessageCount >= initialUnreadCount || !messageQuery.hasNextPage || messageQuery.isFetchingNextPage) return
+    void messageQuery.fetchNextPage()
+  }, [incomingMessageCount, initialUnreadCount, messageQuery])
   const extractMessageRange = useCallback((range: Range): number[] => {
     const indexes = defaultRangeExtractor(range)
-    const pendingId = pendingHistoryAnchorRef.current?.id
+    const pendingId = pendingHistoryAnchorRef.current?.id ?? (initialScrollPendingRef.current ? initialUnreadMessageId : undefined)
     if (!pendingId) return indexes
     const timelineIndex = timeline.findIndex((item) => item.type === 'message' && item.message.id === pendingId)
     const virtualIndex = timelineIndex + 1
     if (timelineIndex < 0 || indexes.includes(virtualIndex)) return indexes
     return [...indexes, virtualIndex].sort((left, right) => left - right)
-  }, [timeline])
+  }, [initialUnreadMessageId, timeline])
   const virtualizer = useVirtualizer({
     count: timeline.length + 1,
     getScrollElement: () => parentRef.current,
@@ -700,14 +723,70 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
     if (!messages.length) return
     if (scrollFrameRef.current !== undefined) cancelAnimationFrame(scrollFrameRef.current)
     scrollFrameRef.current = requestAnimationFrame(() => {
+      measureRenderedRows()
       virtualizer.scrollToIndex(timeline.length, { align: 'end' })
+      const element = parentRef.current
+      if (element) element.scrollTop = element.scrollHeight
       nearBottomRef.current = true
       if (clearNotice) setNewMessageCount(0)
       scrollFrameRef.current = undefined
     })
-  }, [messages.length, timeline.length, virtualizer])
+  }, [measureRenderedRows, messages.length, timeline.length, virtualizer])
+  const alignInitialScroll = useCallback((): void => {
+    if (!initialScrollPendingRef.current || !messages.length || unreadBoundaryPending) return
+    if (scrollFrameRef.current !== undefined) return
+    initialScrollStableFramesRef.current = 0
+    initialScrollAttemptsRef.current = 0
+    const unreadTimelineIndex = initialUnreadMessageId
+      ? timeline.findIndex((item) => item.type === 'message' && item.message.id === initialUnreadMessageId)
+      : -1
+    const align = (): void => {
+      if (!initialScrollPendingRef.current) return
+      initialScrollAttemptsRef.current += 1
+      measureRenderedRows()
+      const element = parentRef.current
+      let aligned = false
+      if (element && unreadTimelineIndex >= 0 && initialUnreadMessageId) {
+        const row = [...element.querySelectorAll<HTMLElement>('.message-item[data-message-id]')]
+          .find((candidate) => candidate.dataset.messageId === initialUnreadMessageId)
+        if (row) {
+          const desiredOffset = 48
+          const currentOffset = row.getBoundingClientRect().top - element.getBoundingClientRect().top
+          element.scrollTop += currentOffset - desiredOffset
+          aligned = Math.abs(currentOffset - desiredOffset) <= 2
+        } else {
+          virtualizer.scrollToIndex(unreadTimelineIndex + 1, { align: 'start' })
+        }
+        nearBottomRef.current = false
+        anchorRef.current = { id: initialUnreadMessageId, viewportOffset: 48 }
+      } else if (element) {
+        const newestMessageId = messages.at(-1)?.id
+        const newestRow = newestMessageId
+          ? [...element.querySelectorAll<HTMLElement>('.message-item[data-message-id]')]
+            .find((candidate) => candidate.dataset.messageId === newestMessageId)
+          : undefined
+        virtualizer.scrollToIndex(timeline.length, { align: 'end' })
+        element.scrollTop = element.scrollHeight
+        aligned = Boolean(newestRow) && element.scrollHeight - element.scrollTop - element.clientHeight <= 2
+        nearBottomRef.current = true
+      }
+      initialScrollStableFramesRef.current = aligned ? initialScrollStableFramesRef.current + 1 : 0
+      if (initialScrollStableFramesRef.current < 2 && initialScrollAttemptsRef.current < 60) {
+        scrollFrameRef.current = requestAnimationFrame(align)
+        return
+      }
+      initialScrollPendingRef.current = false
+      setNewMessageCount(0)
+      scrollFrameRef.current = undefined
+    }
+    scrollFrameRef.current = requestAnimationFrame(align)
+  }, [initialUnreadMessageId, measureRenderedRows, messages, timeline, unreadBoundaryPending, virtualizer])
   const handleRowResize = useCallback((): void => {
     if (rowResizeFrameRef.current !== undefined) return
+    if (initialScrollPendingRef.current) {
+      alignInitialScroll()
+      return
+    }
     const shouldFollow = nearBottomRef.current
     const anchor = anchorRef.current
     rowResizeFrameRef.current = requestAnimationFrame(() => {
@@ -716,7 +795,7 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
       if (shouldFollow) scrollToNewest(false)
       else if (anchor) restoreAnchor(anchor)
     })
-  }, [measureRenderedRows, restoreAnchor, scrollToNewest])
+  }, [alignInitialScroll, measureRenderedRows, restoreAnchor, scrollToNewest])
   const sendMutation = useMutation({
     mutationFn: (input: { chatId: string; clientId: string; text?: string; attachmentToken?: string;
       attachmentKind?: 'image' | 'video' | 'document' | 'audio' | 'voice' | 'sticker'; quotedMessageId?: string;
@@ -857,6 +936,7 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
       if (scrollStateFrameRef.current !== undefined) return
       scrollStateFrameRef.current = requestAnimationFrame(() => {
         scrollStateFrameRef.current = undefined
+        if (initialScrollPendingRef.current) return
         nearBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 120
         if (nearBottomRef.current) setNewMessageCount(0)
         captureAnchor()
@@ -865,10 +945,10 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
     updateScrollState()
     element.addEventListener('scroll', updateScrollState, { passive: true })
     const resizeObserver = new ResizeObserver(() => {
-      const shouldFollow = nearBottomRef.current
       setMessageViewportHeight(element.clientHeight)
       measureRenderedRows()
-      if (shouldFollow && messages.length) scrollToNewest(false)
+      if (initialScrollPendingRef.current) alignInitialScroll()
+      else if (nearBottomRef.current && messages.length) scrollToNewest(false)
       else captureAnchor()
     })
     resizeObserver.observe(element)
@@ -879,14 +959,13 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
       if (scrollStateFrameRef.current !== undefined) cancelAnimationFrame(scrollStateFrameRef.current)
       scrollStateFrameRef.current = undefined
     }
-  }, [captureAnchor, measureRenderedRows, messages.length, scrollToNewest])
+  }, [alignInitialScroll, captureAnchor, measureRenderedRows, messages.length, scrollToNewest])
 
   useLayoutEffect(() => {
     const previous = previousMessagesRef.current
-    if (activeChatRef.current !== chat.id) {
-      activeChatRef.current = chat.id
+    if (initialScrollPendingRef.current) {
       previousMessagesRef.current = messages
-      if (messages.length) scrollToNewest()
+      alignInitialScroll()
       return
     }
 
@@ -931,7 +1010,7 @@ function Conversation({ chat, session, enterToSend, onForward, onChatHidden }: {
       setNewMessageCount((count) => count + newerCount)
     }
     previousMessagesRef.current = messages
-  }, [chat.id, messageMotionUpdate?.quiet, messageMotionUpdate?.revision, messages, restoreAnchor, scrollToNewest, virtualizer])
+  }, [alignInitialScroll, messageMotionUpdate?.quiet, messageMotionUpdate?.revision, messages, restoreAnchor, scrollToNewest, virtualizer])
 
   useEffect(() => {
     activeRef.current = true

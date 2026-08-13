@@ -19,6 +19,20 @@ afterEach(() => {
 })
 
 describe('MessageBubble', () => {
+  it('turns web addresses into safe external links without swallowing punctuation', () => {
+    render(<MessageBubble message={createMessage({ text: 'Open https://example.com/orders/42, or www.example.org/help.' })}
+      showSender={false} onReply={vi.fn()} onForward={vi.fn()} onOpenQuote={vi.fn()} onResize={vi.fn()} onError={vi.fn()} />)
+
+    expect(screen.getByRole('link', { name: 'https://example.com/orders/42' })).toHaveAttribute('href', 'https://example.com/orders/42')
+    expect(screen.getByRole('link', { name: 'www.example.org/help' })).toHaveAttribute('href', 'https://www.example.org/help')
+    for (const link of screen.getAllByRole('link')) {
+      expect(link).toHaveAttribute('target', '_blank')
+      expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+    }
+    expect(screen.getByText(/, or/)).toBeInTheDocument()
+    expect(screen.getByText('www.example.org/help').parentElement).toHaveTextContent(/help\.$/)
+  })
+
   it('shows a stable quote preview and reserves a reaction row', () => {
     const onOpenQuote = vi.fn()
     const { container } = render(<MessageBubble message={createMessage({

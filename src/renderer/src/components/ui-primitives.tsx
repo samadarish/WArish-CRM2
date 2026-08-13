@@ -19,7 +19,8 @@ import {
   useFilter,
   type Placement
 } from 'react-aria-components'
-import { isValidElement, useEffect, useRef, useState, type ComponentProps, type ReactNode } from 'react'
+import { isValidElement, useEffect, useId, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 
 const EMPTY_KEY = '__warish_empty_value__'
 
@@ -132,10 +133,61 @@ export function DropdownMenu({ label, icon, items, className = 'icon-button', pl
   onOpenChange?(open: boolean): void
 }): React.JSX.Element {
   const triggerRef = useRef<HTMLButtonElement>(null)
-  return <AriaMenuTrigger isOpen={isOpen} onOpenChange={onOpenChange}>
-    <Tooltip label={label}><AriaButton ref={triggerRef} className={className} aria-label={label} isDisabled={disabled}>
+  const tooltipRef = useRef<HTMLDivElement>(null)
+  const tooltipTimerRef = useRef<number | undefined>(undefined)
+  const tooltipId = useId()
+  const [tooltipOpen, setTooltipOpen] = useState(false)
+  const [tooltipPosition, setTooltipPosition] = useState({ left: 0, top: 0, placement: 'top' as 'top' | 'bottom' })
+  const closeTooltip = (): void => {
+    if (tooltipTimerRef.current !== undefined) window.clearTimeout(tooltipTimerRef.current)
+    tooltipTimerRef.current = undefined
+    setTooltipOpen(false)
+  }
+  const scheduleTooltip = (): void => {
+    if (disabled) return
+    if (tooltipTimerRef.current !== undefined) window.clearTimeout(tooltipTimerRef.current)
+    tooltipTimerRef.current = window.setTimeout(() => {
+      tooltipTimerRef.current = undefined
+      setTooltipOpen(true)
+    }, 450)
+  }
+  useEffect(() => () => {
+    if (tooltipTimerRef.current !== undefined) window.clearTimeout(tooltipTimerRef.current)
+  }, [])
+  useLayoutEffect(() => {
+    if (!tooltipOpen) return
+    const updatePosition = (): void => {
+      const trigger = triggerRef.current
+      const tooltip = tooltipRef.current
+      if (!trigger || !tooltip) return
+      const triggerBounds = trigger.getBoundingClientRect()
+      const tooltipBounds = tooltip.getBoundingClientRect()
+      const edgePadding = 8
+      const gap = 7
+      const halfWidth = tooltipBounds.width / 2
+      const left = Math.min(window.innerWidth - edgePadding - halfWidth,
+        Math.max(edgePadding + halfWidth, triggerBounds.left + triggerBounds.width / 2))
+      const placement = triggerBounds.top >= tooltipBounds.height + gap + edgePadding ? 'top' : 'bottom'
+      setTooltipPosition({ left, top: placement === 'top' ? triggerBounds.top - gap : triggerBounds.bottom + gap, placement })
+    }
+    updatePosition()
+    window.addEventListener('resize', updatePosition)
+    window.addEventListener('scroll', updatePosition, true)
+    return () => {
+      window.removeEventListener('resize', updatePosition)
+      window.removeEventListener('scroll', updatePosition, true)
+    }
+  }, [tooltipOpen])
+  return <>
+    <AriaMenuTrigger isOpen={isOpen} onOpenChange={(open) => {
+      if (open) closeTooltip()
+      onOpenChange?.(open)
+    }}>
+    <AriaButton ref={triggerRef} className={className} aria-label={label} aria-describedby={tooltipOpen ? tooltipId : undefined}
+      isDisabled={disabled} onHoverStart={scheduleTooltip} onHoverEnd={closeTooltip}
+      onFocus={() => setTooltipOpen(!disabled)} onBlur={closeTooltip} onKeyDown={(event) => { if (event.key === 'Escape') closeTooltip() }}>
       <span aria-hidden="true">{icon}</span>
-    </AriaButton></Tooltip>
+    </AriaButton>
     <AriaPopover className="ui-popover ui-menu-popover" placement={placement} offset={4} shouldFlip>
       <AriaMenu className="ui-menu" items={items} onAction={(key) => {
         const item = items.find((candidate) => candidate.id === key)
@@ -150,6 +202,10 @@ export function DropdownMenu({ label, icon, items, className = 'icon-button', pl
       </AriaMenu>
     </AriaPopover>
   </AriaMenuTrigger>
+    {!disabled && tooltipOpen && createPortal(<div ref={tooltipRef} id={tooltipId} role="tooltip"
+      className="ui-tooltip dropdown-tooltip" data-placement={tooltipPosition.placement}
+      style={{ left: tooltipPosition.left, top: tooltipPosition.top }}>{label}</div>, document.body)}
+  </>
 }
 
 export function IconButton({ label, tooltipPlacement = 'top', className = 'icon-button', children, ...props }: {
@@ -171,33 +227,10 @@ export function Tooltip({ label, children, placement = 'top' }: {
 }): React.JSX.Element {
   const triggerDisabled = isValidElement<{ disabled?: boolean; isDisabled?: boolean }>(children)
     && Boolean(children.props.disabled || children.props.isDisabled)
-  const [isOpen, setIsOpen] = useState(false)
-  const openTimerRef = useRef<number | undefined>(undefined)
-  const handleOpenChange = (open: boolean): void => {
-    if (openTimerRef.current !== undefined) window.clearTimeout(openTimerRef.current)
-    openTimerRef.current = undefined
-    if (!open) {
-      setIsOpen(false)
-      return
-    }
-    openTimerRef.current = window.setTimeout(() => {
-      openTimerRef.current = undefined
-      setIsOpen(true)
-    }, 450)
-  }
-  useEffect(() => () => {
-    if (openTimerRef.current !== undefined) window.clearTimeout(openTimerRef.current)
-  }, [])
-  useEffect(() => {
-    if (!triggerDisabled) return
-    if (openTimerRef.current !== undefined) window.clearTimeout(openTimerRef.current)
-    openTimerRef.current = undefined
-    setIsOpen(false)
-  }, [triggerDisabled])
 
   if (triggerDisabled) return <>{children}</>
 
-  return <AriaTooltipTrigger delay={0} closeDelay={0} isOpen={isOpen} onOpenChange={handleOpenChange}>
+  return <AriaTooltipTrigger delay={450} closeDelay={0}>
     <Pressable>{children}</Pressable>
     <AriaTooltip className="ui-tooltip" placement={placement} offset={7}>{label}</AriaTooltip>
   </AriaTooltipTrigger>

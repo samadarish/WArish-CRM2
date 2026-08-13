@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { memo, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { format } from 'date-fns'
 import { Check, CheckCheck, Clock3, Copy, Download, EllipsisVertical, File, Forward, Heart, Images, List, ListTodo, MessageSquareText, NotebookPen, Package, Pencil, RefreshCw, Reply, Trash2, Vote, X } from 'lucide-react'
@@ -92,12 +92,12 @@ export const MessageBubble = memo(function MessageBubble({ message, groupPositio
           <Media message={message} url={media?.url} cacheToken={media?.token} downloading={downloading}
             onDownload={() => void download()} onCancel={() => void cancelDownload()} onResize={onResize} onError={onError}
             onBroken={() => { setMedia(undefined); onError(new Error('The cached media file is unavailable. Download it again.')) }} />
-          {message.text && !message.rich && <p className="message-text">{message.text}</p>}
+          {message.text && !message.rich && <p className="message-text">{linkifyMessageText(message.text)}</p>}
         </>}
         <div className="message-meta">{message.edited && <span>edited</span>}<time>{format(message.timestamp, 'HH:mm')}</time>{message.fromMe && <DeliveryIcon status={message.status} />}</div>
         {!readOnly && message.status === 'failed' && onRetry && <button className="message-failed" onClick={() => onRetry(message.id)}><RefreshCw />Retry</button>}
         {message.reactions.length > 0 && <div className="reaction-pill">{message.reactions.map((reaction) => reaction.emoji).join(' ')}</div>}
-        <div className="message-actions" data-focus-return-group>
+        <div className="message-actions" data-focus-return-group data-focus-restoring={moreOpen || undefined}>
           {!readOnly && <Tooltip label="Reply"><button aria-label="Reply" onClick={() => onReply(message)}><Reply /></button></Tooltip>}
           {!readOnly && <Tooltip label="React with heart"><button aria-label="React with heart" onClick={() => void react()}><Heart /></button></Tooltip>}
           {readOnly && message.text && <Tooltip label="Copy text"><button aria-label="Copy message text" onClick={() => void copy()}><Copy /></button></Tooltip>}
@@ -121,6 +121,38 @@ export const MessageBubble = memo(function MessageBubble({ message, groupPositio
     </article>
   )
 })
+
+const messageUrlPattern = /(?:https?:\/\/|www\.)[^\s<>"']+/gi
+
+function linkifyMessageText(text: string): ReactNode[] {
+  const content: ReactNode[] = []
+  let cursor = 0
+  for (const match of text.matchAll(messageUrlPattern)) {
+    const start = match.index
+    const matchedText = match[0]
+    if (start > cursor) content.push(text.slice(cursor, start))
+    const { url, suffix } = trimUrlSuffix(matchedText)
+    const href = url.toLowerCase().startsWith('www.') ? `https://${url}` : url
+    content.push(<a key={`${start}:${url}`} className="message-link" href={href} target="_blank" rel="noopener noreferrer">{url}</a>)
+    if (suffix) content.push(suffix)
+    cursor = start + matchedText.length
+  }
+  if (cursor < text.length) content.push(text.slice(cursor))
+  return content
+}
+
+function trimUrlSuffix(value: string): { url: string; suffix: string } {
+  let end = value.length
+  while (end > 0 && /[.,!?;:]/.test(value[end - 1]!)) end -= 1
+  for (const [opening, closing] of [['(', ')'], ['[', ']'], ['{', '}']] as const) {
+    while (value[end - 1] === closing && countCharacter(value.slice(0, end), closing) > countCharacter(value.slice(0, end), opening)) end -= 1
+  }
+  return { url: value.slice(0, end), suffix: value.slice(end) }
+}
+
+function countCharacter(value: string, character: string): number {
+  return [...value].filter((candidate) => candidate === character).length
+}
 
 function RichMessageCard({ message }: { message: MessageDto }): React.JSX.Element {
   const rich = message.rich!

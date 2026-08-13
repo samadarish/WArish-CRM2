@@ -310,7 +310,7 @@ function assertTrustedSender(sender: Electron.WebContents): void {
   if (sender !== mainWindow?.webContents) throw new Error('Untrusted IPC sender')
 }
 function isSafeExternalUrl(value: string): boolean {
-  try { return ['https:', 'mailto:'].includes(new URL(value).protocol) } catch { return false }
+  try { return ['http:', 'https:', 'mailto:'].includes(new URL(value).protocol) } catch { return false }
 }
 
 app.on('before-quit', () => { isQuitting = true; nativeTheme.removeListener('updated', updateTrayIcon); void core?.stop() })

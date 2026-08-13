@@ -80,7 +80,7 @@ interface BrowserStyledElement {
       matchMedia(query: string): { matches: boolean }
       warish: {
         chats: { update(chatId: string, patch: { pinned: boolean }): Promise<void> }
-        settings: { update(patch: { theme: string }): Promise<unknown> }
+        settings: { update(patch: { theme?: string; density?: string }): Promise<unknown> }
       }
     }
   }
@@ -331,6 +331,79 @@ async function clickAndObserveSidebarReveal(locator: ReturnType<Page['locator']>
   })
 }
 
+test('opens at the first unseen message and returns to a read chat at the newest message', async () => {
+  await seedAndRelaunch((database) => {
+    linkAccount(database)
+    const chat = database.prepare(`INSERT INTO chats(
+      id, account_id, title, kind, last_message, last_message_at, last_message_id, unread_count, archived, pinned, updated_at
+    ) VALUES (?, 'primary', ?, 'direct', ?, ?, ?, ?, 0, 0, ?)`)
+    const identity = database.prepare(`INSERT INTO contact_identities(
+      identity_id, phone_jid, phone_number, saved_name, whatsapp_name, avatar_failures, updated_at
+    ) VALUES (?, ?, ?, ?, ?, 0, ?)`)
+    const alias = database.prepare('INSERT INTO contact_identity_aliases(alias_id, identity_id, updated_at) VALUES (?, ?, ?)')
+    const message = database.prepare(`INSERT INTO messages(
+      id, account_id, chat_id, sender_id, sender_name, from_me, kind, text, timestamp, status, updated_at
+    ) VALUES (?, 'primary', ?, ?, ?, ?, 'text', ?, ?, 'read', ?)`)
+    const baseTime = Date.now() - 500_000
+    const targetChatId = fixtureChatId(201)
+    const controlChatId = fixtureChatId(202)
+    database.exec('BEGIN')
+    identity.run('unread-target-identity', targetChatId, '1888000201', 'Unread Target', 'Unread Target', baseTime)
+    identity.run('scroll-control-identity', controlChatId, '1888000202', 'Scroll Control', 'Scroll Control', baseTime)
+    alias.run(targetChatId, 'unread-target-identity', baseTime)
+    alias.run(controlChatId, 'scroll-control-identity', baseTime)
+    chat.run(targetChatId, 'Unread Target', 'Unread history 120', baseTime + 120, 'unread-message-120', 70, baseTime + 120)
+    chat.run(controlChatId, 'Scroll Control', 'Control message', baseTime + 1_000, 'control-message', 0, baseTime + 1_000)
+    for (let index = 1; index <= 120; index += 1) {
+      const sequence = String(index).padStart(3, '0')
+      const timestamp = baseTime + index
+      const fromMe = index % 4 === 0
+      message.run(`unread-message-${sequence}`, targetChatId, targetChatId, 'Unread Target', Number(fromMe),
+        index === 26 ? `Unread history ${sequence}\nA multiline message before the unread boundary verifies measured row heights.`
+          : `Unread history ${sequence}`, timestamp, timestamp)
+    }
+    message.run('control-message', controlChatId, controlChatId, 'Scroll Control', 0, 'Control message',
+      baseTime + 1_000, baseTime + 1_000)
+    database.exec('COMMIT')
+  })
+  await page.setViewportSize({ width: 1366, height: 768 })
+  await expect(page.locator('.conversation-identity > span > strong')).toHaveText('Scroll Control')
+  const chatList = page.locator('.chat-list')
+  const targetRow = chatList.getByRole('button', { name: /Unread Target/ })
+  const controlRow = chatList.getByRole('button', { name: /Scroll Control/ })
+
+  await targetRow.click()
+  await expect(page.locator('.conversation-identity > span > strong')).toHaveText('Unread Target')
+  await expect(page.locator('.message-history-skeleton')).toBeHidden()
+  const scroller = page.locator('.message-scroller')
+  const firstUnread = page.locator('[data-message-id="unread-message-027"]')
+  await expect(firstUnread).toBeVisible()
+  await expect.poll(() => messageViewportOffset(scroller, 'unread-message-027')).toBeGreaterThanOrEqual(12)
+  await expect.poll(() => messageViewportOffset(scroller, 'unread-message-027')).toBeLessThanOrEqual(64)
+
+  await controlRow.click()
+  await expect(page.locator('.conversation-identity > span > strong')).toHaveText('Scroll Control')
+  await targetRow.click()
+  await expect(page.locator('.conversation-identity > span > strong')).toHaveText('Unread Target')
+  await expect(page.locator('.message-history-skeleton')).toBeHidden()
+  await expect(page.locator('[data-message-id="unread-message-120"]')).toBeVisible()
+  await expect.poll(() => scroller.evaluate((element: unknown) => {
+    const target = element as BrowserScrollElement
+    return target.scrollHeight - target.scrollTop - target.clientHeight
+  })).toBeLessThanOrEqual(2)
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await controlRow.click()
+    await expect(page.locator('.conversation-identity > span > strong')).toHaveText('Scroll Control')
+    await targetRow.click()
+    await expect(page.locator('.conversation-identity > span > strong')).toHaveText('Unread Target')
+    await expect(page.locator('[data-message-id="unread-message-120"]')).toBeVisible()
+    await expect.poll(() => scroller.evaluate((element: unknown) => {
+      const target = element as BrowserScrollElement
+      return target.scrollHeight - target.scrollTop - target.clientHeight
+    })).toBeLessThanOrEqual(2)
+  }
+})
+
 test('keeps chat and message motion meaningful under rapid updates and reduced motion', async () => {
   test.setTimeout(90_000)
   await seedAndRelaunch((database) => {
@@ -390,10 +463,12 @@ test('keeps chat and message motion meaningful under rapid updates and reduced m
   const chatListMenuButton = page.getByRole('button', { name: 'Chat list menu' })
   await chatListMenuButton.focus()
   const chatListTooltip = page.locator('.ui-tooltip').filter({ hasText: 'Chat list menu' })
-  await expect(chatListTooltip).toBeVisible({ timeout: 1_500 })
+  await expect(chatListTooltip).toBeVisible({ timeout: 500 })
+  await expect(page.locator('.ui-tooltip')).toHaveCount(1)
   await expectInsideViewport(chatListTooltip)
   await page.mouse.move(800, 300)
   await chatListMenuButton.click()
+  await expect(page.locator('.ui-tooltip')).toHaveCount(0)
   await expect(page.getByRole('menu', { name: 'Chat list menu' })).toBeVisible()
   await expectInsideViewport(page.locator('.ui-menu-popover'))
   await page.mouse.click(800, 300)
@@ -422,6 +497,7 @@ test('keeps chat and message motion meaningful under rapid updates and reduced m
   const cachedSkeleton = await clickAndObserveMessageSkeleton(cachedRow)
   await expect(page.locator('.conversation-identity > span > strong')).toHaveText('Motion Chat 123')
   expect(cachedSkeleton.sawSkeleton).toBe(false)
+  await expect(page.locator('.message-scroller').getByText('Seed message 123', { exact: true })).toBeVisible()
   expect(cachedSkeleton.surfaceKey).toBe('chat')
   expect(cachedSkeleton.chatSurfaceName).toBe('chat-surface')
   expect(cachedSkeleton.workspaceSurfaceName).toBe('none')
@@ -465,6 +541,11 @@ test('keeps chat and message motion meaningful under rapid updates and reduced m
 
   const scroller = page.locator('.message-scroller')
   await expect(page.locator('.message-history-skeleton')).toBeHidden()
+  await expect(page.locator('[data-message-id="motion-message-140"]')).toBeVisible()
+  await expect.poll(() => scroller.evaluate((element: unknown) => {
+    const target = element as BrowserScrollElement
+    return target.scrollHeight - target.scrollTop - target.clientHeight
+  })).toBeLessThanOrEqual(2)
   await scroller.evaluate((element: unknown) => { (element as BrowserScrollElement).scrollTop = 0 })
   await expect(page.getByRole('button', { name: 'Load older messages' })).toBeVisible()
   await page.waitForTimeout(80)
@@ -511,12 +592,23 @@ test('keeps chat and message motion meaningful under rapid updates and reduced m
 
   await outgoingItem.locator('.message-bubble').hover()
   const messageMenuButton = outgoingItem.locator('button[aria-label="More message actions"]')
+  await messageMenuButton.hover()
+  const messageMenuTooltip = page.locator('.ui-tooltip').filter({ hasText: 'More message actions' })
+  await expect(messageMenuTooltip).toBeVisible({ timeout: 1_000 })
+  const messageMenuButtonBounds = await messageMenuButton.boundingBox()
+  if (!messageMenuButtonBounds) throw new Error('The message menu trigger has missing geometry')
   await messageMenuButton.click()
+  await expect(messageMenuTooltip).toHaveCount(0)
   const messageMenu = page.locator('.ui-menu-popover').filter({
     has: page.getByRole('menuitem', { name: 'Delete message' })
   })
   await expect(messageMenu).toBeVisible()
   await expectInsideViewport(messageMenu)
+  const messageMenuBounds = await messageMenu.boundingBox()
+  if (!messageMenuBounds) throw new Error('The message menu has missing geometry')
+  expect(Math.abs(messageMenuBounds.x + messageMenuBounds.width
+    - (messageMenuButtonBounds.x + messageMenuButtonBounds.width))).toBeLessThanOrEqual(3)
+  expect(messageMenuBounds.y + messageMenuBounds.height).toBeLessThanOrEqual(messageMenuButtonBounds.y)
   await page.getByRole('menuitem', { name: 'Delete message' }).click()
   const deleteDialog = page.getByRole('dialog', { name: 'Delete message' })
   await expect(deleteDialog).toBeVisible()
@@ -605,6 +697,54 @@ test('keeps chat and message motion meaningful under rapid updates and reduced m
   expect(staticSkeleton.sawSkeleton).toBe(true)
   expect(staticSkeleton.animationName).toBe('none')
   await expect(page.locator('.conversation-identity > span > strong')).toHaveText('Motion Chat 115')
+
+  await page.setViewportSize({ width: 900, height: 620 })
+  await page.getByRole('button', { name: 'Choose an emoji' }).click()
+  const emojiPicker = page.getByRole('dialog', { name: 'Choose an emoji' })
+  const tooltip = page.locator('.ui-tooltip')
+  await expect(emojiPicker).toBeVisible()
+  await expectInsideViewport(emojiPicker)
+  for (const label of ['Grinning face', 'Face with tears of joy', 'Smiling face']) {
+    await emojiPicker.getByRole('button', { name: label, exact: true }).hover()
+    await page.waitForTimeout(75)
+  }
+  await page.getByRole('textbox', { name: 'Message' }).hover()
+  await page.waitForTimeout(500)
+  await expect(tooltip).toHaveCount(0)
+
+  await emojiPicker.getByRole('button', { name: 'Grinning face', exact: true }).hover()
+  await expect(tooltip).toHaveText('Grinning face', { timeout: 1_000 })
+  await expect(tooltip).toHaveCount(1)
+  await expectInsideViewport(tooltip)
+  const smilingEmoji = emojiPicker.getByRole('button', { name: 'Smiling face', exact: true })
+  await smilingEmoji.hover()
+  await expect(tooltip).toHaveCount(1)
+  await expect(tooltip).toHaveText('Smiling face')
+  await expectInsideViewport(tooltip)
+
+  const tooltipVisualDirectory = resolve('test-results', 'visual', 'motion-tooltips')
+  const tooltipThemes = ['light', 'dark', 'black', 'salesforce-black'] as const
+  const tooltipDensities = ['comfortable', 'compact', 'dense', 'ultra-dense'] as const
+  mkdirSync(tooltipVisualDirectory, { recursive: true })
+  for (const theme of tooltipThemes) {
+    for (const density of tooltipDensities) {
+      await page.locator('html').evaluate((element: unknown, appearance: { theme: string; density: string }) =>
+        (element as BrowserStyledElement).ownerDocument.defaultView.warish.settings.update(appearance), { theme, density })
+      await expect.poll(() => page.locator('html').getAttribute('data-theme')).toBe(theme)
+      await expect.poll(() => page.locator('html').getAttribute('data-density-mode')).toBe(density)
+      await smilingEmoji.hover()
+      await expect(tooltip).toHaveCount(1)
+      await expect(tooltip).toHaveText('Smiling face')
+      await expectInsideViewport(emojiPicker)
+      await expectInsideViewport(tooltip)
+      await page.screenshot({
+        path: join(tooltipVisualDirectory, `emoji-${theme}-${density}-900x620.png`), animations: 'disabled'
+      })
+    }
+  }
+  await emojiPicker.getByRole('button', { name: 'Close emoji picker' }).click()
+  await expect(emojiPicker).toBeHidden()
+  await expect(tooltip).toHaveCount(0)
 })
 
 test('keeps virtual CRM records reachable and portaled choices inside every viewport', async () => {
