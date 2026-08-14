@@ -8,6 +8,7 @@ import {
   Pin, PinOff, Radio, RefreshCw, Search, Send, Settings, ShoppingBag, Smile, Square, WifiOff, X
 } from 'lucide-react'
 import type { AppSettings, ChatCategory, ChatCrmStageFilter, ChatSummary, CommunitySummary, CrmChatIndicatorDto, CrmContactDetailsDto, CrmTaskDto, DraftDto, MessageDto, Page, PickedAttachment, SessionState } from '../../../shared/contracts'
+import { clipboardImageFiles } from '../clipboard-image'
 import { useUiStore } from '../store'
 import { shouldSubmitComposer } from '../composer-keyboard'
 import { contactIdentityPresentation, type ContactIdentityPresentation } from '../contact-identity'
@@ -565,6 +566,7 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
   const [restrictedSendOpen, setRestrictedSendOpen] = useState(false)
   const [attachment, setAttachment] = useState<PickedAttachment>()
   const [attachmentKind, setAttachmentKind] = useState<'image' | 'video' | 'document' | 'audio' | 'voice' | 'sticker'>()
+  const [isStagingImage, setIsStagingImage] = useState(false)
   const showPersistentDetails = useMediaQuery('(min-width: 1180px)')
   const showContactDetails = contactDrawerOpen || (chat.kind === 'direct' && showPersistentDetails)
   const emojiToolRef = useRef<HTMLDivElement>(null)
@@ -583,6 +585,7 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
   const scrollStateFrameRef = useRef<number | undefined>(undefined)
   const rowResizeFrameRef = useRef<number | undefined>(undefined)
   const messageEnterTimersRef = useRef<Map<string, number>>(new Map())
+  const clipboardImageRequestRef = useRef(0)
   const activeRef = useRef(true)
   const draftReadyRef = useRef(false)
   const pushNotice = useUiStore((state) => state.pushNotice)
@@ -850,12 +853,12 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
     onSettled: () => { pendingOwnSendRef.current = false }
   })
   const sendMessage = (restrictedContactAcknowledged = false): void => {
-    if (chat.readOnly || sendMutation.isPending || session.phase !== 'connected' || (!text.trim() && !attachment)) return
+    if (chat.readOnly || sendMutation.isPending || isStagingImage || session.phase !== 'connected' || (!text.trim() && !attachment)) return
     sendMutation.mutate({ chatId: chat.id, clientId: crypto.randomUUID(), text: text.trim() || undefined,
       attachmentToken: attachment?.token, attachmentKind, quotedMessageId: replyTo?.id, restrictedContactAcknowledged })
   }
   const submitMessage = (): void => {
-    if (chat.readOnly || sendMutation.isPending || session.phase !== 'connected' || (!text.trim() && !attachment)) return
+    if (chat.readOnly || sendMutation.isPending || isStagingImage || session.phase !== 'connected' || (!text.trim() && !attachment)) return
     if (chat.crm?.restricted) {
       setEmojiOpen(false)
       setRestrictedSendOpen(true)
@@ -1082,6 +1085,13 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
     }
   }), [messageQuery.isPending])
 
+  const replaceAttachment = (picked: PickedAttachment, kind: NonNullable<DraftDto['attachmentKind']>): void => {
+    setAttachment((current) => {
+      if (current && current.token !== picked.token) void window.warish.media.discardDraft(current.token)
+      return picked
+    })
+    setAttachmentKind(kind)
+  }
   const chooseAttachment = async (): Promise<void> => {
     try {
       const picked = await window.warish.media.pick()
@@ -1090,10 +1100,40 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
         await window.warish.media.discardDraft(picked.token)
         return
       }
-      if (attachment && attachment.token !== picked.token) void window.warish.media.discardDraft(attachment.token)
-      setAttachment(picked)
-      setAttachmentKind(inferAttachmentKind(picked))
+      replaceAttachment(picked, inferAttachmentKind(picked))
     } catch (error) { pushNotice(errorMessage(error)) }
+  }
+  const pasteClipboardImage = (event: React.ClipboardEvent<HTMLTextAreaElement>): void => {
+    const images = clipboardImageFiles(event.clipboardData)
+    if (!images.length) return
+    event.preventDefault()
+    if (isRecording) {
+      pushNotice('Finish or cancel the voice recording before adding an image.')
+      return
+    }
+    if (images.length > 1) {
+      pushNotice('Paste one image at a time.')
+      return
+    }
+
+    const image = images[0]!
+    const requestId = ++clipboardImageRequestRef.current
+    setIsStagingImage(true)
+    void (async () => {
+      let picked: PickedAttachment | undefined
+      try {
+        picked = await window.warish.media.saveClipboardImage(new Uint8Array(await image.arrayBuffer()), image.type)
+        if (!activeRef.current || requestId !== clipboardImageRequestRef.current) {
+          await window.warish.media.discardDraft(picked.token)
+          return
+        }
+        replaceAttachment(picked, 'image')
+      } catch (error) {
+        if (activeRef.current && requestId === clipboardImageRequestRef.current) pushNotice(errorMessage(error))
+      } finally {
+        if (activeRef.current && requestId === clipboardImageRequestRef.current) setIsStagingImage(false)
+      }
+    })()
   }
   const stopRecording = (cancel: boolean): void => {
     if (recorder.current?.state !== 'recording') return
@@ -1131,9 +1171,7 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
             if (!blob.size) throw new Error('The recording was empty')
             const picked = await window.warish.media.saveRecording(new Uint8Array(await blob.arrayBuffer()), mimeType)
             if (!activeRef.current) { await window.warish.media.discardDraft(picked.token); return }
-            if (attachment) void window.warish.media.discardDraft(attachment.token)
-            setAttachment(picked)
-            setAttachmentKind('voice')
+            replaceAttachment(picked, 'voice')
           } catch (error) { pushNotice(errorMessage(error)) }
         })()
       }
@@ -1286,9 +1324,14 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
         sendMessage(true)
       }} />}</MotionPresence>
     {newMessageCount > 0 && <button className="new-messages-button" onClick={() => scrollToNewest()}><ArrowDown />{newMessageCount} new {newMessageCount === 1 ? 'message' : 'messages'}</button>}
-    {!chat.readOnly && (replyTo || attachment) && <div className="composer-context">
-      <div>{replyTo && <><strong>Replying to {replyTo.senderName ?? (replyTo.fromMe ? 'yourself' : chat.title)}</strong><span>{replyTo.text ?? replyTo.kind}</span></>}{attachment && <><strong>{attachmentKind === 'voice' ? 'Voice message' : attachment.name}</strong><span>{formatBytes(attachment.size)}</span></>}</div>
+    {!chat.readOnly && (replyTo || attachment || isStagingImage) && <div className="composer-context">
+      {attachment && attachmentKind === 'image' && <img className="composer-attachment-preview" src={attachment.previewUrl} alt={`${attachment.name} preview`} />}
+      <div>{replyTo && <><strong>Replying to {replyTo.senderName ?? (replyTo.fromMe ? 'yourself' : chat.title)}</strong><span>{replyTo.text ?? replyTo.kind}</span></>}
+        {attachment ? <><strong>{attachmentKind === 'voice' ? 'Voice message' : attachment.name}</strong><span>{isStagingImage ? 'Preparing replacement image…' : formatBytes(attachment.size)}</span></>
+          : isStagingImage && <><strong>Preparing pasted image…</strong><span>Please wait</span></>}</div>
       <IconButton className="" label="Clear reply or attachment" onClick={() => {
+        clipboardImageRequestRef.current += 1
+        setIsStagingImage(false)
         setReplyTo(undefined)
         if (attachment) void window.warish.media.discardDraft(attachment.token)
         setAttachment(undefined)
@@ -1297,22 +1340,23 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
     </div>}
     {chat.readOnly ? <footer className="read-only-composer"><Radio /><span>Channels are read-only in WArish</span></footer> : <footer className="composer">
       <div className="composer-tool" ref={emojiToolRef}><Tooltip label="Emoji"><button className={`icon-button ${emojiOpen ? 'active' : ''}`}
-        aria-label="Choose an emoji" aria-haspopup="dialog" aria-expanded={emojiOpen} disabled={isRecording}
+        aria-label="Choose an emoji" aria-haspopup="dialog" aria-expanded={emojiOpen} disabled={isRecording || isStagingImage}
         onClick={() => setEmojiOpen((open) => !open)}><Smile /></button></Tooltip>
         <MotionPresence show={emojiOpen}>{emojiOpen && <EmojiPicker onSelect={insertEmoji} onClose={() => setEmojiOpen(false)} />}</MotionPresence></div>
-      <Tooltip label="Attach a file"><button className="icon-button" aria-label="Attach a file" disabled={isRecording}
+      <Tooltip label="Attach a file"><button className="icon-button" aria-label="Attach a file" disabled={isRecording || isStagingImage}
         onClick={() => void chooseAttachment()}><Paperclip /></button></Tooltip>
       <textarea ref={composerRef} value={text} rows={1} aria-label="Message" placeholder={isRecording ? `Recording… ${formatDuration(recordingSeconds)}` : session.phase === 'connected' ? 'Type a message' : 'Type a draft — reconnect to send'} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => {
         if (shouldSubmitComposer(event, enterToSend)) { event.preventDefault(); submitMessage() }
-      }} />
+      }} onPaste={pasteClipboardImage} />
       {isRecording ? <><Tooltip label="Cancel recording"><button className="icon-button recording" aria-label="Cancel recording"
         onClick={() => stopRecording(true)}><X /></button></Tooltip>
         <Tooltip label="Finish recording"><button className="send-button" aria-label="Finish recording"
           onClick={() => stopRecording(false)}><Square /></button></Tooltip></>
+        : isStagingImage ? <Tooltip label="Preparing pasted image"><button className="send-button" aria-label="Preparing pasted image" disabled><LoaderCircle className="spin" /></button></Tooltip>
         : !text.trim() && !attachment ? <Tooltip label="Voice message"><button className="icon-button" aria-label="Record a voice message"
           onClick={() => void toggleRecording()}><Mic /></button></Tooltip>
           : <Tooltip label={session.phase === 'connected' ? 'Send' : 'Reconnect to send'}><button className="send-button" aria-label="Send message"
-            disabled={sendMutation.isPending || session.phase !== 'connected'} onClick={submitMessage}>{sendMutation.isPending ? <LoaderCircle className="spin" /> : <Send />}</button></Tooltip>}
+            disabled={sendMutation.isPending || isStagingImage || session.phase !== 'connected'} onClick={submitMessage}>{sendMutation.isPending ? <LoaderCircle className="spin" /> : <Send />}</button></Tooltip>}
     </footer>}
   </>
 }

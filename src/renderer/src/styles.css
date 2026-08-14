@@ -443,6 +443,7 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .message-search-result p { margin: 5px 0 0; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
 
 .composer-context { display: flex; grid-column: 1; grid-row: 4; align-items: center; gap: 9px; padding: 6px 12px; border-top: 1px solid var(--border); background: var(--panel-soft); }
+.composer-attachment-preview { width: 48px; height: 48px; flex: 0 0 auto; border: 1px solid var(--border); border-radius: 5px; object-fit: cover; background: var(--panel); }
 .composer-context > div { min-width: 0; flex: 1; padding: 5px 9px; border-left: 3px solid var(--accent); border-radius: 5px; background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
 .composer-context strong, .composer-context span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer-context span { margin-top: 2px; color: var(--muted); font-size: 12px; }
@@ -793,6 +794,7 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 :root[data-density='compact'] .crm-contact-panel.in-conversation { top: calc(var(--conversation-header-height) + var(--active-sales-lifecycle-height)); }
 :root[data-density='compact'] .message-search-result { padding: 9px 13px; }
 :root[data-density='compact'] .composer-context { gap: 8px; padding: 5px 10px; }
+:root[data-density='compact'] .composer-attachment-preview { width: 42px; height: 42px; }
 :root[data-density='compact'] .composer-context > div { padding: 4px 9px; }
 :root[data-density='compact'] .composer { min-height: 52px; gap: 3px; padding: 6px 10px; }
 :root[data-density='compact'] .read-only-composer { min-height: 52px; padding: 7px 10px; }
@@ -1231,6 +1233,7 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 :root[data-density='dense'] .contact-detail { gap: 9px; padding: 8px 13px; }
 :root[data-density='dense'] .contact-detail > span { width: 27px; height: 27px; }
 :root[data-density='dense'] .composer-context { gap: 6px; padding: 4px 8px; }
+:root[data-density='dense'] .composer-attachment-preview { width: 36px; height: 36px; }
 :root[data-density='dense'] .composer-context > div { padding: 3px 7px; }
 :root[data-density='dense'] .composer { min-height: 46px; gap: 2px; padding: 5px 8px; }
 :root[data-density='dense'] .read-only-composer { min-height: 46px; padding: 6px 8px; }
@@ -1387,6 +1390,7 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 :root[data-density-mode='ultra-dense'] .quoted-message { margin-bottom: 2px; padding: 3px 5px; }
 :root[data-density-mode='ultra-dense'] .message-meta { min-height: 12px; margin-left: 27px; }
 :root[data-density-mode='ultra-dense'] .composer-context { gap: 5px; padding: 3px 6px; }
+:root[data-density-mode='ultra-dense'] .composer-attachment-preview { width: 32px; height: 32px; }
 :root[data-density-mode='ultra-dense'] .composer { min-height: 40px; padding: 4px 6px; }
 :root[data-density-mode='ultra-dense'] .read-only-composer { min-height: 40px; padding: 4px 6px; }
 :root[data-density-mode='ultra-dense'] .composer textarea { min-height: 30px; padding: 5px 9px; }

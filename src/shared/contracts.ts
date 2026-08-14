@@ -662,6 +662,7 @@ export interface WarishApi {
   }
   media: {
     pick(): Promise<PickedAttachment | null>
+    saveClipboardImage(data: Uint8Array, mimeType: string): Promise<PickedAttachment>
     saveRecording(data: Uint8Array, mimeType: string): Promise<PickedAttachment>
     thumbnail(messageId: string): Promise<{ thumbnailDataUrl?: string }>
     download(messageId: string): Promise<{ cacheToken: string; url: string }>

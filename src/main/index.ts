@@ -15,6 +15,7 @@ import {
   rpcInvocationSchema, type AppSettings, type ChatSummary, type CoreEventEnvelope,
   type MessageDto, type PickedAttachment, type SessionState
 } from '../shared/contracts'
+import { saveClipboardImageDraft } from './clipboard-image'
 import { CoreBridge } from './core-bridge'
 import { loadOrCreateMasterKey } from './security'
 
@@ -136,6 +137,10 @@ function registerIpc(userDataPath: string): void {
     return result
   })
   ipcMain.handle('warish:pick-attachment', (event) => { assertTrustedSender(event.sender); return pickAttachment(userDataPath) })
+  ipcMain.handle('warish:save-clipboard-image', (event, data: unknown, mimeType: unknown) => {
+    assertTrustedSender(event.sender)
+    return saveClipboardImageDraft(userDataPath, data, mimeType)
+  })
   ipcMain.handle('warish:save-recording', (event, data: unknown, mimeType: unknown) => {
     assertTrustedSender(event.sender)
     return saveRecording(userDataPath, data, mimeType)

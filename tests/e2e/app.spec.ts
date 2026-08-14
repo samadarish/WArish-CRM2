@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -18,6 +18,20 @@ interface BrowserBoxElement {
 
 interface BrowserAnimatedElement {
   getAnimations(): Array<{ playState: string }>
+}
+
+interface BrowserClipboardElement {
+  ownerDocument: { defaultView: {
+    atob(value: string): string
+    DataTransfer: new () => { items: { add(file: unknown): void } }
+    File: new (parts: unknown[], name: string, options: { type: string }) => unknown
+    ClipboardEvent: new (type: string, options: {
+      bubbles: boolean
+      cancelable: boolean
+      clipboardData: unknown
+    }) => unknown
+  } }
+  dispatchEvent(event: unknown): boolean
 }
 
 interface BrowserScrollElement {
@@ -591,4 +605,76 @@ test('keeps grouped replies and remote/downloaded media visually stable', async 
   const quote = page.locator('.quoted-message')
   await expect(quote).toContainText('First grouped message with a deliberately long quoted preview')
   await expect(quote.locator('span')).toHaveCSS('white-space', 'nowrap')
+})
+
+test('stages a pasted image as a persistent composer draft', async () => {
+  await application.close()
+  const chatId = '15550008888@s.whatsapp.net'
+  const database = new DatabaseSync(join(userDataPath, 'warish.sqlite'))
+  database.prepare("UPDATE accounts SET linked_at=? WHERE id='primary'").run(Date.now())
+  database.exec(`
+    INSERT INTO contact_identities(identity_id, phone_jid, phone_number, saved_name, whatsapp_name, avatar_failures, updated_at)
+      VALUES ('clipboard-contact', '${chatId}', '15550008888', 'Clipboard Paste', 'Clipboard Profile', 0, 1);
+    INSERT INTO contact_identity_aliases(alias_id, identity_id, updated_at)
+      VALUES ('${chatId}', 'clipboard-contact', 1);
+    INSERT INTO chats(id, account_id, title, kind, last_message, last_message_at, last_message_id, unread_count, archived, pinned, updated_at)
+      VALUES ('${chatId}', 'primary', 'Clipboard Paste', 'direct', 'Ready for an image', 1784390800000, 'clipboard-seed', 0, 0, 0, 1784390800000);
+    INSERT INTO messages(id, account_id, chat_id, sender_id, sender_name, from_me, kind, text, timestamp, status, updated_at)
+      VALUES ('clipboard-seed', 'primary', '${chatId}', '${chatId}', 'Clipboard Paste', 0, 'text', 'Ready for an image', 1784390800000, 'read', 1);
+  `)
+  database.close()
+
+  application = await electron.launch({
+    args: [resolve('.'), `--user-data-dir=${userDataPath}`],
+    env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' }
+  })
+  page = await application.firstWindow()
+  await page.locator('.chat-list').getByRole('button', { name: /Clipboard Paste/ }).click()
+  const composer = page.getByRole('textbox', { name: 'Message' })
+  await composer.fill('Image caption')
+  await composer.evaluate((element, encodedPng) => {
+    const target = element as unknown as BrowserClipboardElement
+    const browser = target.ownerDocument.defaultView
+    const binary = browser.atob(encodedPng)
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
+    const transfer = new browser.DataTransfer()
+    transfer.items.add(new browser.File([bytes], 'clipboard.png', { type: 'image/png' }))
+    target.dispatchEvent(new browser.ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: transfer }))
+  }, 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=')
+
+  await expect(page.getByRole('img', { name: 'Pasted image.png preview' })).toBeVisible()
+  await expect(composer).toHaveValue('Image caption')
+  await expect(page.getByText('Pasted image.png')).toBeVisible()
+
+  let draftToken = ''
+  await expect.poll(() => {
+    const draftDatabase = new DatabaseSync(join(userDataPath, 'warish.sqlite'))
+    const row = draftDatabase.prepare('SELECT text, attachment_token FROM drafts WHERE chat_id=?').get(chatId) as
+      { text: string; attachment_token: string | null } | undefined
+    draftDatabase.close()
+    draftToken = row?.attachment_token ?? ''
+    return row
+  }).toMatchObject({ text: 'Image caption', attachment_token: expect.stringMatching(/\.png$/) })
+  expect(existsSync(join(userDataPath, 'drafts', draftToken))).toBe(true)
+
+  await application.close()
+  application = await electron.launch({
+    args: [resolve('.'), `--user-data-dir=${userDataPath}`],
+    env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' }
+  })
+  page = await application.firstWindow()
+  await page.locator('.chat-list').getByRole('button', { name: /Clipboard Paste/ }).click()
+  await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('Image caption')
+  await expect(page.getByRole('img', { name: 'Pasted image.png preview' })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Clear reply or attachment' }).click()
+  await expect(page.getByRole('img', { name: 'Pasted image.png preview' })).toHaveCount(0)
+  await expect.poll(() => existsSync(join(userDataPath, 'drafts', draftToken))).toBe(false)
+  await expect.poll(() => {
+    const draftDatabase = new DatabaseSync(join(userDataPath, 'warish.sqlite'))
+    const row = draftDatabase.prepare('SELECT text, attachment_token FROM drafts WHERE chat_id=?').get(chatId) as
+      { text: string; attachment_token: string | null } | undefined
+    draftDatabase.close()
+    return row
+  }).toEqual({ text: 'Image caption', attachment_token: null })
 })
