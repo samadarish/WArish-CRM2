@@ -7,6 +7,7 @@ import {
   type AppSettings,
   type AttachmentDto,
   type ChatCategory,
+  type ChatCrmStageFilter,
   type ChatSummary,
   type CommunitySummary,
   type ContactDetails,
@@ -458,24 +459,27 @@ export class WarishDatabase {
     })
   }
 
-  listChats(input: { cursor?: string; limit?: number; archived?: boolean; query?: string; category?: ChatCategory }): Page<ChatSummary> {
+  listChats(input: { cursor?: string; limit?: number; archived?: boolean; query?: string; category?: ChatCategory;
+    crmStage?: ChatCrmStageFilter }): Page<ChatSummary> {
     const limit = Math.min(Math.max(input.limit ?? 50, 1), 100)
     const cursor = decodeChatCursor(input.cursor)
     const query = `%${(input.query ?? '').trim()}%`
     const category = input.category ?? 'all'
+    const crmStage = input.crmStage ?? 'all'
     const rows = this.db.prepare(
       `SELECT * FROM (SELECT ${SQL_RESOLVED_CHAT_COLUMNS} ${SQL_RESOLVED_CHAT_FROM}) resolved WHERE archived=?
        AND (kind='channel' OR last_message_id IS NOT NULL OR EXISTS (SELECT 1 FROM drafts d WHERE d.chat_id=resolved.id)
          OR EXISTS (SELECT 1 FROM outbox o WHERE o.chat_id=resolved.id AND o.state IN ('queued', 'sending', 'failed')))
        AND (?='all' OR (?='direct' AND kind='direct') OR (?='group' AND kind='group' AND community_id IS NULL)
          OR (?='community' AND (kind='community' OR community_id IS NOT NULL)) OR (?='channel' AND kind='channel'))
+       AND (?='all' OR crm_stage_key=?)
        AND (pinned < ? OR (pinned = ? AND
          (COALESCE(last_message_at, 0) < ? OR (COALESCE(last_message_at, 0) = ? AND id < ?))))
        AND (? = '%%' OR title LIKE ? COLLATE NOCASE OR crm_name LIKE ? COLLATE NOCASE OR contact_saved_name LIKE ? COLLATE NOCASE OR
          contact_whatsapp_name LIKE ? COLLATE NOCASE OR
          contact_phone_number LIKE ? COLLATE NOCASE)
        ORDER BY pinned DESC, COALESCE(last_message_at, 0) DESC, id DESC LIMIT ?`
-    ).all(Number(input.archived ?? false), category, category, category, category, category,
+    ).all(Number(input.archived ?? false), category, category, category, category, category, crmStage, crmStage,
       cursor.pinned, cursor.pinned, cursor.timestamp, cursor.timestamp, cursor.id,
       query, query, query, query, query, query, limit + 1) as Record<string, unknown>[]
     const hasMore = rows.length > limit

@@ -7,7 +7,7 @@ import {
   CalendarClock, CircleAlert, Link2, ListTodo, LoaderCircle, Menu, MessageCircle, Mic, NotebookPen, Paperclip,
   Pin, PinOff, Radio, RefreshCw, Search, Send, Settings, ShoppingBag, Smile, Square, WifiOff, X
 } from 'lucide-react'
-import type { AppSettings, ChatCategory, ChatSummary, CommunitySummary, CrmChatIndicatorDto, CrmContactDetailsDto, CrmTaskDto, DraftDto, MessageDto, Page, PickedAttachment, SessionState } from '../../../shared/contracts'
+import type { AppSettings, ChatCategory, ChatCrmStageFilter, ChatSummary, CommunitySummary, CrmChatIndicatorDto, CrmContactDetailsDto, CrmTaskDto, DraftDto, MessageDto, Page, PickedAttachment, SessionState } from '../../../shared/contracts'
 import { useUiStore } from '../store'
 import { shouldSubmitComposer } from '../composer-keyboard'
 import { contactIdentityPresentation, type ContactIdentityPresentation } from '../contact-identity'
@@ -66,6 +66,8 @@ function ConversationShell({ session }: { session: SessionState }): React.JSX.El
   const destination = useUiStore((state) => state.destination)
   const selectChat = useUiStore((state) => state.selectChat)
   const navigate = useUiStore((state) => state.navigate)
+  const chatStageFilter = useUiStore((state) => state.chatStageFilter)
+  const setChatStageFilter = useUiStore((state) => state.setChatStageFilter)
   const setSettingsOpen = useUiStore((state) => state.setSettingsOpen)
   const pushNotice = useUiStore((state) => state.pushNotice)
   const showArchived = destination === 'archived'
@@ -80,6 +82,17 @@ function ConversationShell({ session }: { session: SessionState }): React.JSX.El
   const showChatPreviews = settingsQuery.data?.showChatPreviews ?? true
   const enterToSend = settingsQuery.data?.enterToSend ?? true
   const density = settingsQuery.data?.density ?? 'dense'
+  const stagesQuery = useQuery({ queryKey: ['crm', 'pipeline'], queryFn: () => window.warish.crm.pipeline(),
+    staleTime: 5 * 60_000, enabled: destination === 'direct' })
+  const stageFilterOptions = useMemo(() => {
+    const stages = new Map(stagesQuery.data?.map((stage) => [stage.key, stage]) ?? [])
+    return [
+      { value: 'all', label: 'All', color: 'var(--muted)' },
+      { value: 'new', label: stages.get('new')?.name ?? 'New enquiry', color: stages.get('new')?.color ?? '#F59E0B' },
+      { value: 'won', label: stages.get('won')?.name ?? 'Won', color: stages.get('won')?.color ?? '#84CC16' },
+      { value: 'lost', label: stages.get('lost')?.name ?? 'Lost', color: stages.get('lost')?.color ?? '#EF4444' }
+    ]
+  }, [stagesQuery.data])
   const reconnectMutation = useMutation({
     mutationFn: () => window.warish.session.reconnect(),
     onSuccess: (state) => queryClient.setQueryData(['session'], state),
@@ -87,9 +100,9 @@ function ConversationShell({ session }: { session: SessionState }): React.JSX.El
   })
   useEffect(() => { if (session.accountState === 'linked') setRelinkOpen(false) }, [session.accountState])
   const chatsQuery = useInfiniteQuery({
-    queryKey: ['chats', showArchived, category, debouncedChatQuery],
+    queryKey: ['chats', showArchived, category, debouncedChatQuery, destination === 'direct' ? chatStageFilter : 'all'],
     queryFn: ({ pageParam }) => window.warish.chats.list({ cursor: pageParam, limit: 50, archived: showArchived,
-      category, query: debouncedChatQuery }),
+      category, query: debouncedChatQuery, crmStage: destination === 'direct' ? chatStageFilter : 'all' }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (page) => page.nextCursor,
     enabled: destination !== 'community'
@@ -130,14 +143,6 @@ function ConversationShell({ session }: { session: SessionState }): React.JSX.El
     initialData: listedSelectedChat
   })
   const selectedChat = selectedChatQuery.data ?? listedSelectedChat
-  useEffect(() => {
-    if (selectedChatId) return
-    const first = destination === 'community' ? communities[0]?.children[0] : chats[0]
-    if (first) {
-      conversationEntryRef.current = { chatId: first.id, unreadCount: first.unreadCount }
-      selectChat(first.id)
-    }
-  }, [chats, communities, destination, selectChat, selectedChatId])
   const listHasNextPage = destination === 'community' ? communitiesQuery.hasNextPage : chatsQuery.hasNextPage
   const listIsFetchingNextPage = destination === 'community' ? communitiesQuery.isFetchingNextPage : chatsQuery.isFetchingNextPage
   const sidebarVirtualizer = useVirtualizer({
@@ -222,6 +227,14 @@ function ConversationShell({ session }: { session: SessionState }): React.JSX.El
       }) }))
     }) : current)
   }, [pushNotice, queryClient])
+  useEffect(() => {
+    if (selectedChatId) return
+    const first = destination === 'community' ? communities[0]?.children[0] : chats[0]
+    if (!first) return
+    conversationEntryRef.current = { chatId: first.id, unreadCount: first.unreadCount }
+    selectChat(first.id)
+    markRead(first.id)
+  }, [chats, communities, destination, markRead, selectChat, selectedChatId])
   const selectChatRow = useCallback((chat: ChatSummary): void => {
     setPendingSelectedChatId(chat.id)
     conversationEntryRef.current = { chatId: chat.id, unreadCount: chat.unreadCount }
@@ -272,7 +285,7 @@ function ConversationShell({ session }: { session: SessionState }): React.JSX.El
   const clearSelectedChat = useCallback((): void => selectChat(), [selectChat])
   useEffect(() => {
     if (chatListRef.current) chatListRef.current.scrollTop = 0
-  }, [destination])
+  }, [chatStageFilter, destination])
   const sidebarPending = destination === 'community' ? communitiesQuery.isPending : chatsQuery.isPending
   const sidebarError = destination === 'community' ? communitiesQuery.isError : chatsQuery.isError
   const sidebarRevealKey = destination
@@ -313,7 +326,10 @@ function ConversationShell({ session }: { session: SessionState }): React.JSX.El
     <div className="chat-shell">
       <NavigationRail current={destination} onNavigate={changeDestination} />
       <aside className={`chat-list-panel ${showChatPreviews ? '' : 'chat-previews-hidden'}`}>
-        <header className="panel-header"><h1>{destinationLabel(destination)}</h1><DropdownMenu label="Chat list menu" icon={<Menu />}
+        <header className="panel-header"><h1>{destinationLabel(destination)}</h1>{destination === 'direct' &&
+          <SelectField className="chat-stage-filter" density="compact" label="Filter chats by stage" hideLabel
+            value={chatStageFilter} onChange={(value) => setChatStageFilter(value as ChatCrmStageFilter)}
+            options={stageFilterOptions} />}<DropdownMenu label="Chat list menu" icon={<Menu />}
           isOpen={sidebarMenuOpen} onOpenChange={setSidebarMenuOpen} items={[
             { id: 'archive', label: showArchived ? 'All conversations' : 'Archived',
               icon: showArchived ? <MessageCircle /> : <Archive />, onAction: () => changeDestination(showArchived ? 'all' : 'archived') },
@@ -323,7 +339,8 @@ function ConversationShell({ session }: { session: SessionState }): React.JSX.El
         <label className="search-box"><Search /><input value={chatQuery} onChange={(event) => setChatQuery(event.target.value)} placeholder={`Search ${destinationLabel(destination).toLowerCase()}`} />{chatQuery && <IconButton className="" label="Clear chat search" onClick={() => setChatQuery('')}><X /></IconButton>}</label>
         <div className="chat-list" ref={chatListRef}>
           {sidebarPending && <SkeletonRows />}
-          {!sidebarPending && !sidebarError && sidebarItems.length === 0 && <EmptyChatList destination={destination} />}
+          {!sidebarPending && !sidebarError && sidebarItems.length === 0 && <EmptyChatList destination={destination}
+            stageFilter={destination === 'direct' ? chatStageFilter : 'all'} />}
           {sidebarError && <QueryError label={destination === 'community' ? 'Could not load communities' : 'Could not load conversations'}
             onRetry={() => void (destination === 'community' ? communitiesQuery.refetch() : chatsQuery.refetch())} />}
           {!sidebarPending && !sidebarError && <div className="virtual-chat-list" style={{ height: sidebarVirtualizer.getTotalSize() }}>
@@ -420,13 +437,16 @@ type SidebarItem =
   | { type: 'community'; community: CommunitySummary }
   | { type: 'chat'; chat: ChatSummary; nested?: boolean }
 
-function EmptyChatList({ destination }: { destination: SidebarDestination }): React.JSX.Element {
+function EmptyChatList({ destination, stageFilter = 'all' }: { destination: SidebarDestination; stageFilter?: ChatCrmStageFilter }): React.JSX.Element {
   const archived = destination === 'archived'
-  const label = archived ? 'No archived conversations' : destination === 'community' ? 'No communities found'
+  const stageLabel = stageFilter === 'new' ? 'New enquiry' : stageFilter === 'won' ? 'Won' : stageFilter === 'lost' ? 'Lost' : undefined
+  const label = stageLabel ? `No ${stageLabel.toLowerCase()} chats found`
+    : archived ? 'No archived conversations' : destination === 'community' ? 'No communities found'
     : destination === 'channel' ? 'No channels found' : destination === 'group' ? 'No groups found'
       : destination === 'direct' ? 'No direct chats found' : 'No conversations yet'
   return <div className="empty-list">{archived ? <Archive /> : <MessageCircle />}<p>{label}</p>
-    <span>{archived ? 'Archived conversations will appear here.' : 'Items will appear as WhatsApp history and metadata arrive.'}</span></div>
+    <span>{stageLabel ? `Chats marked ${stageLabel} will appear here.`
+      : archived ? 'Archived conversations will appear here.' : 'Items will appear as WhatsApp history and metadata arrive.'}</span></div>
 }
 
 const CommunityParentRow = memo(function CommunityParentRow({ community, expanded, onToggle }: {
@@ -556,7 +576,6 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
   const pendingOwnSendRef = useRef(false)
   const initialScrollPendingRef = useRef(true)
   const initialScrollStableFramesRef = useRef(0)
-  const initialScrollAttemptsRef = useRef(0)
   const previousMessagesRef = useRef<MessageDto[]>([])
   const anchorRef = useRef<{ id: string; viewportOffset: number } | undefined>(undefined)
   const pendingHistoryAnchorRef = useRef<{ id: string; viewportOffset: number } | undefined>(undefined)
@@ -642,6 +661,9 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
     const incoming = messages.filter((message) => !message.fromMe)
     return incoming.length >= initialUnreadCount ? incoming.at(-initialUnreadCount)?.id : undefined
   }, [initialUnreadCount, messages, unreadBoundaryPending])
+  const initialScrollTargetMessageId = unreadBoundaryPending
+    ? undefined
+    : initialUnreadMessageId ?? messages.at(-1)?.id
   const timeline = useMemo(() => buildTimeline(messages), [messages])
   const groupPositionById = useMemo(() => messageGroupPositions(messages), [messages])
   const showSenderById = useMemo(() => {
@@ -659,13 +681,14 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
   }, [incomingMessageCount, initialUnreadCount, messageQuery])
   const extractMessageRange = useCallback((range: Range): number[] => {
     const indexes = defaultRangeExtractor(range)
-    const pendingId = pendingHistoryAnchorRef.current?.id ?? (initialScrollPendingRef.current ? initialUnreadMessageId : undefined)
+    const pendingId = pendingHistoryAnchorRef.current?.id ??
+      (initialScrollPendingRef.current ? initialScrollTargetMessageId : undefined)
     if (!pendingId) return indexes
     const timelineIndex = timeline.findIndex((item) => item.type === 'message' && item.message.id === pendingId)
     const virtualIndex = timelineIndex + 1
     if (timelineIndex < 0 || indexes.includes(virtualIndex)) return indexes
     return [...indexes, virtualIndex].sort((left, right) => left - right)
-  }, [initialUnreadMessageId, timeline])
+  }, [initialScrollTargetMessageId, timeline])
   const virtualizer = useVirtualizer({
     count: timeline.length + 1,
     getScrollElement: () => parentRef.current,
@@ -740,17 +763,17 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
     if (!initialScrollPendingRef.current || !messages.length || unreadBoundaryPending) return
     if (scrollFrameRef.current !== undefined) return
     initialScrollStableFramesRef.current = 0
-    initialScrollAttemptsRef.current = 0
-    const unreadTimelineIndex = initialUnreadMessageId
-      ? timeline.findIndex((item) => item.type === 'message' && item.message.id === initialUnreadMessageId)
+    let attempts = 0
+    const targetTimelineIndex = initialScrollTargetMessageId
+      ? timeline.findIndex((item) => item.type === 'message' && item.message.id === initialScrollTargetMessageId)
       : -1
     const align = (): void => {
       if (!initialScrollPendingRef.current) return
-      initialScrollAttemptsRef.current += 1
+      attempts += 1
       measureRenderedRows()
       const element = parentRef.current
       let aligned = false
-      if (element && unreadTimelineIndex >= 0 && initialUnreadMessageId) {
+      if (element && targetTimelineIndex >= 0 && initialUnreadMessageId) {
         const row = [...element.querySelectorAll<HTMLElement>('.message-item[data-message-id]')]
           .find((candidate) => candidate.dataset.messageId === initialUnreadMessageId)
         if (row) {
@@ -759,32 +782,31 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
           element.scrollTop += currentOffset - desiredOffset
           aligned = Math.abs(currentOffset - desiredOffset) <= 2
         } else {
-          virtualizer.scrollToIndex(unreadTimelineIndex + 1, { align: 'start' })
+          virtualizer.scrollToIndex(targetTimelineIndex + 1, { align: 'start' })
         }
         nearBottomRef.current = false
         anchorRef.current = { id: initialUnreadMessageId, viewportOffset: 48 }
-      } else if (element) {
-        const newestMessageId = messages.at(-1)?.id
-        const newestRow = newestMessageId
-          ? [...element.querySelectorAll<HTMLElement>('.message-item[data-message-id]')]
-            .find((candidate) => candidate.dataset.messageId === newestMessageId)
-          : undefined
-        virtualizer.scrollToIndex(timeline.length, { align: 'end' })
+      } else if (element && targetTimelineIndex >= 0 && initialScrollTargetMessageId) {
+        const newestRow = [...element.querySelectorAll<HTMLElement>('.message-item[data-message-id]')]
+          .find((candidate) => candidate.dataset.messageId === initialScrollTargetMessageId)
+        virtualizer.scrollToIndex(targetTimelineIndex + 1, { align: 'end' })
         element.scrollTop = element.scrollHeight
         aligned = Boolean(newestRow) && element.scrollHeight - element.scrollTop - element.clientHeight <= 2
         nearBottomRef.current = true
       }
       initialScrollStableFramesRef.current = aligned ? initialScrollStableFramesRef.current + 1 : 0
-      if (initialScrollStableFramesRef.current < 2 && initialScrollAttemptsRef.current < 60) {
+      if (initialScrollStableFramesRef.current < 2 && attempts < 120) {
         scrollFrameRef.current = requestAnimationFrame(align)
         return
       }
+      if (!initialUnreadMessageId && element) element.scrollTop = element.scrollHeight
       initialScrollPendingRef.current = false
       setNewMessageCount(0)
       scrollFrameRef.current = undefined
     }
     scrollFrameRef.current = requestAnimationFrame(align)
-  }, [initialUnreadMessageId, measureRenderedRows, messages, timeline, unreadBoundaryPending, virtualizer])
+  }, [initialScrollTargetMessageId, initialUnreadMessageId, measureRenderedRows, messages.length,
+    timeline, unreadBoundaryPending, virtualizer])
   const handleRowResize = useCallback((): void => {
     if (rowResizeFrameRef.current !== undefined) return
     if (initialScrollPendingRef.current) {
@@ -1021,10 +1043,22 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
     const messageEnterTimers = messageEnterTimersRef.current
     return () => {
       activeRef.current = false
-      if (scrollFrameRef.current !== undefined) cancelAnimationFrame(scrollFrameRef.current)
-      if (rowResizeFrameRef.current !== undefined) cancelAnimationFrame(rowResizeFrameRef.current)
-      if (focusTimerRef.current !== undefined) window.clearTimeout(focusTimerRef.current)
-      if (recordingTimer.current !== undefined) window.clearInterval(recordingTimer.current)
+      if (scrollFrameRef.current !== undefined) {
+        cancelAnimationFrame(scrollFrameRef.current)
+        scrollFrameRef.current = undefined
+      }
+      if (rowResizeFrameRef.current !== undefined) {
+        cancelAnimationFrame(rowResizeFrameRef.current)
+        rowResizeFrameRef.current = undefined
+      }
+      if (focusTimerRef.current !== undefined) {
+        window.clearTimeout(focusTimerRef.current)
+        focusTimerRef.current = undefined
+      }
+      if (recordingTimer.current !== undefined) {
+        window.clearInterval(recordingTimer.current)
+        recordingTimer.current = undefined
+      }
       for (const timer of messageEnterTimers.values()) window.clearTimeout(timer)
       messageEnterTimers.clear()
       if (recorder.current?.state === 'recording') {
@@ -1033,6 +1067,7 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
         recorder.current.stop()
         recorder.current.stream.getTracks().forEach((track) => track.stop())
       }
+      recorder.current = undefined
     }
   }, [])
   useEffect(() => subscribeToReducedMotion(() => {

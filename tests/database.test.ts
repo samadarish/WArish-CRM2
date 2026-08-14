@@ -447,6 +447,44 @@ describe('WarishDatabase', () => {
     database.close()
   })
 
+  it('filters the complete chat query by exact CRM stage while preserving search and pagination', () => {
+    const { database } = createDatabase()
+    const crm = new CrmRepository(database, () => undefined)
+    const stages = [
+      ['15550100001@s.whatsapp.net', 'New Match', 'stage-new'],
+      ['15550100002@s.whatsapp.net', 'Qualified Match', 'stage-qualified'],
+      ['15550100003@s.whatsapp.net', 'Quoted Match', 'stage-quoted'],
+      ['15550100004@s.whatsapp.net', 'Won Match A', 'stage-won'],
+      ['15550100005@s.whatsapp.net', 'Won Other B', 'stage-won'],
+      ['15550100006@s.whatsapp.net', 'Lost Match', 'stage-lost']
+    ] as const
+    for (const [index, [chatId, name, stageId]] of stages.entries()) {
+      database.upsertContact({ id: chatId, phoneNumber: chatId.split('@')[0], name })
+      database.storeMessage({ id: `stage-message-${index}`, chatId, fromMe: false, kind: 'text', text: name,
+        timestamp: 10_000 + index, status: 'read', incrementUnread: false })
+      const contact = crm.ensureContact(chatId)
+      if (stageId !== 'stage-new') crm.setStage(contact.id, stageId)
+    }
+    const untrackedId = '15550100007@s.whatsapp.net'
+    database.storeMessage({ id: 'untracked-message', chatId: untrackedId, fromMe: false, kind: 'text', text: 'Untracked Match',
+      timestamp: 20_000, status: 'read', incrementUnread: false })
+
+    const ids = (crmStage: 'all' | 'new' | 'won' | 'lost', query?: string) =>
+      database.listChats({ category: 'direct', crmStage, query }).items.map((chat) => chat.id)
+    expect(ids('new')).toEqual(['15550100001@s.whatsapp.net'])
+    expect(ids('won')).toEqual(['15550100005@s.whatsapp.net', '15550100004@s.whatsapp.net'])
+    expect(ids('lost')).toEqual(['15550100006@s.whatsapp.net'])
+    expect(ids('all')).toEqual([untrackedId, ...stages.map(([chatId]) => chatId).reverse()])
+    expect(ids('won', 'Match')).toEqual(['15550100004@s.whatsapp.net'])
+
+    const firstWonPage = database.listChats({ category: 'direct', crmStage: 'won', limit: 1 })
+    expect(firstWonPage.items.map((chat) => chat.id)).toEqual(['15550100005@s.whatsapp.net'])
+    expect(firstWonPage.nextCursor).toBeDefined()
+    expect(database.listChats({ category: 'direct', crmStage: 'won', limit: 1, cursor: firstWonPage.nextCursor })
+      .items.map((chat) => chat.id)).toEqual(['15550100004@s.whatsapp.net'])
+    database.close()
+  })
+
   it('paginates pinned and unpinned chats without duplicates at equal timestamps', () => {
     const { database } = createDatabase()
     const expected = [

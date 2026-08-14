@@ -31,6 +31,10 @@ interface BrowserLifecycleElement {
   ownerDocument: { defaultView: { getComputedStyle(target: unknown): { clipPath: string } } }
 }
 
+interface BrowserColorElement {
+  ownerDocument: { defaultView: { getComputedStyle(target: unknown): { backgroundColor: string } } }
+}
+
 async function bodyFontSize(targetPage: Page): Promise<string> {
   return targetPage.locator('body').evaluate((element: unknown) => {
     const target = element as BrowserElement
@@ -374,6 +378,144 @@ test('keeps local history in the workspace when an existing account needs relink
   await expect(page.getByRole('dialog', { name: 'Relink WhatsApp' })).toBeVisible()
   await expect(page.getByRole('img', { name: 'WhatsApp linked-device QR code' })).not.toBeVisible()
   await page.getByRole('button', { name: 'Close relink dialog' }).click()
+})
+
+test('filters direct chats by exact CRM stage while keeping the open conversation', async () => {
+  test.setTimeout(90_000)
+  await application.close()
+  const database = new DatabaseSync(join(userDataPath, 'warish.sqlite'))
+  database.prepare("UPDATE accounts SET linked_at=? WHERE id='primary'").run(Date.now())
+  const identity = database.prepare(`INSERT INTO contact_identities(
+    identity_id, phone_jid, phone_number, saved_name, whatsapp_name, avatar_failures, updated_at
+  ) VALUES (?, ?, ?, ?, ?, 0, ?)`)
+  const alias = database.prepare('INSERT INTO contact_identity_aliases(alias_id, identity_id, updated_at) VALUES (?, ?, ?)')
+  const chat = database.prepare(`INSERT INTO chats(
+    id, account_id, title, kind, last_message, last_message_at, last_message_id, unread_count, archived, pinned, updated_at
+  ) VALUES (?, 'primary', ?, 'direct', ?, ?, ?, 0, 0, 0, ?)`)
+  const crm = database.prepare(`INSERT INTO crm_contacts(
+    id, identity_id, chat_id, lifecycle, stage_id, name, source, created_at, last_activity_at, updated_at
+  ) VALUES (?, ?, ?, ?, ?, ?, 'fixture', ?, ?, ?)`)
+  const fixtures = [
+    { key: 'new', name: 'New Prospect', stageId: 'stage-new', lifecycle: 'lead' },
+    { key: 'qualified', name: 'Qualified Prospect', stageId: 'stage-qualified', lifecycle: 'lead' },
+    { key: 'quoted', name: 'Quoted Prospect', stageId: 'stage-quoted', lifecycle: 'lead' },
+    { key: 'won', name: 'Won Prospect', stageId: 'stage-won', lifecycle: 'customer' },
+    { key: 'lost', name: 'Lost Prospect', stageId: 'stage-lost', lifecycle: 'lead' },
+    { key: 'untracked', name: 'Untracked Prospect' }
+  ] as const
+  const baseTime = Date.now() - 10_000
+  database.exec('BEGIN')
+  for (const [index, fixture] of fixtures.entries()) {
+    const sequence = String(index + 1).padStart(2, '0')
+    const identityId = `stage-filter-${fixture.key}`
+    const phone = `155520000${sequence}`
+    const chatId = `${phone}@s.whatsapp.net`
+    const timestamp = baseTime + index
+    identity.run(identityId, chatId, phone, fixture.name, fixture.name, timestamp)
+    alias.run(chatId, identityId, timestamp)
+    chat.run(chatId, fixture.name, `${fixture.name} preview`, timestamp, `stage-filter-message-${fixture.key}`, timestamp)
+    if ('stageId' in fixture) {
+      crm.run(`crm-stage-filter-${fixture.key}`, identityId, chatId, fixture.lifecycle, fixture.stageId,
+        fixture.name, timestamp, timestamp, timestamp)
+    }
+  }
+  database.exec('COMMIT')
+  database.close()
+
+  application = await electron.launch({
+    args: [resolve('.'), `--user-data-dir=${userDataPath}`],
+    env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' }
+  })
+  page = await application.firstWindow()
+
+  const chatList = page.locator('.chat-list')
+  const stageFilter = page.getByRole('button', { name: /Filter chats by stage/ })
+  const conversationHeader = page.locator('.conversation-header')
+  const expectChatNames = async (visible: string[], hidden: string[]): Promise<void> => {
+    for (const name of visible) await expect(chatList.getByRole('button', { name: new RegExp(name) })).toBeVisible()
+    for (const name of hidden) await expect(chatList.getByRole('button', { name: new RegExp(name) })).toHaveCount(0)
+  }
+  const selectStage = async (name: 'All' | 'New enquiry' | 'Won' | 'Lost'): Promise<void> => {
+    await stageFilter.click()
+    await page.getByRole('option', { name, exact: true }).click()
+    await expect(stageFilter).toContainText(name)
+  }
+
+  await expect(stageFilter).toBeVisible()
+  await expectChatNames(fixtures.map((fixture) => fixture.name), [])
+  await stageFilter.click()
+  for (const [name, color] of [
+    ['New enquiry', 'rgb(245, 158, 11)'],
+    ['Won', 'rgb(132, 204, 22)'],
+    ['Lost', 'rgb(239, 68, 68)']
+  ] as const) {
+    const swatch = page.getByRole('option', { name, exact: true }).locator('.ui-choice-swatch')
+    await expect(swatch).toBeVisible()
+    expect(await swatch.evaluate((element: unknown) => {
+      const target = element as BrowserColorElement
+      return target.ownerDocument.defaultView.getComputedStyle(target).backgroundColor
+    })).toBe(color)
+  }
+  const allOptionColor = await page.getByRole('option', { name: 'All', exact: true }).locator('.ui-choice-swatch')
+    .evaluate((element: unknown) => {
+      const target = element as BrowserColorElement
+      return target.ownerDocument.defaultView.getComputedStyle(target).backgroundColor
+    })
+  await page.keyboard.press('Escape')
+  expect(await stageFilter.locator('.ui-choice-swatch').evaluate((element: unknown) => {
+    const target = element as BrowserColorElement
+    return target.ownerDocument.defaultView.getComputedStyle(target).backgroundColor
+  })).toBe(allOptionColor)
+
+  const excludedFromNew = ['Qualified Prospect', 'Quoted Prospect', 'Won Prospect', 'Lost Prospect', 'Untracked Prospect']
+  await selectStage('New enquiry')
+  await expectChatNames(['New Prospect'], excludedFromNew)
+  await selectStage('Won')
+  await expectChatNames(['Won Prospect'], fixtures.filter((fixture) => fixture.key !== 'won').map((fixture) => fixture.name))
+  expect(await stageFilter.locator('.ui-choice-swatch').evaluate((element: unknown) => {
+    const target = element as BrowserColorElement
+    return target.ownerDocument.defaultView.getComputedStyle(target).backgroundColor
+  })).toBe('rgb(132, 204, 22)')
+  await selectStage('Lost')
+  await expectChatNames(['Lost Prospect'], fixtures.filter((fixture) => fixture.key !== 'lost').map((fixture) => fixture.name))
+  await selectStage('All')
+  await expectChatNames(fixtures.map((fixture) => fixture.name), [])
+
+  await chatList.getByRole('button', { name: /Qualified Prospect/ }).click()
+  await expect(conversationHeader.getByText('Qualified Prospect', { exact: true })).toBeVisible()
+  await selectStage('New enquiry')
+  await expectChatNames(['New Prospect'], excludedFromNew)
+  await expect(conversationHeader.getByText('Qualified Prospect', { exact: true })).toBeVisible()
+
+  const lifecycle = page.getByRole('region', { name: 'Sales lifecycle' })
+  await lifecycle.getByRole('button', { name: 'Set sales stage to New enquiry' }).click()
+  await expectChatNames(['New Prospect', 'Qualified Prospect'], ['Quoted Prospect', 'Won Prospect', 'Lost Prospect', 'Untracked Prospect'])
+  await lifecycle.getByRole('button', { name: 'Set sales stage to Qualified' }).click()
+  await expectChatNames(['New Prospect'], excludedFromNew)
+  await expect(conversationHeader.getByText('Qualified Prospect', { exact: true })).toBeVisible()
+
+  await selectStage('Lost')
+  await page.getByRole('button', { name: 'Groups', exact: true }).click()
+  await expect(page.getByRole('button', { name: /Filter chats by stage/ })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Chats', exact: true }).click()
+  await expect(stageFilter).toContainText('Lost')
+  await expectChatNames(['Lost Prospect'], fixtures.filter((fixture) => fixture.key !== 'lost').map((fixture) => fixture.name))
+
+  await page.setViewportSize({ width: 900, height: 620 })
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await page.getByRole('button', { name: 'Salesforce black' }).click()
+  await page.getByRole('button', { name: 'Ultra dense' }).click()
+  await page.getByRole('button', { name: 'Close settings' }).click()
+  await expect.poll(() => page.locator('html').getAttribute('data-theme')).toBe('salesforce-black')
+  await expect.poll(() => page.locator('html').getAttribute('data-density-mode')).toBe('ultra-dense')
+  const [headerBounds, headingBounds, filterBounds, menuBounds] = await Promise.all([
+    page.locator('.panel-header').boundingBox(), page.locator('.panel-header h1').boundingBox(),
+    stageFilter.boundingBox(), page.getByRole('button', { name: 'Chat list menu' }).boundingBox()
+  ])
+  if (!headerBounds || !headingBounds || !filterBounds || !menuBounds) throw new Error('The narrow Chats header has missing geometry')
+  expect(filterBounds.x).toBeGreaterThanOrEqual(headingBounds.x + headingBounds.width - 1)
+  expect(menuBounds.x).toBeGreaterThanOrEqual(filterBounds.x + filterBounds.width - 1)
+  expect(menuBounds.x + menuBounds.width).toBeLessThanOrEqual(headerBounds.x + headerBounds.width + 1)
 })
 
 test('keeps grouped replies and remote/downloaded media visually stable', async () => {

@@ -27,6 +27,7 @@ const EMPTY_KEY = '__warish_empty_value__'
 export interface ChoiceOption {
   value: string
   label: string
+  color?: string
   disabled?: boolean
 }
 
@@ -65,6 +66,7 @@ function selectedOptionKey(value: string, options: ChoiceOption[]): string | nul
 export function SelectField({ label, value, options, onChange, description, placeholder, disabled = false,
   required = false, hideLabel = false, density = 'regular', className = '' }: ChoiceFieldProps): React.JSX.Element {
   const items = keyedOptions(options)
+  const selected = options.find((option) => option.value === value)
   return <AriaSelect className={`ui-choice-field ui-select-field ${density} ${className}`.trim()}
     selectedKey={selectedOptionKey(value, options)} isDisabled={disabled} isRequired={required} validationBehavior="native"
     onSelectionChange={(key) => { if (key !== null) onChange(optionValue(key)) }}>
@@ -73,16 +75,21 @@ export function SelectField({ label, value, options, onChange, description, plac
       {description && <AriaText slot="description"><small>{description}</small></AriaText>}
     </span>
     <AriaButton className="ui-choice-trigger">
-      <AriaSelectValue>{({ selectedText }) => selectedText || placeholder || 'Select an option'}</AriaSelectValue>
+      <AriaSelectValue>{selected ? <ChoiceOptionLabel option={selected} /> : placeholder || 'Select an option'}</AriaSelectValue>
       <ChevronDown aria-hidden="true" />
     </AriaButton>
     <AriaPopover className="ui-popover" placement="bottom start" offset={4} shouldFlip>
       <AriaListBox className="ui-listbox" items={items} renderEmptyState={() => <div className="ui-empty-option">No options</div>}>
         {(option) => <AriaListBoxItem id={option.id} textValue={option.label} isDisabled={option.disabled}
-          className="ui-option">{({ isSelected }) => <><span>{option.label}</span>{isSelected && <Check aria-hidden="true" />}</>}</AriaListBoxItem>}
+          className="ui-option">{({ isSelected }) => <><ChoiceOptionLabel option={option} />{isSelected && <Check aria-hidden="true" />}</>}</AriaListBoxItem>}
       </AriaListBox>
     </AriaPopover>
   </AriaSelect>
+}
+
+function ChoiceOptionLabel({ option }: { option: ChoiceOption }): React.JSX.Element {
+  return <span className="ui-choice-option">{option.color && <i className="ui-choice-swatch" aria-hidden="true"
+    style={{ '--choice-color': option.color } as React.CSSProperties} />}<span>{option.label}</span></span>
 }
 
 export function ComboBoxField({ label, value, options, onChange, description, placeholder = 'Search options',

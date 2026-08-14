@@ -1,6 +1,6 @@
 import type { Logger } from 'pino'
 import type {
-  AppError, AppSettings, CoreEventEnvelope, CrmCatalogItemDto, CrmContactPatch, CrmLifecycle, CrmNoteInput, CrmOrderInput,
+  AppError, AppSettings, ChatCrmStageFilter, CoreEventEnvelope, CrmCatalogItemDto, CrmContactPatch, CrmLifecycle, CrmNoteInput, CrmOrderInput,
   CrmOrderItemDto, CrmPaymentDto, CrmTaskDto, CrmTaskInput, DraftDto, PickedAttachment, RpcMethod
 } from '../shared/contracts'
 import { WarishDatabase } from './database'
@@ -55,7 +55,7 @@ export class RpcRouter {
       }
       case 'chat.list': return this.#database.listChats({
         cursor: optionalString(params.cursor), limit: optionalNumber(params.limit), archived: optionalBoolean(params.archived),
-        query: optionalString(params.query), category: chatCategory(params.category)
+        query: optionalString(params.query), category: chatCategory(params.category), crmStage: chatCrmStageFilter(params.crmStage)
       })
       case 'chat.get': return this.#whatsapp.getChat(requiredString(params, 'chatId'))
       case 'chat.getMany': return this.#database.getChats(stringArray(params.chatIds))
@@ -228,6 +228,9 @@ function chatCategory(value: unknown): 'all' | 'direct' | 'group' | 'community' 
   return value === 'all' || value === 'direct' || value === 'group' || value === 'community' || value === 'channel'
     ? value
     : undefined
+}
+function chatCrmStageFilter(value: unknown): ChatCrmStageFilter | undefined {
+  return value === 'all' || value === 'new' || value === 'won' || value === 'lost' ? value : undefined
 }
 function optionalString(value: unknown): string | undefined { return typeof value === 'string' ? value : undefined }
 function optionalNumber(value: unknown): number | undefined { return typeof value === 'number' && Number.isFinite(value) ? value : undefined }

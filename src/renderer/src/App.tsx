@@ -151,7 +151,10 @@ function handleEvent(event: CoreEventEnvelope, queryClient: ReturnType<typeof us
     if (payload.chatId) {
       void queryClient.invalidateQueries({ queryKey: ['chat', payload.chatId] })
     }
-    if (payload.chatId) scheduleChatRefresh(queryClient, [payload.chatId])
+    if (payload.scope === 'pipeline') {
+      void queryClient.invalidateQueries({ queryKey: ['chats'], refetchType: 'active' })
+      void queryClient.invalidateQueries({ queryKey: ['communities'], refetchType: 'active' })
+    } else if (payload.chatId) scheduleChatRefresh(queryClient, [payload.chatId])
     else if (payload.scope === 'all') scheduleChatRefresh(queryClient)
   }
   if (event.type === 'crm.taskDue') {

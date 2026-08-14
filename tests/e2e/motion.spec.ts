@@ -353,7 +353,7 @@ test('opens at the first unseen message and returns to a read chat at the newest
     alias.run(targetChatId, 'unread-target-identity', baseTime)
     alias.run(controlChatId, 'scroll-control-identity', baseTime)
     chat.run(targetChatId, 'Unread Target', 'Unread history 120', baseTime + 120, 'unread-message-120', 70, baseTime + 120)
-    chat.run(controlChatId, 'Scroll Control', 'Control message', baseTime + 1_000, 'control-message', 0, baseTime + 1_000)
+    chat.run(controlChatId, 'Scroll Control', 'Control message', baseTime + 100, 'control-message', 0, baseTime + 100)
     for (let index = 1; index <= 120; index += 1) {
       const sequence = String(index).padStart(3, '0')
       const timestamp = baseTime + index
@@ -363,18 +363,17 @@ test('opens at the first unseen message and returns to a read chat at the newest
           : `Unread history ${sequence}`, timestamp, timestamp)
     }
     message.run('control-message', controlChatId, controlChatId, 'Scroll Control', 0, 'Control message',
-      baseTime + 1_000, baseTime + 1_000)
+      baseTime + 100, baseTime + 100)
     database.exec('COMMIT')
   })
   await page.setViewportSize({ width: 1366, height: 768 })
-  await expect(page.locator('.conversation-identity > span > strong')).toHaveText('Scroll Control')
+  await expect(page.locator('.conversation-identity > span > strong')).toHaveText('Unread Target')
   const chatList = page.locator('.chat-list')
   const targetRow = chatList.getByRole('button', { name: /Unread Target/ })
   const controlRow = chatList.getByRole('button', { name: /Scroll Control/ })
 
-  await targetRow.click()
-  await expect(page.locator('.conversation-identity > span > strong')).toHaveText('Unread Target')
   await expect(page.locator('.message-history-skeleton')).toBeHidden()
+  await expect(targetRow.locator('.chat-row-meta > b')).toHaveCount(0)
   const scroller = page.locator('.message-scroller')
   const firstUnread = page.locator('[data-message-id="unread-message-027"]')
   await expect(firstUnread).toBeVisible()

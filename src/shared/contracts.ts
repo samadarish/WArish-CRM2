@@ -178,6 +178,7 @@ export interface ContactSyncState {
 
 export type ChatKind = 'direct' | 'group' | 'community' | 'channel' | 'broadcast' | 'unknown'
 export type ChatCategory = 'all' | 'direct' | 'group' | 'community' | 'channel'
+export type ChatCrmStageFilter = 'all' | 'new' | 'won' | 'lost'
 
 export interface ChatSummary {
   id: string
@@ -623,7 +624,8 @@ export interface WarishApi {
     logout(eraseLocalData: boolean): Promise<void>
   }
   chats: {
-    list(input?: { cursor?: string; limit?: number; archived?: boolean; query?: string; category?: ChatCategory }): Promise<Page<ChatSummary>>
+    list(input?: { cursor?: string; limit?: number; archived?: boolean; query?: string; category?: ChatCategory;
+      crmStage?: ChatCrmStageFilter }): Promise<Page<ChatSummary>>
     get(chatId: string): Promise<ChatSummary>
     getMany(chatIds: string[]): Promise<ChatSummary[]>
     update(chatId: string, patch: Partial<Pick<ChatSummary, 'archived' | 'pinned' | 'mutedUntil'>>): Promise<void>

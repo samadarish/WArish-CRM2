@@ -12,7 +12,7 @@ function session(patch: Partial<SessionState> = {}): SessionState {
   return { phase: 'starting', accountState: 'linked', ...patch }
 }
 
-beforeEach(() => useUiStore.setState({ destination: 'direct', selectedChatId: undefined }))
+beforeEach(() => useUiStore.setState({ destination: 'direct', selectedChatId: undefined, chatStageFilter: 'all' }))
 
 describe('workspace navigation', () => {
   it('keeps Chats first and All conversations below Channels', () => {
@@ -32,6 +32,14 @@ describe('workspace navigation', () => {
     expect(destinationForChat(chat({ kind: 'group', communityId: 'community-1' }))).toBe('community')
     expect(destinationForChat(chat({ kind: 'channel' }))).toBe('channel')
     expect(destinationForChat(chat({ archived: true }))).toBe('archived')
+  })
+
+  it('remembers the Chats stage filter while navigating during the current session', () => {
+    useUiStore.getState().setChatStageFilter('won')
+    useUiStore.getState().navigate('crm')
+    useUiStore.getState().navigate('direct')
+
+    expect(useUiStore.getState().chatStageFilter).toBe('won')
   })
 })
 

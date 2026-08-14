@@ -58,6 +58,20 @@ describe('SelectField', () => {
       options={[{ value: 'qualified', label: 'Qualified' }]} />)
     expect(screen.getByRole('button', { name: /Stage/ })).toHaveTextContent('Qualified')
   })
+
+  it('shows matching color swatches in the selected value and option list', async () => {
+    render(<SelectField label="Stage" value="won" onChange={vi.fn()} options={[
+      { value: 'all', label: 'All', color: 'rgb(102, 119, 129)' },
+      { value: 'won', label: 'Won', color: '#84CC16' }
+    ]} />)
+
+    const trigger = screen.getByRole('button', { name: /Stage/ })
+    expect(trigger.querySelector('.ui-choice-swatch')).toHaveStyle({ '--choice-color': '#84CC16' })
+    fireEvent.click(trigger)
+    const wonOption = await screen.findByRole('option', { name: 'Won' })
+    expect(wonOption.querySelector('.ui-choice-swatch')).toHaveStyle({ '--choice-color': '#84CC16' })
+    expect(document.querySelectorAll('.ui-choice-swatch')).toHaveLength(3)
+  })
 })
 
 describe('ComboBoxField', () => {
