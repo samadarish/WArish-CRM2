@@ -26,11 +26,11 @@ export function App(): React.JSX.Element {
   useEffect(() => window.warish.onEvent((event) => handleEvent(event, queryClient)), [queryClient])
   useEffect(() => {
     const reportError = (event: ErrorEvent): void => {
-      void window.warish.diagnostics.reportRendererError(event.message, event.error instanceof Error ? event.error.stack : undefined)
+      reportRendererError(event.message, event.error instanceof Error ? event.error.stack : undefined)
     }
     const reportRejection = (event: PromiseRejectionEvent): void => {
       const error = event.reason instanceof Error ? event.reason : new Error(String(event.reason))
-      void window.warish.diagnostics.reportRendererError(error.message, error.stack)
+      reportRendererError(error.message, error.stack)
     }
     window.addEventListener('error', reportError)
     window.addEventListener('unhandledrejection', reportRejection)
@@ -192,7 +192,7 @@ function scheduleChatRefresh(queryClient: QueryClient, chatIds?: string[]): void
   if (chatIds?.length) for (const chatId of chatIds) pendingChatRefreshIds.add(chatId)
   else fullChatRefreshPending = true
   if (chatRefreshTimer !== undefined) return
-  chatRefreshTimer = window.setTimeout(() => { void flushChatRefresh(queryClient) }, 120)
+  chatRefreshTimer = window.setTimeout(() => { void flushChatRefresh(queryClient).catch(() => undefined) }, 120)
 }
 
 async function flushChatRefresh(queryClient: QueryClient): Promise<void> {
@@ -210,13 +210,24 @@ async function flushChatRefresh(queryClient: QueryClient): Promise<void> {
   }
   try {
     const chats = await window.warish.chats.getMany(ids)
-    for (const chat of chats) patchChatSummary(queryClient, chat)
+    let listsNeedRefresh = false
+    for (const chat of chats) {
+      if (patchChatSummary(queryClient, chat) || shouldRefreshCachedLists(queryClient, chat)) listsNeedRefresh = true
+    }
+    if (listsNeedRefresh) await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['chats'], refetchType: 'active' }),
+      queryClient.invalidateQueries({ queryKey: ['communities'], refetchType: 'active' })
+    ])
   } catch {
-    await queryClient.invalidateQueries({ queryKey: ['chats'], refetchType: 'active' })
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['chats'], refetchType: 'active' }),
+      queryClient.invalidateQueries({ queryKey: ['communities'], refetchType: 'active' })
+    ])
   }
 }
 
-function patchChatSummary(queryClient: QueryClient, chat: ChatSummary): void {
+function patchChatSummary(queryClient: QueryClient, chat: ChatSummary): boolean {
+  let needsRefresh = false
   queryClient.setQueryData(['chat', chat.id], chat)
   queryClient.setQueriesData<InfiniteData<Page<ChatSummary>, string | undefined>>({ queryKey: ['chats'] }, (current) => {
     if (!current) return current
@@ -224,6 +235,9 @@ function patchChatSummary(queryClient: QueryClient, chat: ChatSummary): void {
     const items = current.pages.flatMap((page) => page.items)
     const index = items.findIndex((item) => item.id === chat.id)
     if (index < 0) return current
+    const previous = items[index]!
+    if (index === items.length - 1 && current.pages.at(-1)?.nextCursor
+      && (previous.pinned !== chat.pinned || previous.lastMessageAt !== chat.lastMessageAt)) needsRefresh = true
     items[index] = chat
     items.sort(compareChatSummaries)
     let offset = 0
@@ -238,8 +252,15 @@ function patchChatSummary(queryClient: QueryClient, chat: ChatSummary): void {
     { queryKey: ['communities'] }, (current) => current ? ({ ...current, pages: current.pages.map((page) => {
       let changed = false
       const items = page.items.map((community) => {
+        if (community.id === chat.id) {
+          changed = true
+          return { ...community, title: chat.title, avatarUrl: chat.avatarUrl,
+            lastMessageAt: chat.lastMessageAt, unreadCount: chat.unreadCount }
+        }
         const index = community.children.findIndex((child) => child.id === chat.id)
-        if (index < 0 || community.children[index] === chat) return community
+        if (index < 0) return community
+        if (community.children[index]?.communityId !== chat.communityId) needsRefresh = true
+        if (community.children[index] === chat) return community
         const children = [...community.children]
         children[index] = chat
         changed = true
@@ -248,6 +269,35 @@ function patchChatSummary(queryClient: QueryClient, chat: ChatSummary): void {
       return changed ? { ...page, items } : page
     }) }) : current
   )
+  return needsRefresh
+}
+
+function shouldRefreshCachedLists(queryClient: QueryClient, chat: ChatSummary): boolean {
+  const chatQueries = queryClient.getQueriesData<InfiniteData<Page<ChatSummary>, string | undefined>>({ queryKey: ['chats'] })
+  if (chatQueries.some(([queryKey, data]) => {
+    if (!data) return false
+    const contains = data.pages.some((page) => page.items.some((item) => item.id === chat.id))
+    return contains !== chatMatchesQuery(chat, queryKey)
+  })) return true
+  if (!chat.communityId && chat.kind !== 'community') return false
+  const communityQueries = queryClient.getQueriesData<InfiniteData<Page<CommunitySummary>, string | undefined>>({ queryKey: ['communities'] })
+  return communityQueries.some(([, data]) => Boolean(data))
+}
+
+function chatMatchesQuery(chat: ChatSummary, queryKey: readonly unknown[]): boolean {
+  const archived = queryKey[1] === true
+  const category = typeof queryKey[2] === 'string' ? queryKey[2] : 'all'
+  const query = (typeof queryKey[3] === 'string' ? queryKey[3] : '').trim().toLocaleLowerCase()
+  const crmStage = typeof queryKey[4] === 'string' ? queryKey[4] : 'all'
+  const categoryMatches = category === 'all'
+    || category === 'direct' && chat.kind === 'direct'
+    || category === 'group' && chat.kind === 'group' && !chat.communityId
+    || category === 'community' && (chat.kind === 'community' || Boolean(chat.communityId))
+    || category === 'channel' && chat.kind === 'channel'
+  const queryMatches = !query || [chat.title, chat.crm?.name, chat.savedName, chat.whatsappName, chat.phoneNumber]
+    .some((value) => value?.toLocaleLowerCase().includes(query))
+  return chat.archived === archived && categoryMatches
+    && (crmStage === 'all' || chat.crm?.stageKey === crmStage) && queryMatches
 }
 
 function sameItems<T>(left: T[], right: T[]): boolean {
@@ -361,12 +411,16 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { error?: Erro
   static getDerivedStateFromError(error: Error): { error: Error } { return { error } }
   componentDidCatch(error: Error, info: ErrorInfo): void {
     console.error('Renderer failure', error, info)
-    void window.warish.diagnostics.reportRendererError(error.message, `${error.stack ?? ''}\n${info.componentStack ?? ''}`)
+    reportRendererError(error.message, `${error.stack ?? ''}\n${info.componentStack ?? ''}`)
   }
   render(): ReactNode {
     if (this.state.error) return <FatalError error={this.state.error} onRetry={() => this.setState({ error: undefined })} />
     return this.props.children
   }
+}
+
+function reportRendererError(message: string, context?: string): void {
+  void window.warish.diagnostics.reportRendererError(message, context).catch(() => undefined)
 }
 
 function applyAppearance(settings?: AppSettings): void {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useMemo, useState, type CSSProperties } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, CircleAlert, LoaderCircle, RefreshCw } from 'lucide-react'
 import type { ChatSummary, CrmContactDetailsDto, CrmStageDto } from '../../../shared/contracts'
@@ -8,19 +8,17 @@ import { Tooltip } from './ui-primitives'
 export function SalesLifecyclePath({ chat }: { chat: ChatSummary }): React.JSX.Element {
   const queryClient = useQueryClient()
   const pushNotice = useUiStore((state) => state.pushNotice)
-  const [optimisticStageId, setOptimisticStageId] = useState<string>()
+  const [optimisticStage, setOptimisticStage] = useState<{ chatId: string; stageId: string }>()
   const stagesQuery = useQuery({
     queryKey: ['crm', 'pipeline'],
     queryFn: () => window.warish.crm.pipeline(),
     staleTime: 5 * 60_000
   })
   const stages = useMemo(() => [...(stagesQuery.data ?? [])].sort((left, right) => left.position - right.position), [stagesQuery.data])
+  const optimisticStageId = optimisticStage?.chatId === chat.id && optimisticStage.stageId !== chat.crm?.stageId
+    ? optimisticStage.stageId : undefined
   const activeStageId = optimisticStageId ?? chat.crm?.stageId
   const activeIndex = stages.findIndex((stage) => stage.id === activeStageId)
-
-  useEffect(() => {
-    if (optimisticStageId && chat.crm?.stageId === optimisticStageId) setOptimisticStageId(undefined)
-  }, [chat.crm?.stageId, optimisticStageId])
 
   const stageMutation = useMutation({
     mutationFn: async (stage: CrmStageDto) => {
@@ -30,7 +28,7 @@ export function SalesLifecyclePath({ chat }: { chat: ChatSummary }): React.JSX.E
       queryClient.setQueryData(['crm', 'contact', 'chat', chat.id], contact)
       return contact.stageId === stage.id ? contact : window.warish.crm.contacts.setStage(contact.id, stage.id)
     },
-    onMutate: (stage) => setOptimisticStageId(stage.id),
+    onMutate: (stage) => setOptimisticStage({ chatId: chat.id, stageId: stage.id }),
     onSuccess: async (contact) => {
       queryClient.setQueryData(['crm', 'contact', contact.id], contact)
       queryClient.setQueryData(['crm', 'contact', 'chat', chat.id], contact)
@@ -40,10 +38,10 @@ export function SalesLifecyclePath({ chat }: { chat: ChatSummary }): React.JSX.E
         queryClient.invalidateQueries({ queryKey: ['crm', 'contacts'] }),
         queryClient.invalidateQueries({ queryKey: ['crm', 'dashboard'] })
       ])
-      setOptimisticStageId(undefined)
+      setOptimisticStage(undefined)
     },
     onError: (error) => {
-      setOptimisticStageId(undefined)
+      setOptimisticStage(undefined)
       pushNotice(error instanceof Error ? error.message : 'Could not update the sales stage')
     }
   })
@@ -60,7 +58,7 @@ export function SalesLifecyclePath({ chat }: { chat: ChatSummary }): React.JSX.E
       {!stagesQuery.isLoading && !stagesQuery.isError && stages.length === 0 && <div className="sales-lifecycle-error"><CircleAlert /><span>No pipeline stages</span></div>}
       {stages.length > 0 && <div className="sales-lifecycle-path" role="group" aria-label="Pipeline stages">{stages.map((stage, index) => {
         const current = stage.id === activeStageId
-        const completed = activeIndex >= 0 && index < activeIndex
+        const completed = activeIndex >= 0 && index < activeIndex && stage.outcome === 'open'
         const pending = stageMutation.isPending && stageMutation.variables?.id === stage.id
         return <button key={stage.id} className={`${current ? 'current' : ''} ${completed ? 'completed' : ''} outcome-${stage.outcome}`}
           style={{ '--stage-color': stage.color } as CSSProperties} aria-current={current ? 'step' : undefined}

@@ -21,6 +21,7 @@ import type {
   OlderHistoryResult,
   SessionState
 } from '../shared/contracts'
+import { mimeTypeForPath } from '../shared/media-types'
 import { createPersistentAuthState, hasLinkedAuth, mergeAuthCreds, type PersistentAuthState } from './auth-store'
 import { CrmRepository } from './crm-repository'
 import { WarishDatabase } from './database'
@@ -45,6 +46,8 @@ interface OutgoingMessageInput {
   text?: string
   attachmentToken?: string
   attachmentKind?: 'image' | 'video' | 'document' | 'audio' | 'voice' | 'sticker'
+  attachmentName?: string
+  attachmentMimeType?: string
   quotedMessageId?: string
 }
 
@@ -136,7 +139,7 @@ export class WhatsAppClient {
     const socket = makeWASocket({
       version,
       auth: this.#auth.state,
-      logger: this.#logger.child({ component: 'baileys' }),
+      logger: this.#logger.child({ component: 'baileys' }, { level: 'warn' }),
       browser: Browsers.windows(requestFullHistory ? 'Desktop' : 'Chrome'),
       syncFullHistory: requestFullHistory,
       shouldSyncHistoryMessage: (notification) => this.#shouldDownloadHistory(notification),
@@ -206,10 +209,11 @@ export class WhatsAppClient {
     if (!input.text?.trim() && !input.attachmentToken) throw new Error('A message cannot be empty')
     const chatId = this.#database.resolveChatId(input.chatId)
     if (this.#database.getChat(chatId).readOnly) throw new Error('This conversation is read only')
-    const normalizedInput = { ...input, chatId, text: input.text?.trim() || undefined }
     const localId = `local:${input.clientId}`
     const draft = this.#database.getDraft(chatId)
     const draftAttachment = draft?.attachment && draft.attachment.token === input.attachmentToken ? draft.attachment : undefined
+    const normalizedInput = { ...input, chatId, text: input.text?.trim() || undefined,
+      attachmentName: draftAttachment?.name, attachmentMimeType: draftAttachment?.mimeType }
     let local!: MessageDto
     this.#database.transaction(() => {
       this.#database.enqueueOutbox(input.clientId, chatId, normalizedInput)
@@ -261,7 +265,8 @@ export class WhatsAppClient {
       const quotedRaw = input.quotedMessageId ? this.#database.getRawMessage(input.quotedMessageId) : undefined
       const quoted = quotedRaw ? deserializeRawMessage(quotedRaw) : undefined
       const content = input.attachmentToken
-        ? mediaContent(this.media.resolveDraft(input.attachmentToken), input.attachmentKind ?? 'document', input.text)
+        ? mediaContent(this.media.resolveDraft(input.attachmentToken), input.attachmentKind ?? 'document', input.text,
+          input.attachmentName, input.attachmentMimeType)
         : { text: input.text!.trim() }
       const options = { ...(quoted ? { quoted } : {}), messageId: stableWhatsAppMessageId(input.clientId) }
       const sent = await socket.sendMessage(input.chatId, content as any, options)
@@ -275,7 +280,12 @@ export class WhatsAppClient {
         stored = this.#database.upsertMessage(normalized.message!)
         this.#database.deleteOutbox(input.clientId)
       })
-      if (input.attachmentToken) this.media.discardDraft(input.attachmentToken)
+      if (input.attachmentToken) {
+        try { this.media.discardDraft(input.attachmentToken) }
+        catch (error) {
+          this.#logger.warn({ error, attachmentToken: input.attachmentToken }, 'sent attachment draft cleanup failed')
+        }
+      }
       this.#emit({ type: 'message.changed', payload: { message: stored, replacedId: localId } })
       return stored
     } catch (error) {
@@ -425,17 +435,29 @@ export class WhatsAppClient {
     })
   }
 
+  #runSocketEvent(name: string, operation: () => void | Promise<void>, onError?: (error: unknown) => void): void {
+    const report = (error: unknown): void => {
+      this.#logger.error({ error, event: name }, 'WhatsApp event handler failed')
+      try { onError?.(error) }
+      catch (followUpError) { this.#logger.error({ error: followUpError, event: name }, 'WhatsApp event recovery failed') }
+    }
+    try {
+      const result = operation()
+      if (result) void result.catch(report)
+    } catch (error) { report(error) }
+  }
+
   #bindEvents(socket: WASocket, generation: number): void {
     const isActive = (): boolean => this.#socket === socket && this.#socketGeneration === generation
-    socket.ev.on('creds.update', (update) => {
+    socket.ev.on('creds.update', (update) => this.#runSocketEvent('creds.update', () => {
       if (!isActive()) return
       mergeAuthCreds(this.#auth.state.creds, update)
       this.#auth.saveCreds()
       if (hasLinkedAuth(this.#auth.state.creds) && this.#state.accountState !== 'linked') {
         this.#setState({ accountState: 'linked', message: undefined })
       }
-    })
-    socket.ev.on('connection.update', async (update) => {
+    }))
+    socket.ev.on('connection.update', (update) => this.#runSocketEvent('connection.update', async () => {
       if (!isActive()) return
       if (update.qr) {
         if (hasLinkedAuth(this.#auth.state.creds) || this.#state.accountState === 'linked') {
@@ -460,9 +482,11 @@ export class WhatsAppClient {
         void this.#refreshContactIdentities(socket, generation, false)
       }
       if (update.connection === 'close') this.#handleDisconnect(update.lastDisconnect?.error, socket, generation)
-    })
+    }, () => {
+      if (isActive()) this.#setState({ phase: 'error', message: 'WhatsApp connection state could not be processed.' })
+    }))
 
-    socket.ev.on('messaging-history.set', async (history) => {
+    socket.ev.on('messaging-history.set', (history) => this.#runSocketEvent('messaging-history.set', async () => {
       if (!isActive()) return
       const startedAt = Date.now()
       const isOnDemand = history.syncType === proto.HistorySync.HistorySyncType.ON_DEMAND
@@ -520,49 +544,66 @@ export class WhatsAppClient {
       else if (history.syncType === proto.HistorySync.HistorySyncType.RECENT && Number(history.progress) >= 100) {
         this.#setHistorySync('complete', 100)
       }
-    })
+    }, (error) => {
+      if (!isActive()) return
+      if (history.syncType === proto.HistorySync.HistorySyncType.ON_DEMAND) {
+        this.#rejectHistoryRequest(history.peerDataRequestSessionId, error instanceof Error ? error : new Error(String(error)))
+      } else this.#setHistorySync('paused')
+    }))
 
-    socket.ev.on('messaging-history.status', ({ syncType, status }) => {
+    socket.ev.on('messaging-history.status', ({ syncType, status }) => this.#runSocketEvent('messaging-history.status', () => {
       if (!isActive()) return
       if (syncType !== proto.HistorySync.HistorySyncType.RECENT) return
       if (status === 'complete') this.#setHistorySync('complete', 100)
       else this.#setHistorySync('paused')
-    })
+    }))
 
-    socket.ev.on('contacts.upsert', (contacts) => { if (isActive()) this.#ingestContacts(contacts) })
-    socket.ev.on('contacts.update', (contacts) => { if (isActive()) this.#ingestContacts(contacts) })
-    socket.ev.on('lid-mapping.update', ({ lid, pn }) => {
+    socket.ev.on('contacts.upsert', (contacts) => this.#runSocketEvent('contacts.upsert', () => {
+      if (isActive()) this.#ingestContacts(contacts)
+    }))
+    socket.ev.on('contacts.update', (contacts) => this.#runSocketEvent('contacts.update', () => {
+      if (isActive()) this.#ingestContacts(contacts)
+    }))
+    socket.ev.on('lid-mapping.update', ({ lid, pn }) => this.#runSocketEvent('lid-mapping.update', () => {
       if (!isActive()) return
       const merge = this.#database.linkContactLid(lid, pn)
       if (merge) this.#emit({ type: 'chat.merged', payload: merge })
       this.#emit({ type: 'contact.changed', payload: { chatIds: [this.#database.resolveChatId(lid)] } })
-    })
-    socket.ev.on('chats.upsert', (chats) => { if (isActive()) chats.forEach((chat) => this.#ingestChat(chat as any)) })
-    socket.ev.on('chats.update', (chats) => { if (isActive()) chats.forEach((chat) => this.#ingestChat(chat as any)) })
-    socket.ev.on('groups.update', (groups) => groups.forEach((group) => {
-      if (!isActive()) return
-      this.#ingestGroupMetadata(group)
     }))
-    socket.ev.on('newsletter-settings.update', ({ id }) => {
-      if (isActive()) void this.#hydrateChannelMetadata(id, socket)
-    })
-    socket.ev.on('messages.upsert', ({ messages }) => {
+    socket.ev.on('chats.upsert', (chats) => this.#runSocketEvent('chats.upsert', () => {
+      if (isActive()) chats.forEach((chat) => this.#ingestChat(chat as any))
+    }))
+    socket.ev.on('chats.update', (chats) => this.#runSocketEvent('chats.update', () => {
+      if (isActive()) chats.forEach((chat) => this.#ingestChat(chat as any))
+    }))
+    socket.ev.on('groups.update', (groups) => this.#runSocketEvent('groups.update', () => {
+      groups.forEach((group) => {
+        if (isActive()) this.#ingestGroupMetadata(group)
+      })
+    }))
+    socket.ev.on('newsletter-settings.update', ({ id }) => this.#runSocketEvent('newsletter-settings.update', () => {
+      if (isActive()) return this.#hydrateChannelMetadata(id, socket)
+    }))
+    socket.ev.on('messages.upsert', ({ messages }) => this.#runSocketEvent('messages.upsert', () => {
       if (!isActive()) return
       messages.forEach((message) => this.#ingestMessage(message))
-    })
-    socket.ev.on('messages.update', (updates) => {
+    }))
+    socket.ev.on('messages.update', (updates) => this.#runSocketEvent('messages.update', () => {
       if (!isActive()) return
       for (const { key, update } of updates) {
         if (!key.id || update.status === undefined) continue
-        const status = Number(update.status) >= 4 ? 'read' : Number(update.status) === 3 ? 'delivered' : 'sent'
-        this.#database.updateMessageStatus(key.id, status)
+        const receiptStatus = Number(update.status) >= 4 ? 'read' : Number(update.status) === 3 ? 'delivered' : 'sent'
+        const status = this.#database.updateMessageStatus(key.id, receiptStatus)
+        if (!status) continue
         try {
           const changed = this.#database.getMessage(key.id)
           this.#emit({ type: 'message.statusChanged', payload: { chatId: changed.chatId, messageId: key.id, status } })
         } catch { /* A receipt can arrive before its message is locally available. */ }
       }
-    })
-    socket.ev.on('presence.update', (presence) => { if (isActive()) this.#emit({ type: 'presence.changed', payload: presence }) })
+    }))
+    socket.ev.on('presence.update', (presence) => this.#runSocketEvent('presence.update', () => {
+      if (isActive()) this.#emit({ type: 'presence.changed', payload: presence })
+    }))
   }
 
   #repairStoredMessageContent(): void {
@@ -1018,6 +1059,15 @@ export class WhatsAppClient {
     pending.resolve({ items: page.items, hasMore: page.items.length === 50 })
   }
 
+  #rejectHistoryRequest(sessionId: string | null | undefined, error: Error): void {
+    if (!sessionId) return
+    const pending = this.#historyRequests.get(sessionId)
+    if (!pending) return
+    clearTimeout(pending.timer)
+    this.#historyRequests.delete(sessionId)
+    pending.reject(error)
+  }
+
   #rejectHistoryRequests(error: Error): void {
     for (const request of this.#historyRequests.values()) {
       clearTimeout(request.timer)
@@ -1059,23 +1109,23 @@ function errorDetails(error: unknown): string {
   return suffix === undefined ? error.message : `${error.message} (${suffix})`
 }
 
-function mediaContent(path: string, kind: string, caption?: string): Record<string, unknown> {
+function mediaContent(path: string, kind: string, caption?: string, fileName?: string, mimeType?: string): Record<string, unknown> {
   const url = { url: path }
+  const normalizedMimeType = mimeType?.split(';', 1)[0]?.trim().toLowerCase()
   switch (kind) {
     case 'image': return { image: url, caption }
     case 'video': return { video: url, caption }
-    case 'audio': return { audio: url, mimetype: mimeForPath(path) }
+    case 'audio': return { audio: url, mimetype: normalizedMimeType?.startsWith('audio/') ? normalizedMimeType : mimeTypeForPath(path) }
     case 'voice': return { audio: url, ptt: true, mimetype: extname(path).toLowerCase() === '.ogg' ? 'audio/ogg; codecs=opus' : 'audio/webm; codecs=opus' }
     case 'sticker': return { sticker: url }
-    default: return { document: url, fileName: basename(path), mimetype: mimeForPath(path), caption }
+    default: return { document: url, fileName: safeAttachmentName(fileName) ?? basename(path),
+      mimetype: normalizedMimeType || mimeTypeForPath(path), caption }
   }
 }
 
-function mimeForPath(path: string): string {
-  const map: Record<string, string> = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp',
-    '.gif': 'image/gif', '.mp4': 'video/mp4', '.webm': 'video/webm', '.ogg': 'audio/ogg', '.opus': 'audio/ogg',
-    '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.pdf': 'application/pdf', '.txt': 'text/plain' }
-  return map[extname(path).toLowerCase()] ?? 'application/octet-stream'
+function safeAttachmentName(fileName?: string): string | undefined {
+  const name = fileName?.split(/[\\/]/).at(-1)?.trim()
+  return name ? name.slice(0, 255) : undefined
 }
 
 function stableWhatsAppMessageId(clientId: string): string {

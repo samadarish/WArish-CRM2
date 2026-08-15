@@ -65,6 +65,14 @@ describe('SalesLifecyclePath', () => {
     expect(screen.getByRole('button', { name: 'Set sales stage to Quoted' })).toHaveAttribute('aria-current', 'step')
   })
 
+  it('does not present the mutually exclusive won outcome as completed for a lost lead', async () => {
+    renderPath(trackedChat('stage-lost'))
+    await screen.findByRole('group', { name: 'Pipeline stages' })
+    expect(screen.getByRole('button', { name: 'Set sales stage to Quoted' })).toHaveClass('completed')
+    expect(screen.getByRole('button', { name: 'Set sales stage to Won' })).not.toHaveClass('completed')
+    expect(screen.getByRole('button', { name: 'Set sales stage to Lost' })).toHaveAttribute('aria-current', 'step')
+  })
+
   it('updates a tracked contact immediately without ensuring another CRM record', async () => {
     const { ensure, setStage } = renderPath(trackedChat())
     fireEvent.click(await screen.findByRole('button', { name: 'Set sales stage to Won' }))

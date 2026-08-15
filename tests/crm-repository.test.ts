@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import pino from 'pino'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ContactRestrictedError, CrmRepository } from '../src/core/crm-repository'
 import { WarishDatabase } from '../src/core/database'
 import { toAppError } from '../src/core/rpc-router'
@@ -27,6 +27,7 @@ function directContact(database: WarishDatabase, user: string, input: { savedNam
 }
 
 afterEach(() => {
+  vi.restoreAllMocks()
   while (directories.length) rmSync(directories.pop()!, { recursive: true, force: true })
 })
 
@@ -73,6 +74,31 @@ describe('CrmRepository', () => {
     expect(crm.activity(contact.id).map((activity) => activity.type)).toEqual(expect.arrayContaining([
       'lead-created', 'note-added', 'order-created', 'task-created'
     ]))
+    database.close()
+  })
+
+  it('loads order children in batches and rejects payments above the order total', () => {
+    const { database, crm } = setup()
+    const chatId = directContact(database, '919800005555', { whatsappName: 'Batch Customer' })
+    const contact = crm.ensureContact(chatId)
+    for (let index = 0; index < 3; index += 1) {
+      crm.saveOrder({ contactId: contact.id, status: 'draft', items: [{ type: 'service', name: `Service ${index}`,
+        quantity: 1, unitPrice: 100 + index, discount: 0, taxRate: 0 }],
+      payments: [{ amount: 10 + index, paidAt: 1_000 + index, method: 'Cash' }] })
+    }
+
+    const prepare = vi.spyOn(database.db, 'prepare')
+    const orders = crm.listOrders(contact.id)
+
+    expect(orders).toHaveLength(3)
+    expect(orders.every((order) => order.items.length === 1 && order.payments.length === 1)).toBe(true)
+    expect(prepare).toHaveBeenCalledTimes(3)
+    prepare.mockRestore()
+
+    expect(() => crm.saveOrder({ contactId: contact.id, status: 'draft', items: [{ type: 'service', name: 'Audit',
+      quantity: 1, unitPrice: 50, discount: 0, taxRate: 0 }], payments: [{ amount: 50.01, paidAt: 2_000 }] }))
+      .toThrow('Payment cannot exceed the order total')
+    expect(crm.listOrders(contact.id)).toHaveLength(3)
     database.close()
   })
 

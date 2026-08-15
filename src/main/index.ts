@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import { copyFile, stat } from 'node:fs/promises'
+import { rmSync } from 'node:fs'
+import { copyFile, mkdir, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, extname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
@@ -15,6 +15,7 @@ import {
   rpcInvocationSchema, type AppSettings, type ChatSummary, type CoreEventEnvelope,
   type MessageDto, type PickedAttachment, type SessionState
 } from '../shared/contracts'
+import { mimeTypeForPath } from '../shared/media-types'
 import { saveClipboardImageDraft } from './clipboard-image'
 import { CoreBridge } from './core-bridge'
 import { loadOrCreateMasterKey } from './security'
@@ -55,9 +56,9 @@ async function bootstrap(): Promise<void> {
   settings = initialSettings
   currentSession = initialSession
   configureMediaProtocol(userDataPath)
+  registerIpc(userDataPath)
   createWindow()
   createTray()
-  registerIpc(userDataPath)
   configurePermissions()
   applyStartupSetting(settings.launchAtLogin)
 }
@@ -188,15 +189,17 @@ async function resetLocalData(userDataPath: string): Promise<void> {
   }
 }
 
-function saveRecording(userDataPath: string, data: unknown, mimeType: unknown): PickedAttachment {
+async function saveRecording(userDataPath: string, data: unknown, mimeType: unknown): Promise<PickedAttachment> {
   if (!(data instanceof Uint8Array) || typeof mimeType !== 'string' || data.byteLength === 0) throw new Error('Invalid voice recording')
   if (data.byteLength > 25 * 1024 * 1024) throw new Error('Voice recordings are limited to 25 MB')
+  const normalizedMimeType = mimeType.split(';', 1)[0]?.trim().toLowerCase()
+  if (normalizedMimeType !== 'audio/webm' && normalizedMimeType !== 'audio/ogg') throw new Error('Unsupported voice recording format')
   const drafts = join(userDataPath, 'drafts')
-  mkdirSync(drafts, { recursive: true })
-  const extension = mimeType.includes('ogg') ? '.ogg' : '.webm'
+  await mkdir(drafts, { recursive: true })
+  const extension = normalizedMimeType === 'audio/ogg' ? '.ogg' : '.webm'
   const token = `${randomUUID()}${extension}`
-  writeFileSync(safeMediaPath(drafts, token), data)
-  return { token, name: `Voice message${extension}`, size: data.byteLength, mimeType,
+  await writeFile(safeMediaPath(drafts, token), data, { flag: 'wx' })
+  return { token, name: `Voice message${extension}`, size: data.byteLength, mimeType: normalizedMimeType,
     previewUrl: `warish-media://drafts/${encodeURIComponent(token)}` }
 }
 
@@ -212,12 +215,18 @@ async function pickAttachment(userDataPath: string): Promise<PickedAttachment | 
   const source = result.filePaths[0]
   if (result.canceled || !source) return null
   const drafts = join(userDataPath, 'drafts')
-  mkdirSync(drafts, { recursive: true })
+  await mkdir(drafts, { recursive: true })
   const token = `${randomUUID()}${extname(source).toLowerCase()}`
   const sourceStat = await stat(source)
   if (sourceStat.size > 2 * 1024 * 1024 * 1024) throw new Error('Attachments are limited to 2 GB')
-  await copyFile(source, safeMediaPath(drafts, token))
-  return { token, name: basename(source), size: sourceStat.size, mimeType: mimeForPath(source),
+  const destination = safeMediaPath(drafts, token)
+  try {
+    await copyFile(source, destination)
+  } catch (error) {
+    await rm(destination, { force: true }).catch(() => undefined)
+    throw error
+  }
+  return { token, name: basename(source), size: sourceStat.size, mimeType: mimeTypeForPath(source),
     previewUrl: `warish-media://drafts/${encodeURIComponent(token)}` }
 }
 
@@ -301,13 +310,6 @@ function safeMediaPath(directory: string, token: string): string {
   const path = resolve(directory, token)
   if (!path.startsWith(`${parent}${process.platform === 'win32' ? '\\' : '/'}`)) throw new Error('Invalid media path')
   return path
-}
-
-function mimeForPath(path: string): string {
-  const map: Record<string, string> = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp',
-    '.gif': 'image/gif', '.mp4': 'video/mp4', '.webm': 'video/webm', '.ogg': 'audio/ogg', '.opus': 'audio/ogg',
-    '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.pdf': 'application/pdf', '.txt': 'text/plain' }
-  return map[extname(path).toLowerCase()] ?? 'application/octet-stream'
 }
 
 function showWindow(): void { mainWindow?.show(); mainWindow?.focus() }

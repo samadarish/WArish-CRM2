@@ -68,7 +68,7 @@ function RailButton({ destination, current, expanded, label, onClick, children }
   const active = destination === current
   const button = <button className={`nav-button ${active ? 'active' : ''}`} aria-label={label}
     aria-current={active ? 'page' : undefined} onClick={() => onClick(destination)}>{children}<span>{label}</span></button>
-  return expanded ? button : <Tooltip label={label} placement="right">{button}</Tooltip>
+  return expanded ? button : <Tooltip key={active ? 'active' : 'inactive'} label={label} placement="right">{button}</Tooltip>
 }
 
 function RailControl({ expanded, label, disabled, onClick, children }: {

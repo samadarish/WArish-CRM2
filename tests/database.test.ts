@@ -447,6 +447,25 @@ describe('WarishDatabase', () => {
     database.close()
   })
 
+  it('never regresses sent, delivered, or read acknowledgements when updates arrive out of order', () => {
+    const { database } = createDatabase()
+    const chatId = '15550006668@s.whatsapp.net'
+    database.storeMessage({ id: 'read-message', chatId, fromMe: true, kind: 'text', text: 'Already read',
+      timestamp: 2_000, status: 'read', incrementUnread: false })
+
+    database.storeMessage({ id: 'read-message', chatId, fromMe: true, kind: 'text', text: 'History replay',
+      timestamp: 2_000, status: 'sent', incrementUnread: false })
+    expect(database.getMessage('read-message').status).toBe('read')
+    expect(database.updateMessageStatus('read-message', 'delivered')).toBe('read')
+    expect(database.updateMessageStatus('read-message', 'sent')).toBe('read')
+
+    database.storeMessage({ id: 'delivered-message', chatId, fromMe: true, kind: 'text', text: 'Delivered',
+      timestamp: 3_000, status: 'delivered', incrementUnread: false })
+    expect(database.updateMessageStatus('delivered-message', 'sent')).toBe('delivered')
+    expect(database.updateMessageStatus('missing-message', 'read')).toBeUndefined()
+    database.close()
+  })
+
   it('filters the complete chat query by exact CRM stage while preserving search and pagination', () => {
     const { database } = createDatabase()
     const crm = new CrmRepository(database, () => undefined)

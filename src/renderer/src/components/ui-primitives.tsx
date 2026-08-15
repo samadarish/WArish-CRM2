@@ -140,9 +140,12 @@ export function DropdownMenu({ label, icon, items, className = 'icon-button', pl
   onOpenChange?(open: boolean): void
 }): React.JSX.Element {
   const triggerRef = useRef<HTMLButtonElement>(null)
+  const pendingActionRef = useRef<DropdownMenuItem | undefined>(undefined)
+  const restoreFocusRef = useRef(false)
   const tooltipRef = useRef<HTMLDivElement>(null)
   const tooltipTimerRef = useRef<number | undefined>(undefined)
   const tooltipId = useId()
+  const [observedOpen, setObservedOpen] = useState(false)
   const [tooltipOpen, setTooltipOpen] = useState(false)
   const [tooltipPosition, setTooltipPosition] = useState({ left: 0, top: 0, placement: 'top' as 'top' | 'bottom' })
   const closeTooltip = (): void => {
@@ -161,6 +164,16 @@ export function DropdownMenu({ label, icon, items, className = 'icon-button', pl
   useEffect(() => () => {
     if (tooltipTimerRef.current !== undefined) window.clearTimeout(tooltipTimerRef.current)
   }, [])
+  const menuOpen = isOpen ?? observedOpen
+  useLayoutEffect(() => {
+    if (menuOpen || (!restoreFocusRef.current && !pendingActionRef.current)) return
+    restoreFocusRef.current = false
+    const trigger = triggerRef.current ?? undefined
+    trigger?.focus({ preventScroll: true })
+    const action = pendingActionRef.current
+    pendingActionRef.current = undefined
+    action?.onAction(trigger)
+  }, [menuOpen])
   useLayoutEffect(() => {
     if (!tooltipOpen) return
     const updatePosition = (): void => {
@@ -187,6 +200,7 @@ export function DropdownMenu({ label, icon, items, className = 'icon-button', pl
   }, [tooltipOpen])
   return <>
     <AriaMenuTrigger isOpen={isOpen} onOpenChange={(open) => {
+      setObservedOpen(open)
       if (open) closeTooltip()
       onOpenChange?.(open)
     }}>
@@ -196,17 +210,21 @@ export function DropdownMenu({ label, icon, items, className = 'icon-button', pl
       <span aria-hidden="true">{icon}</span>
     </AriaButton>
     <AriaPopover className="ui-popover ui-menu-popover" placement={placement} offset={4} shouldFlip>
-      <AriaMenu className="ui-menu" items={items} onAction={(key) => {
-        const item = items.find((candidate) => candidate.id === key)
-        if (!item) return
-        triggerRef.current?.focus()
-        item.onAction(triggerRef.current ?? undefined)
+      <div className="ui-menu-event-boundary" onKeyDownCapture={(event) => {
+        if (event.key === 'Escape') restoreFocusRef.current = true
       }}>
-        {(item) => <AriaMenuItem id={item.id} textValue={item.label} isDisabled={item.disabled}
-          className={`ui-menu-item ${item.danger ? 'danger-text' : ''}`}>
-          {item.icon}<span>{item.label}</span>
-        </AriaMenuItem>}
-      </AriaMenu>
+        <AriaMenu className="ui-menu" items={items} onAction={(key) => {
+          const item = items.find((candidate) => candidate.id === key)
+          if (!item) return
+          pendingActionRef.current = item
+          restoreFocusRef.current = true
+        }}>
+          {(item) => <AriaMenuItem id={item.id} textValue={item.label} isDisabled={item.disabled}
+            className={`ui-menu-item ${item.danger ? 'danger-text' : ''}`}>
+            {item.icon}<span>{item.label}</span>
+          </AriaMenuItem>}
+        </AriaMenu>
+      </div>
     </AriaPopover>
   </AriaMenuTrigger>
     {!disabled && tooltipOpen && createPortal(<div ref={tooltipRef} id={tooltipId} role="tooltip"

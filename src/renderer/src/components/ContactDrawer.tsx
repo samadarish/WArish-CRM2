@@ -56,12 +56,12 @@ export const ContactDrawer = memo(function ContactDrawer({ chat, onClose, onArch
     },
     onError: (error) => pushNotice(error instanceof Error ? error.message : 'Could not update this conversation')
   })
-  const muted = Boolean(details.mutedUntil && details.mutedUntil > Date.now())
+  const muted = isMuted(details.mutedUntil)
   const conversationOverview = <ConversationOverview details={details} muted={muted} pending={action.isPending}
     onUpdate={(patch) => action.mutate(patch)} />
   const persistentClasses = `${persistent ? 'persistent-contact-panel' : ''} ${overlayOpen ? 'details-overlay-open' : ''}`
 
-  if (details.kind === 'direct' && crmQuery.data) return <CrmContactPanel contactId={crmQuery.data.id}
+  if (details.kind === 'direct' && crmQuery.data) return <CrmContactPanel key={crmQuery.data.id} contactId={crmQuery.data.id}
     stages={stagesQuery.data ?? []} onClose={onClose} inConversation overviewPrefix={conversationOverview}
     onJumpToMessage={onJumpToMessage} persistent={persistent} overlayOpen={overlayOpen} />
 
@@ -109,6 +109,8 @@ export const ContactDrawer = memo(function ContactDrawer({ chat, onClose, onArch
     </>}
   </aside>
 })
+
+function isMuted(mutedUntil?: number): boolean { return Boolean(mutedUntil && mutedUntil > Date.now()) }
 
 function ConversationOverview({ details, muted, pending, onUpdate }: {
   details: ContactDetails

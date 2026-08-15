@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest'
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { MessageDto } from '../src/shared/contracts'
 import { MessageBubble } from '../src/renderer/src/components/MessageBubble'
@@ -14,6 +14,7 @@ function createMessage(patch: Partial<MessageDto> = {}): MessageDto {
 }
 
 afterEach(() => {
+  cleanup()
   vi.unstubAllGlobals()
   Reflect.deleteProperty(window, 'warish')
 })
@@ -43,7 +44,7 @@ describe('MessageBubble', () => {
     expect(screen.getByText('Akshitha')).toBeInTheDocument()
     expect(screen.getByText('Original message')).toBeInTheDocument()
     expect(container.querySelector('.message-row')).toHaveClass('has-reactions')
-    fireEvent.click(screen.getByRole('button', { name: /You Original message/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'You: Original message' }))
     expect(onOpenQuote).toHaveBeenCalledWith('quoted-1')
   })
 

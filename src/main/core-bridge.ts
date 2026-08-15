@@ -4,13 +4,24 @@ import { join } from 'node:path'
 import { MessageChannelMain, utilityProcess, type MessagePortMain, type UtilityProcess } from 'electron'
 import type { AppError, CoreEventEnvelope, RpcMethod, RpcRequest, RpcResponse } from '../shared/contracts'
 
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
+const REQUEST_TIMEOUT_MS: Partial<Record<RpcMethod, number>> = {
+  'contacts.hydrate': 5 * 60_000,
+  'contacts.refresh': 10 * 60_000,
+  'media.download': 10 * 60_000,
+  'message.forward': 10 * 60_000,
+  'message.loadEarlier': 60_000,
+  'message.retry': 10 * 60_000,
+  'message.send': 10 * 60_000
+}
+
 export class CoreBridge extends EventEmitter {
   readonly #userDataPath: string
   readonly #masterKey: Buffer
   readonly #appVersion: string
   #child?: UtilityProcess
   #port?: MessagePortMain
-  #pending = new Map<string, { resolve(value: unknown): void; reject(error: unknown): void }>()
+  #pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void }>()
   #ready?: Promise<void>
   #intentionalStop = false
 
@@ -75,17 +86,20 @@ export class CoreBridge extends EventEmitter {
     await this.start()
     const id = randomUUID()
     return new Promise<T>((resolve, reject) => {
-      this.#pending.set(id, { resolve: resolve as (value: unknown) => void, reject })
-      this.#port!.postMessage({ id, method, params } satisfies RpcRequest)
       const timeout = setTimeout(() => {
         if (!this.#pending.delete(id)) return
         reject(new Error(`Core request timed out: ${method}`))
-      }, 30_000)
-      const pending = this.#pending.get(id)!
+      }, REQUEST_TIMEOUT_MS[method] ?? DEFAULT_REQUEST_TIMEOUT_MS)
       this.#pending.set(id, {
-        resolve: (value) => { clearTimeout(timeout); pending.resolve(value) },
-        reject: (error) => { clearTimeout(timeout); pending.reject(error) }
+        resolve: (value) => { clearTimeout(timeout); resolve(value as T) },
+        reject: (error) => { clearTimeout(timeout); reject(error) }
       })
+      try { this.#port!.postMessage({ id, method, params } satisfies RpcRequest) }
+      catch (error) {
+        clearTimeout(timeout)
+        this.#pending.delete(id)
+        reject(error instanceof Error ? error : new Error(String(error)))
+      }
     })
   }
 

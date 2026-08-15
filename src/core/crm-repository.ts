@@ -47,7 +47,7 @@ export class ContactRestrictedError extends Error {
   }
 }
 
-/** Local-first CRM operations. All business data stays in the same encrypted-at-rest app boundary as WhatsApp. */
+/** Local-first CRM operations. All business data stays inside the same local application data boundary as WhatsApp. */
 export class CrmRepository {
   readonly #database: WarishDatabase
   readonly #emit: EmitEvent
@@ -84,10 +84,13 @@ export class CrmRepository {
     `).get(monthStart, monthStart) as Row
     const pipeline = this.#database.db.prepare(`
       SELECT stage.*, COUNT(crm.id) AS contact_count,
-        COALESCE(SUM((SELECT COALESCE(SUM(orders.total), 0) FROM crm_orders orders
-          WHERE orders.contact_id=crm.id AND orders.status!='cancelled')), 0) AS pipeline_value
+        COALESCE(SUM(order_totals.pipeline_value), 0) AS pipeline_value
       FROM crm_pipeline_stages stage
       LEFT JOIN crm_contacts crm ON crm.stage_id=stage.id AND crm.lifecycle IN ('lead','customer')
+      LEFT JOIN (
+        SELECT contact_id, SUM(total) AS pipeline_value FROM crm_orders
+        WHERE status!='cancelled' GROUP BY contact_id
+      ) order_totals ON order_totals.contact_id=crm.id
       GROUP BY stage.id ORDER BY stage.position, stage.id
     `).all() as Row[]
     return {
@@ -320,7 +323,7 @@ export class CrmRepository {
     if (input.status) { conditions.push('status=?'); values.push(input.status) }
     const now = new Date()
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-    const tomorrow = todayStart + 24 * 60 * 60 * 1000
+    const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime()
     if (input.due === 'overdue') { conditions.push("status='open' AND due_at<?"); values.push(Date.now()) }
     if (input.due === 'today') { conditions.push('due_at>=? AND due_at<?'); values.push(todayStart, tomorrow) }
     if (input.due === 'upcoming') { conditions.push('due_at>=?'); values.push(tomorrow) }
@@ -434,28 +437,59 @@ export class CrmRepository {
 
   listOrders(contactId?: string): CrmOrderDto[] {
     const rows = contactId
-      ? this.#database.db.prepare('SELECT id FROM crm_orders WHERE contact_id=? ORDER BY created_at DESC, id DESC').all(contactId) as Row[]
-      : this.#database.db.prepare('SELECT id FROM crm_orders ORDER BY created_at DESC, id DESC LIMIT 500').all() as Row[]
-    return rows.map((row) => this.getOrder(String(row.id)))
+      ? this.#database.db.prepare('SELECT * FROM crm_orders WHERE contact_id=? ORDER BY created_at DESC, id DESC').all(contactId) as Row[]
+      : this.#database.db.prepare('SELECT * FROM crm_orders ORDER BY created_at DESC, id DESC LIMIT 500').all() as Row[]
+    return this.#mapOrders(rows)
   }
 
   getOrder(orderId: string): CrmOrderDto {
     const order = this.#database.db.prepare('SELECT * FROM crm_orders WHERE id=?').get(orderId) as Row | undefined
     if (!order) throw new Error('Order not found')
-    const items = this.#database.db.prepare('SELECT * FROM crm_order_items WHERE order_id=? ORDER BY position, id').all(orderId) as Row[]
-    const payments = this.#database.db.prepare('SELECT * FROM crm_payments WHERE order_id=? ORDER BY paid_at, id').all(orderId) as Row[]
-    const paidAmount = roundMoney(payments.reduce((total, row) => total + numberValue(row.amount), 0))
-    const total = numberValue(order.total)
-    return {
-      id: String(order.id), contactId: String(order.contact_id), orderNumber: String(order.order_number),
-      status: order.status as CrmOrderDto['status'], paymentStatus: order.payment_status as CrmOrderDto['paymentStatus'],
-      currency: String(order.currency), subtotal: numberValue(order.subtotal), discount: numberValue(order.discount),
-      tax: numberValue(order.tax), total, paidAmount, balanceAmount: roundMoney(Math.max(0, total - paidAmount)),
-      shippingAddress: textValue(order.shipping_address), appointmentAt: numberOptional(order.appointment_at),
-      expectedAt: numberOptional(order.expected_at), customerNote: textValue(order.customer_note),
-      internalNote: textValue(order.internal_note), items: items.map(mapOrderItem), payments: payments.map(mapPayment),
-      createdAt: numberValue(order.created_at), updatedAt: numberValue(order.updated_at), completedAt: numberOptional(order.completed_at)
+    return this.#mapOrders([order])[0]!
+  }
+
+  #mapOrders(orders: Row[]): CrmOrderDto[] {
+    if (!orders.length) return []
+    const itemsByOrder = new Map<string, CrmOrderItemDto[]>()
+    const paymentsByOrder = new Map<string, CrmPaymentDto[]>()
+    for (const batch of chunks(orders.map((order) => String(order.id)), 500)) {
+      const placeholders = batch.map(() => '?').join(', ')
+      const items = this.#database.db.prepare(
+        `SELECT * FROM crm_order_items WHERE order_id IN (${placeholders}) ORDER BY order_id, position, id`
+      ).all(...batch) as Row[]
+      for (const row of items) {
+        const orderId = String(row.order_id)
+        const current = itemsByOrder.get(orderId) ?? []
+        current.push(mapOrderItem(row))
+        itemsByOrder.set(orderId, current)
+      }
+      const payments = this.#database.db.prepare(
+        `SELECT * FROM crm_payments WHERE order_id IN (${placeholders}) ORDER BY order_id, paid_at, id`
+      ).all(...batch) as Row[]
+      for (const row of payments) {
+        const orderId = String(row.order_id)
+        const current = paymentsByOrder.get(orderId) ?? []
+        current.push(mapPayment(row))
+        paymentsByOrder.set(orderId, current)
+      }
     }
+    return orders.map((order) => {
+      const id = String(order.id)
+      const items = itemsByOrder.get(id) ?? []
+      const payments = paymentsByOrder.get(id) ?? []
+      const paidAmount = roundMoney(payments.reduce((total, payment) => total + payment.amount, 0))
+      const total = numberValue(order.total)
+      return {
+        id, contactId: String(order.contact_id), orderNumber: String(order.order_number),
+        status: order.status as CrmOrderDto['status'], paymentStatus: order.payment_status as CrmOrderDto['paymentStatus'],
+        currency: String(order.currency), subtotal: numberValue(order.subtotal), discount: numberValue(order.discount),
+        tax: numberValue(order.tax), total, paidAmount, balanceAmount: roundMoney(Math.max(0, total - paidAmount)),
+        shippingAddress: textValue(order.shipping_address), appointmentAt: numberOptional(order.appointment_at),
+        expectedAt: numberOptional(order.expected_at), customerNote: textValue(order.customer_note),
+        internalNote: textValue(order.internal_note), items, payments,
+        createdAt: numberValue(order.created_at), updatedAt: numberValue(order.updated_at), completedAt: numberOptional(order.completed_at)
+      }
+    })
   }
 
   saveOrder(input: CrmOrderInput): CrmOrderDto {
@@ -505,6 +539,7 @@ export class CrmRepository {
       }
       const paidRow = this.#database.db.prepare('SELECT COALESCE(SUM(amount), 0) AS paid FROM crm_payments WHERE order_id=?').get(id) as Row
       const paid = roundMoney(numberValue(paidRow.paid))
+      if (paid > total + 0.005) throw new Error('Payment cannot exceed the order total')
       const paymentStatus = paid <= 0 ? 'unpaid' : paid + 0.005 >= total ? 'paid' : 'partial'
       this.#database.db.prepare('UPDATE crm_orders SET payment_status=? WHERE id=?').run(paymentStatus, id)
       if (status === 'confirmed' || status === 'in-progress' || status === 'completed') {
@@ -675,6 +710,12 @@ function mapPayment(row: Row): CrmPaymentDto {
 function mapActivity(row: Row): CrmActivityDto {
   return { id: String(row.id), contactId: String(row.contact_id), type: row.type as CrmActivityDto['type'],
     summary: String(row.summary), metadata: parseObject(row.metadata), createdAt: numberValue(row.created_at) }
+}
+
+function chunks<T>(values: T[], size: number): T[][] {
+  const result: T[][] = []
+  for (let index = 0; index < values.length; index += size) result.push(values.slice(index, index + size))
+  return result
 }
 
 function calculateLine(input: CrmOrderInput['items'][number], position: number): Omit<CrmOrderItemDto, 'id'> & {

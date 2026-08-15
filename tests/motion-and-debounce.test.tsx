@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest'
-import { act, render, screen } from '@testing-library/react'
+import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MotionPresence } from '../src/renderer/src/motion'
 import { MOTION_PREFERENCE_EVENT } from '../src/renderer/src/motion-preference'
@@ -14,6 +14,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  cleanup()
   delete document.documentElement.dataset.motion
   delete document.documentElement.dataset.surfaceTransition
   Reflect.deleteProperty(document, 'startViewTransition')

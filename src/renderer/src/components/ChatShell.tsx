@@ -486,7 +486,7 @@ const ChatRow = memo(function ChatRow({ chat, active, showPreview, nested = fals
 
 function ChatCrmSignal({ crm }: { crm: CrmChatIndicatorDto }): React.JSX.Element {
   return <span className="chat-crm-signal"><span style={{ '--stage-color': crm.stageColor } as React.CSSProperties}><i />{crm.stageName}</span>
-    {crm.nextTask && <span className={crm.nextTask.dueAt && crm.nextTask.dueAt < Date.now() ? 'overdue' : ''}><CalendarClock />{crm.nextTask.dueAt ? compactTaskDate(crm.nextTask.dueAt) : 'Next task'}</span>}</span>
+    {crm.nextTask && <span className={isPastDue(crm.nextTask.dueAt) ? 'overdue' : ''}><CalendarClock />{crm.nextTask.dueAt ? compactTaskDate(crm.nextTask.dueAt) : 'Next task'}</span>}</span>
 }
 
 function ContactIdentityDetails({ identity, header = false }: { identity: ContactIdentityPresentation; header?: boolean }): React.JSX.Element {
@@ -1087,7 +1087,7 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
 
   const replaceAttachment = (picked: PickedAttachment, kind: NonNullable<DraftDto['attachmentKind']>): void => {
     setAttachment((current) => {
-      if (current && current.token !== picked.token) void window.warish.media.discardDraft(current.token)
+      if (current && current.token !== picked.token) discardDraftQuietly(current.token)
       return picked
     })
     setAttachmentKind(kind)
@@ -1152,6 +1152,7 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
       const next = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 32_000 })
       next.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data) }
       next.onerror = (event) => {
+        recordingCancelledRef.current = true
         stream.getTracks().forEach((track) => track.stop())
         if (recordingTimer.current !== undefined) window.clearInterval(recordingTimer.current)
         recordingTimer.current = undefined
@@ -1333,7 +1334,7 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
         clipboardImageRequestRef.current += 1
         setIsStagingImage(false)
         setReplyTo(undefined)
-        if (attachment) void window.warish.media.discardDraft(attachment.token)
+        if (attachment) discardDraftQuietly(attachment.token)
         setAttachment(undefined)
         setAttachmentKind(undefined)
       }}><X /></IconButton>
@@ -1408,7 +1409,7 @@ function CrmCaptureDialog({ chat, capture, onClose }: {
   const [body, setBody] = useState(preview)
   const [title, setTitle] = useState('Follow up on WhatsApp')
   const [description, setDescription] = useState(preview)
-  const [due, setDue] = useState(toLocalDateTimeInput(Date.now() + 24 * 60 * 60 * 1000))
+  const [due, setDue] = useState(defaultTaskDueInput)
   const [priority, setPriority] = useState<CrmTaskDto['priority']>('normal')
   const queryClient = useQueryClient()
   const pushNotice = useUiStore((state) => state.pushNotice)
@@ -1562,6 +1563,9 @@ function mergeMessages(current: MessageDto[], incoming: MessageDto[]): MessageDt
   return [...merged.values()].sort(compareMessages)
 }
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : 'Something went wrong' }
+function discardDraftQuietly(token: string): void {
+  void window.warish.media.discardDraft(token).catch(() => undefined)
+}
 function messagePreview(message: MessageDto): string {
   return (message.text ?? message.rich?.body ?? message.rich?.title ?? message.attachment?.fileName ?? message.kind).trim().slice(0, 500)
 }
@@ -1569,6 +1573,8 @@ function toLocalDateTimeInput(value: number): string {
   const date = new Date(value - new Date(value).getTimezoneOffset() * 60_000)
   return date.toISOString().slice(0, 16)
 }
+function defaultTaskDueInput(): string { return toLocalDateTimeInput(Date.now() + 24 * 60 * 60 * 1000) }
+function isPastDue(value?: number): boolean { return Boolean(value && value < Date.now()) }
 function onMediaRecorderError(_event: Event, notify: (message: string) => void): void {
   notify('Voice recording failed. Check your microphone and try again.')
 }

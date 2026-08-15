@@ -1,16 +1,22 @@
-import { closeSync, fstatSync, mkdirSync, openSync, readSync, readdirSync, rmSync } from 'node:fs'
+import { closeSync, fstatSync, mkdirSync, openSync, readSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import pino, { type Logger } from 'pino'
 import type { LogEntryDto } from '../shared/contracts'
 
 type CoreLogDestination = ReturnType<typeof pino.destination>
 const loggerDestinations = new WeakMap<Logger, { destination: CoreLogDestination; ready: Promise<void> }>()
+const MAX_RETAINED_LOG_BYTES = 64 * 1024 * 1024
 
 export function createCoreLogger(logDirectory: string): Logger {
   mkdirSync(logDirectory, { recursive: true })
   pruneLogs(logDirectory)
   const date = new Date().toISOString().slice(0, 10)
-  const destination = pino.destination({ dest: join(logDirectory, `warish-${date}.log`), sync: false, mkdir: true })
+  const destination = pino.destination({
+    dest: join(logDirectory, `warish-${date}.log`),
+    sync: false,
+    mkdir: true,
+    minLength: 4_096
+  })
   const ready = new Promise<void>((resolve, reject) => {
     const onReady = (): void => { destination.off('error', onError); resolve() }
     const onError = (error: Error): void => { destination.off('ready', onReady); reject(error) }
@@ -23,8 +29,11 @@ export function createCoreLogger(logDirectory: string): Logger {
       base: { component: 'core' },
       redact: {
         paths: [
-          '*.key', '*.keys', '*.creds', '*.auth', '*.message', '*.text', '*.body',
-          '*.phoneNumber', '*.remoteJid', '*.participant'
+          'key', '*.key', 'keys', '*.keys', 'creds', '*.creds', 'auth', '*.auth',
+          'message', '*.message', 'text', '*.text', 'body', '*.body',
+          'phoneNumber', '*.phoneNumber', 'remoteJid', '*.remoteJid', 'participant', '*.participant',
+          'chatId', '*.chatId', 'channelId', '*.channelId', 'messageId', '*.messageId',
+          'attachmentToken', '*.attachmentToken', 'identityId', '*.identityId'
         ],
         censor: '[REDACTED]'
       }
@@ -140,11 +149,27 @@ function normalizeLogTimestamp(value: unknown): number {
 
 function pruneLogs(directory: string): void {
   const cutoff = Date.now() - 14 * 24 * 60 * 60 * 1000
+  const retained: Array<{ path: string; name: string; bytes: number }> = []
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     if (!entry.isFile() || !entry.name.startsWith('warish-') || !entry.name.endsWith('.log')) continue
     const match = /^warish-(\d{4}-\d{2}-\d{2})\.log$/.exec(entry.name)
+    const path = join(directory, entry.name)
     if (match?.[1] && new Date(`${match[1]}T00:00:00Z`).getTime() < cutoff) {
-      rmSync(join(directory, entry.name), { force: true })
+      rmSync(path, { force: true })
+      continue
+    }
+    try { retained.push({ path, name: entry.name, bytes: statSync(path).size }) } catch { /* A transient log cannot block startup. */ }
+  }
+
+  retained.sort((left, right) => left.name.localeCompare(right.name))
+  let totalBytes = retained.reduce((total, entry) => total + entry.bytes, 0)
+  for (let index = 0; totalBytes > MAX_RETAINED_LOG_BYTES && index < retained.length - 1; index += 1) {
+    const entry = retained[index]!
+    try {
+      rmSync(entry.path, { force: true })
+      totalBytes -= entry.bytes
+    } catch {
+      // Diagnostics retention must never prevent the messaging core from starting.
     }
   }
 }

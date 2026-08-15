@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient, type QueryClient, type QueryKey } from '@tanstack/react-query'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import {
@@ -119,14 +119,17 @@ export function CrmShell(): React.JSX.Element {
           error={contactsQuery.isError} stages={stagesQuery.data ?? []} stageId={stageId} onStage={setStageId}
           onContact={(id) => openCrmContact(id)} onRetry={() => void contactsQuery.refetch()} emptyLabel={view} />}
         {view === 'orders' && <OrdersView orders={ordersQuery.data} contacts={allContactsQuery.data ?? []}
-          loading={ordersQuery.isLoading} onEdit={(order) => { setEditingOrder(order); setOrderDialogContactId(order.contactId) }} />}
+          loading={ordersQuery.isLoading} error={ordersQuery.isError} onRetry={() => void ordersQuery.refetch()}
+          onEdit={(order) => { setEditingOrder(order); setOrderDialogContactId(order.contactId) }} />}
         {view === 'tasks' && <TasksView tasks={tasksQuery.data} contacts={allContactsQuery.data ?? []}
-          loading={tasksQuery.isLoading} onContact={(id) => openCrmContact(id)} />}
-        {view === 'catalog' && <CatalogView items={catalogQuery.data} loading={catalogQuery.isLoading}
+          loading={tasksQuery.isLoading} error={tasksQuery.isError} onRetry={() => void tasksQuery.refetch()}
+          onContact={(id) => openCrmContact(id)} />}
+        {view === 'catalog' && <CatalogView items={catalogQuery.data} loading={catalogQuery.isLoading} error={catalogQuery.isError}
+          onRetry={() => void catalogQuery.refetch()}
           onEdit={setCatalogDialogItem} onError={(message) => pushNotice(message)} />}
       </section>
     </div>
-    <MotionPresence show={Boolean(selectedContactId)}>{selectedContactId && <CrmContactPanel contactId={selectedContactId} stages={stagesQuery.data ?? []}
+    <MotionPresence show={Boolean(selectedContactId)}>{selectedContactId && <CrmContactPanel key={selectedContactId} contactId={selectedContactId} stages={stagesQuery.data ?? []}
       onClose={() => openCrmContact()} />}</MotionPresence>
     <MotionPresence show={Boolean(taskDialogContactId)}>{taskDialogContactId && <TaskDialog initialContactId={taskDialogContactId} contacts={allContactsQuery.data ?? []}
       onClose={() => setTaskDialogContactId(undefined)} />}</MotionPresence>
@@ -225,9 +228,11 @@ function VirtualContactsTable({ contacts, onContact }: { contacts: CrmContactSum
   </div>
 }
 
-function OrdersView({ orders, contacts, loading, onEdit }: { orders?: CrmOrderDto[]; contacts: CrmContactSummaryDto[]; loading: boolean; onEdit(order: CrmOrderDto): void }): React.JSX.Element {
+function OrdersView({ orders, contacts, loading, error, onRetry, onEdit }: { orders?: CrmOrderDto[]; contacts: CrmContactSummaryDto[];
+  loading: boolean; error: boolean; onRetry(): void; onEdit(order: CrmOrderDto): void }): React.JSX.Element {
   const names = useMemo(() => new Map(contacts.map((contact) => [contact.id, contact.name])), [contacts])
   if (loading) return <CrmLoading label="Loading orders…" />
+  if (error) return <CrmError label="Could not load orders" onRetry={onRetry} />
   if (!orders?.length) return <CrmEmpty icon={<ShoppingBag />} title={contacts.length ? 'No orders yet' : 'No customers to order for'}
     description={contacts.length ? 'New orders will appear here.' : 'Save a WhatsApp contact before creating an order.'} />
   return orders.length > 80 ? <VirtualOrdersTable orders={orders} names={names} onEdit={onEdit} />
@@ -270,7 +275,8 @@ function VirtualOrdersTable({ orders, names, onEdit }: { orders: CrmOrderDto[]; 
   </div>
 }
 
-function TasksView({ tasks, contacts, loading, onContact }: { tasks?: CrmTaskDto[]; contacts: CrmContactSummaryDto[]; loading: boolean; onContact(id: string): void }): React.JSX.Element {
+function TasksView({ tasks, contacts, loading, error, onRetry, onContact }: { tasks?: CrmTaskDto[]; contacts: CrmContactSummaryDto[];
+  loading: boolean; error: boolean; onRetry(): void; onContact(id: string): void }): React.JSX.Element {
   const queryClient = useQueryClient()
   const pushNotice = useUiStore((state) => state.pushNotice)
   const names = useMemo(() => new Map(contacts.map((contact) => [contact.id, contact.name])), [contacts])
@@ -279,6 +285,7 @@ function TasksView({ tasks, contacts, loading, onContact }: { tasks?: CrmTaskDto
       ['crm', 'contact', task.contactId], ['crm', 'activity', task.contactId]),
     onError: (error) => pushNotice(errorMessage(error)) })
   if (loading) return <CrmLoading label="Loading follow-ups…" />
+  if (error) return <CrmError label="Could not load follow-ups" onRetry={onRetry} />
   if (!tasks?.length) return <CrmEmpty icon={<ListTodo />} title={contacts.length ? 'No follow-ups yet' : 'No contacts to follow up with'}
     description={contacts.length ? 'Tasks created for customers will appear here.' : 'Save a WhatsApp contact before creating a task.'} />
   const renderTask = (task: CrmTaskDto, virtualStart?: number, virtualIndex?: number, measureElement?: (element: HTMLElement | null) => void): React.JSX.Element => <TaskRow key={task.id}
@@ -322,11 +329,13 @@ function VirtualTaskList({ tasks, renderTask }: {
   </div>
 }
 
-function CatalogView({ items, loading, onEdit, onError }: { items?: CrmCatalogItemDto[]; loading: boolean; onEdit(item: CrmCatalogItemDto): void; onError(message: string): void }): React.JSX.Element {
+function CatalogView({ items, loading, error, onRetry, onEdit, onError }: { items?: CrmCatalogItemDto[]; loading: boolean;
+  error: boolean; onRetry(): void; onEdit(item: CrmCatalogItemDto): void; onError(message: string): void }): React.JSX.Element {
   const queryClient = useQueryClient()
   const archive = useMutation({ mutationFn: (id: string) => window.warish.crm.catalog.delete(id),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['crm', 'catalog'] }), onError: (error) => onError(errorMessage(error)) })
   if (loading) return <CrmLoading label="Loading catalog…" />
+  if (error) return <CrmError label="Could not load the catalog" onRetry={onRetry} />
   if (!items?.length) return <CrmEmpty icon={<Package />} title="No catalog items" />
   return <div className="catalog-grid">{items.map((item) => <article key={item.id} className={`catalog-card ${item.active ? '' : 'inactive'}`}>
     <header><span className="catalog-icon">{item.type === 'product' ? <Package /> : <BriefcaseBusiness />}</span><div><small>{item.type}{item.sku ? ` · ${item.sku}` : ''}</small><strong>{item.name}</strong></div>
@@ -382,9 +391,6 @@ export function CrmContactPanel({ contactId, stages, onClose, inConversation = f
       queryKey: ['crm', 'activity', contactId], queryFn: () => window.warish.crm.activity(contactId, 100), staleTime: 15_000
     })
   }, [contactId, queryClient])
-  useEffect(() => {
-    setTab('overview'); setEditing(false); setContactSaveOpen(false); setTaskEditor(undefined); setOrderEditor(undefined)
-  }, [contactId])
   return <><aside className={`crm-contact-panel ${inConversation ? 'in-conversation' : ''} ${persistent ? 'persistent-contact-panel' : ''} ${overlayOpen ? 'details-overlay-open' : ''}`} aria-label="CRM contact record"><header><div><span>{inConversation ? 'CRM customer' : 'Contact record'}</span><strong>{inConversation ? 'Customer workspace' : contact?.name ?? 'Loading…'}</strong></div>
     <IconButton className="icon-button contact-panel-close" label="Close customer details" onClick={onClose}><X /></IconButton></header>
     {contactQuery.isError ? <CrmError label="Could not load this customer" onRetry={() => void contactQuery.refetch()} /> : !contact ? <CrmLoading label="Loading contact…" /> : <>
@@ -486,6 +492,7 @@ function ContactNotes({ contactId, onJumpToMessage }: { contactId: string; onJum
       ['crm', 'contact', contactId], ['crm', 'contacts'], ['crm', 'dashboard'])
   }, onError: (error) => pushNotice(errorMessage(error)) })
   const edit = (note: CrmNoteDto): void => { setEditing(note); setBody(note.body) }
+  if (query.isError) return <CrmError label="Could not load notes" onRetry={() => void query.refetch()} />
   return <div className="crm-note-section"><form onSubmit={(event) => { event.preventDefault(); if (body.trim()) save.mutate() }}><textarea value={body}
     onChange={(event) => setBody(event.target.value)} placeholder="Add customer context" /><div className="crm-inline-form-actions">
       {editing && <button type="button" className="secondary-button" onClick={() => { setEditing(undefined); setBody('') }}>Cancel</button>}
@@ -500,6 +507,7 @@ function ContactNotes({ contactId, onJumpToMessage }: { contactId: string; onJum
 
 function ContactOrders({ contactId, onNew, onEdit }: { contactId: string; onNew(): void; onEdit(order: CrmOrderDto): void }): React.JSX.Element {
   const query = useQuery({ queryKey: ['crm', 'orders', contactId], queryFn: () => window.warish.crm.orders.list(contactId) })
+  if (query.isError) return <CrmError label="Could not load purchase history" onRetry={() => void query.refetch()} />
   return <div><button className="primary-button contact-tab-action" onClick={onNew}><Plus />New order</button>{query.data?.map((order) => <button className="contact-order" key={order.id} onClick={() => onEdit(order)}>
     <span><strong>{order.orderNumber}</strong><small>{formatDateTime(order.createdAt)}</small></span><StatusPill value={order.status} /><b>{money(order.total, order.currency)}</b><Pencil /></button>)}
     {!query.isLoading && !query.data?.length && <CrmEmpty icon={<ShoppingBag />} title="No purchase history" />}</div>
@@ -518,6 +526,7 @@ function ContactTasks({ contactId, onNew, onEdit, onJumpToMessage }: { contactId
     invalidateCrmQueries(queryClient, ['crm', 'tasks'], ['crm', 'activity', contactId],
       ['crm', 'contact', contactId], ['crm', 'contacts'], ['crm', 'dashboard'])
   }, onError: (error) => pushNotice(errorMessage(error)) })
+  if (query.isError) return <CrmError label="Could not load follow-ups" onRetry={() => void query.refetch()} />
   return <div><button className="primary-button contact-tab-action" onClick={onNew}><Plus />New task</button>{query.data?.map((task) => <article className="contact-task" key={task.id}>
     <IconButton className={task.status === 'completed' ? 'checked' : ''} label={task.status === 'completed' ? 'Reopen task' : 'Complete task'}
       disabled={complete.isPending} onClick={() => complete.mutate(task)}>{task.status === 'completed' && <Check />}</IconButton>
@@ -530,6 +539,7 @@ function ContactTasks({ contactId, onNew, onEdit, onJumpToMessage }: { contactId
 
 function ContactActivity({ contactId }: { contactId: string }): React.JSX.Element {
   const query = useQuery({ queryKey: ['crm', 'activity', contactId], queryFn: () => window.warish.crm.activity(contactId, 100) })
+  if (query.isError) return <CrmError label="Could not load activity" onRetry={() => void query.refetch()} />
   return <div className="crm-timeline">{query.data?.map((activity) => <article key={activity.id}><i /><div><strong>{activity.summary}</strong><time>{formatDateTime(activity.createdAt)}</time></div></article>)}
     {!query.isLoading && !query.data?.length && <CrmEmpty icon={<RefreshCw />} title="No activity" />}</div>
 }
@@ -544,7 +554,7 @@ function TaskDialog({ initialContactId, contacts, task, onClose }: { initialCont
   const [contactId, setContactId] = useState(initialContactId)
   const [title, setTitle] = useState(task?.title ?? 'Follow up on WhatsApp')
   const [description, setDescription] = useState(task?.description ?? '')
-  const [due, setDue] = useState(task?.dueAt ? toLocalInput(task.dueAt) : toLocalInput(Date.now() + 24 * 60 * 60 * 1000))
+  const [due, setDue] = useState(task?.dueAt ? toLocalInput(task.dueAt) : defaultTaskDueInput)
   const [priority, setPriority] = useState<CrmTaskDto['priority']>(task?.priority ?? 'normal')
   const [status, setStatus] = useState<CrmTaskDto['status']>(task?.status ?? 'open')
   const queryClient = useQueryClient()
@@ -726,4 +736,5 @@ function toLocalInput(value: number): string {
   const date = new Date(value - new Date(value).getTimezoneOffset() * 60_000)
   return date.toISOString().slice(0, 16)
 }
+function defaultTaskDueInput(): string { return toLocalInput(Date.now() + 24 * 60 * 60 * 1000) }
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : 'The CRM action could not be completed' }

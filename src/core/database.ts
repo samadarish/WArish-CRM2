@@ -125,6 +125,7 @@ export class WarishDatabase {
   readonly #crypto: CryptoBox
   readonly #logger: Logger
   #transactionDepth = 0
+  #crmSchemaReady = false
 
   constructor(path: string, masterKey: Buffer, logger: Logger) {
     mkdirSync(dirname(path), { recursive: true })
@@ -134,6 +135,7 @@ export class WarishDatabase {
     this.db = new DatabaseSync(path, { timeout: 5_000, defensive: true })
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA synchronous = NORMAL;')
     this.#migrate()
+    this.#crmSchemaReady = true
   }
 
   close(): void {
@@ -148,7 +150,8 @@ export class WarishDatabase {
   }
 
   sizeBytes(): number {
-    return existsSync(this.path) ? statSync(this.path).size : 0
+    return [this.path, `${this.path}-wal`, `${this.path}-shm`]
+      .reduce((total, path) => total + (existsSync(path) ? statSync(path).size : 0), 0)
   }
 
   transaction<T>(operation: () => T): T {
@@ -693,7 +696,9 @@ export class WarishDatabase {
   storeMessage(input: StoredMessage): void {
     const chatId = this.resolveChatId(input.chatId)
     const raw = input.rawPayload ? this.#crypto.encrypt(input.rawPayload, `message:${input.id}`) : undefined
-    const isNew = !this.db.prepare('SELECT 1 FROM messages WHERE id=?').get(input.id)
+    const existing = this.db.prepare('SELECT status FROM messages WHERE id=?').get(input.id) as { status: DeliveryState } | undefined
+    const isNew = !existing
+    const status = preferredDeliveryState(existing?.status, input.status)
     this.transaction(() => {
       this.upsertChat({ id: chatId, title: jidToLabel(chatId), kind: chatKindForJid(chatId), classificationKnown: false,
         lastMessage: input.text || attachmentPreview(input.kind), lastMessageAt: input.timestamp,
@@ -716,7 +721,7 @@ export class WarishDatabase {
          edited=MAX(excluded.edited, messages.edited), deleted=MAX(excluded.deleted, messages.deleted),
          error=excluded.error, raw_payload=COALESCE(excluded.raw_payload, messages.raw_payload), updated_at=excluded.updated_at`
       ).run(input.id, ACCOUNT_ID, chatId, input.senderId ?? null, input.senderName ?? null, Number(input.fromMe),
-        input.kind, input.text ?? null, input.timestamp, input.status, input.quotedMessageId ?? null,
+        input.kind, input.text ?? null, input.timestamp, status, input.quotedMessageId ?? null,
         input.quoted?.senderName ?? null, input.quoted?.fromMe === undefined ? null : Number(input.quoted.fromMe),
         input.quoted?.kind ?? null, input.quoted?.text ?? null, input.rich ? JSON.stringify(input.rich) : null,
         Number(input.edited ?? false), Number(input.deleted ?? false), input.clientId ?? null, input.error ?? null,
@@ -850,8 +855,12 @@ export class WarishDatabase {
     return new Set(rows.map((row) => row.token))
   }
 
-  updateMessageStatus(messageId: string, status: DeliveryState, error?: string): void {
-    this.db.prepare('UPDATE messages SET status=?, error=?, updated_at=? WHERE id=?').run(status, error ?? null, Date.now(), messageId)
+  updateMessageStatus(messageId: string, status: DeliveryState, error?: string): DeliveryState | undefined {
+    const updated = this.db.prepare(`UPDATE messages SET status=CASE
+      WHEN (status='read' AND ? IN ('sent','delivered')) OR (status='delivered' AND ?='sent') THEN status
+      ELSE ? END, error=?, updated_at=? WHERE id=? RETURNING status`
+    ).get(status, status, status, error ?? null, Date.now(), messageId) as { status: DeliveryState } | undefined
+    return updated?.status
   }
 
   getOutboxForMessage(messageId: string): { clientId: string; payload: Record<string, unknown> } | undefined {
@@ -1249,7 +1258,7 @@ export class WarishDatabase {
   }
 
   #crmSchemaAvailable(): boolean {
-    return Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='crm_contacts'").get())
+    return this.#crmSchemaReady || Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='crm_contacts'").get())
   }
 
   #mergeCrmIdentity(sourceIdentityId: string, targetIdentityId: string, chatId: string, now: number): void {
@@ -1813,6 +1822,15 @@ function attachmentKindValue(value: unknown): DraftDto['attachmentKind'] {
     ? value
     : undefined
 }
+
+function preferredDeliveryState(current: DeliveryState | undefined, incoming: DeliveryState): DeliveryState {
+  if (!current) return incoming
+  const rank: Partial<Record<DeliveryState, number>> = { sent: 0, delivered: 1, read: 2 }
+  const currentRank = rank[current]
+  const incomingRank = rank[incoming]
+  return currentRank !== undefined && incomingRank !== undefined && currentRank > incomingRank ? current : incoming
+}
+
 function sanitizeSettings(value: Partial<AppSettings>): AppSettings {
   const theme = value.theme === 'system' || value.theme === 'light' || value.theme === 'dark' || value.theme === 'black' || value.theme === 'salesforce-black'
     ? value.theme

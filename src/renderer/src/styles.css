@@ -198,11 +198,9 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .chat-crm-signal { display: flex; min-width: 0; align-items: center; gap: 8px; margin-top: 3px; overflow: hidden; color: var(--muted); font-size: 9px; line-height: 14px; white-space: nowrap; }
 .chat-crm-signal > span { display: inline-flex; min-width: 0; align-items: center; gap: 4px; overflow: hidden; text-overflow: ellipsis; }
 .chat-crm-signal > span:first-child { flex: 0 1 auto; color: color-mix(in srgb, var(--stage-color) 72%, var(--text)); font-weight: 650; }
-.chat-crm-signal i, .conversation-stage i { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: var(--stage-color); }
+.chat-crm-signal i { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: var(--stage-color); }
 .chat-crm-signal svg { width: 11px; height: 11px; flex: 0 0 auto; }
 .chat-crm-signal .overdue { color: var(--danger); }
-.community-list { width: 100%; }
-.community-row { border-bottom: 1px solid var(--border); }
 .community-parent { display: flex; width: 100%; min-height: 78px; align-items: center; gap: 8px; padding: 6px 10px 6px 7px; background: transparent; text-align: left; }
 .community-parent > svg { width: 17px; height: 17px; flex: 0 0 auto; color: var(--muted); }
 .community-parent .avatar { width: 52px; height: 52px; }
@@ -216,7 +214,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .chat-row.nested.has-identity { min-height: 88px; }
 .chat-row.nested.active { background: var(--active); }
 .chat-row.nested .avatar { width: 48px; height: 48px; }
-.community-empty { padding: 15px 18px 17px 46px; color: var(--muted); font-size: 12px; }
 .loading-row, .empty-list { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 28px; color: var(--muted); }
 .skeleton-list { padding-top: 3px; }
 .skeleton-row { display: flex; min-height: 76px; align-items: center; gap: 8px; padding: 6px 10px; }
@@ -252,9 +249,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .conversation-crm-line > span { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .conversation-crm-line .whatsapp-profile-pill { max-width: 150px; }
 .conversation-crm-alias { max-width: 180px; color: var(--text); font-weight: 600; }
-.conversation-stage { display: inline-flex; align-items: center; gap: 4px; max-width: 120px; color: color-mix(in srgb, var(--stage-color) 72%, var(--text)); font-size: 10px; font-weight: 650; }
-.conversation-next-task { display: inline-flex; min-width: 0; align-items: center; gap: 4px; max-width: 220px; }
-.conversation-next-task svg { width: 12px; height: 12px; flex: 0 0 auto; }
 .conversation-header .icon-button.active { color: var(--accent); background: var(--active); }
 .customer-summary { display: flex; min-width: 0; height: calc(var(--conversation-header-height) - 12px); flex: 1 1 620px; align-items: stretch; overflow: hidden; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-section); }
 .customer-summary-item { display: flex; min-width: 86px; flex: 0 1 112px; align-items: center; gap: 7px; padding: 4px 10px; border-right: 1px solid var(--border); }
@@ -313,13 +307,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
   .customer-summary-untracked { max-width: 124px; flex-basis: 124px; }
   .customer-summary-untracked small { display: none; }
 }
-.menu-dismiss { position: fixed; inset: 0; z-index: 18; cursor: default; background: transparent; }
-.header-menu { position: absolute; top: 55px; z-index: 20; min-width: 190px; padding: 7px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); box-shadow: var(--shadow); }
-.sidebar-header-menu { right: 11px; }
-.conversation-header-menu { right: 12px; }
-.header-menu button { display: flex; width: 100%; align-items: center; gap: 11px; padding: 10px 12px; border-radius: 7px; text-align: left; background: transparent; white-space: nowrap; }
-.header-menu button:disabled { opacity: .55; }
-.header-menu svg { width: 18px; height: 18px; color: var(--muted); }
 .connection-banner { position: absolute; top: calc(var(--conversation-header-height) + var(--active-sales-lifecycle-height)); left: 0; right: 0; z-index: 5; display: flex; justify-content: center; gap: 8px; padding: 7px; color: #5f4100; background: #ffdd8c; font-size: 12px; }
 .connection-banner svg { width: 16px; height: 16px; }
 .conversation-panel:has(.connection-banner) .message-scroller { padding-top: 52px; }
@@ -376,9 +363,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .message-actions button { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 50%; color: var(--muted); background: transparent; }
 .message-actions svg { width: 15px; height: 15px; }
 .message-action-overflow { position: relative; }
-.message-action-menu { position: absolute; top: 33px; right: -3px; z-index: 12; display: grid; width: 196px; overflow: hidden; padding: 4px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
-.message-actions .message-action-menu button { display: flex; width: 100%; height: 34px; align-items: center; justify-content: flex-start; gap: 9px; padding: 0 9px; border-radius: 4px; text-align: left; white-space: nowrap; }
-.message-actions .message-action-menu button svg { width: 15px; height: 15px; flex: 0 0 auto; }
 .message-failed { display: flex; align-items: center; gap: 4px; margin: 4px 0 1px auto; padding: 3px 7px; border-radius: 10px; color: var(--danger); background: transparent; font-size: 10px; }
 .message-failed svg { width: 12px; height: 12px; }
 .reaction-pill { position: absolute; right: 8px; bottom: -13px; padding: 2px 7px; border: 2px solid var(--conversation); border-radius: 12px; background: var(--panel-soft); box-shadow: 0 1px 2px rgb(0 0 0 / 10%); font-size: 12px; }
@@ -512,7 +496,7 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .code-view { display: flex; align-items: center; flex-direction: column; margin: 36px 0 20px; padding: 28px; border-radius: 12px; background: var(--panel-soft); }
 .code-view p { color: var(--muted); }
 .code-view strong { letter-spacing: 5px; font-size: 30px; }
-.status-line, .error-text { display: flex; justify-content: center; gap: 8px; margin: 20px 0 0; }
+.error-text { display: flex; justify-content: center; gap: 8px; margin: 20px 0 0; }
 .error-text { color: var(--danger); }
 
 .modal-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgb(11 20 26 / 68%); animation: motion-fade-in var(--motion-slow) var(--motion-ease); }
@@ -626,10 +610,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .toggle-setting input:checked + i::after { transform: translateX(18px); }
 .select-setting select { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: var(--panel); }
 .settings-content .secondary-button, .settings-content .danger-button { margin-top: 9px; }
-.settings-note { display: flex; gap: 12px; margin-top: 16px; padding: 13px 15px; border-radius: 10px; color: var(--muted); background: var(--panel-soft); line-height: 1.45; }
-.settings-note > svg { width: 18px; height: 18px; flex: 0 0 auto; color: var(--accent-strong); }
-.settings-note strong, .settings-note span { display: block; }
-.settings-note strong { margin-bottom: 2px; color: var(--text); }
 .contact-sync-summary { display: grid; gap: 6px; margin-bottom: 2px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-soft); }
 .contact-sync-summary strong, .contact-sync-summary span { display: block; }
 .contact-sync-summary span, .contact-sync-summary small { margin-top: 3px; color: var(--muted); line-height: 1.4; }
@@ -694,7 +674,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 @keyframes motion-message-in { from { opacity: 0; transform: translateY(var(--motion-distance-short)) scale(.99); } }
 @keyframes motion-chat-row-in { from { opacity: 0; transform: translateY(var(--motion-distance-short)); } }
 
-.header-menu { transform-origin: top right; animation: motion-menu-in var(--motion-medium) var(--motion-ease); }
 .crm-contact-panel.in-conversation, .conversation-search-panel { animation: motion-panel-in var(--motion-slow) var(--motion-ease); }
 .crm-contact-body > * { animation: motion-content-in var(--motion-medium) var(--motion-ease); }
 .message-item.message-enter .message-bubble { animation: motion-message-in var(--motion-slow) var(--motion-ease); }
@@ -767,7 +746,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 :root[data-density='compact'] .connection-banner { padding: 5px; }
 :root[data-density='compact'] .conversation-panel:has(.connection-banner) .message-scroller { padding-top: 42px; }
 :root[data-density='compact'] .conversation-panel:has(.session-banner) .message-scroller { padding-top: 60px; }
-:root[data-density='compact'] .header-menu { top: 48px; }
 :root[data-density='compact'] .message-scroller { padding: 8px max(3%, 14px) 7px; }
 :root[data-density='compact'] .virtual-message:not(.message-item) { padding-block: 1px; }
 :root[data-density='compact'] .virtual-message.message-item { padding-top: 4px; }
@@ -872,12 +850,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .contact-compact-row > span strong { font-size: 12px; }
 .contact-compact-row > span small { margin-top: 2px; color: var(--muted); font-size: 10px; }
 .contact-compact-row > svg { width: 15px; height: 15px; color: var(--muted); }
-.crm-revenue-strip { display: flex; min-height: 76px; align-items: center; gap: 13px; padding: 13px 16px; }
-.crm-revenue-strip > span { display: grid; width: 39px; height: 39px; flex: 0 0 auto; place-items: center; border-radius: 10px; color: var(--accent-strong); background: color-mix(in srgb, var(--accent) 11%, var(--panel)); }
-.crm-revenue-strip small, .crm-revenue-strip strong { display: block; }
-.crm-revenue-strip small { color: var(--muted); font-size: 10px; }
-.crm-revenue-strip strong { margin-top: 2px; font-size: 16px; }
-.crm-revenue-strip p { max-width: 500px; margin: 0 0 0 auto; color: var(--muted); font-size: 11px; line-height: 1.45; }
 .crm-list-view { max-width: 1380px; margin: 0 auto; }
 .crm-filter-row { display: flex; gap: 6px; margin-bottom: 12px; overflow-x: auto; }
 .crm-filter-row button { display: flex; height: 32px; flex: 0 0 auto; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--border); border-radius: 16px; color: var(--muted); background: var(--panel); font-size: 11px; }
@@ -1050,14 +1022,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .crm-timeline strong { font-size: 11px; font-weight: 600; }
 .crm-timeline time { margin-top: 3px; color: var(--muted); font-size: 9px; }
 
-.contact-crm-entry { display: flex; width: calc(100% - 36px); min-height: 62px; align-items: center; gap: 11px; margin: 12px 18px 3px; padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border)); border-radius: 9px; background: color-mix(in srgb, var(--accent) 6%, var(--panel)); text-align: left; }
-.contact-crm-entry > span { display: grid; width: 34px; height: 34px; flex: 0 0 auto; place-items: center; border-radius: 8px; color: var(--accent-strong); background: color-mix(in srgb, var(--accent) 13%, var(--panel)); }
-.contact-crm-entry > span svg { width: 17px; height: 17px; }
-.contact-crm-entry > div { min-width: 0; flex: 1; }
-.contact-crm-entry strong, .contact-crm-entry small { display: block; }
-.contact-crm-entry strong { font-size: 11px; }
-.contact-crm-entry small { margin-top: 3px; overflow: hidden; color: var(--muted); font-size: 9px; line-height: 1.35; text-overflow: ellipsis; }
-.contact-crm-entry > svg { width: 15px; height: 15px; flex: 0 0 auto; color: var(--muted); }
 
 .crm-dialog-backdrop { z-index: 70; place-items: center; padding: 22px; }
 .crm-dialog { --crm-dialog-body-padding: 18px; display: grid; width: min(560px, 100%); max-height: min(820px, calc(100vh - 44px)); grid-template-rows: 62px minmax(0, 1fr); overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: var(--panel); box-shadow: 0 28px 80px rgb(4 17 23 / 28%); }
@@ -1127,7 +1091,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
   .crm-section-nav span, .crm-section-nav b { display: none; }
   .crm-content { padding-inline: 11px; }
   .crm-stat-grid, .catalog-grid { grid-template-columns: 1fr; }
-  .crm-revenue-strip p { display: none; }
   .crm-topbar { padding-inline: 12px; }
   .crm-search { width: min(250px, 38vw); }
   .crm-contact-panel { width: calc(100% - var(--rail-width)); }
@@ -1193,7 +1156,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 :root[data-density='dense'] .conversation-identity > span > strong { font-size: 14px; }
 :root[data-density='dense'] .conversation-identity > span > span { margin-top: 1px; font-size: 10px; }
 :root[data-density='dense'] .conversation-crm-line { gap: 5px; }
-:root[data-density='dense'] .conversation-next-task { max-width: 160px; }
 :root[data-density='dense'] .sales-lifecycle-label { width: 90px; min-width: 90px; padding-inline: 6px; }
 :root[data-density='dense'] .sales-lifecycle-label strong { font-size: 9px; }
 :root[data-density='dense'] .sales-lifecycle-label small { font-size: 8px; }
@@ -1208,8 +1170,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 :root[data-density='dense'] .session-banner button { min-height: 28px; padding: 4px 8px; }
 :root[data-density='dense'] .conversation-panel:has(.connection-banner) .message-scroller { padding-top: 38px; }
 :root[data-density='dense'] .conversation-panel:has(.session-banner) .message-scroller { padding-top: 50px; }
-:root[data-density='dense'] .header-menu { top: 42px; padding: 5px; border-radius: 7px; }
-:root[data-density='dense'] .header-menu button { gap: 8px; padding: 7px 9px; }
 :root[data-density='dense'] .message-scroller { padding: 6px max(2.5%, 11px) 5px; }
 :root[data-density='dense'] .virtual-message:not(.message-item) { padding-block: 1px; }
 :root[data-density='dense'] .virtual-message.message-item { padding-top: 3px; }
@@ -1272,7 +1232,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 :root[data-density='dense'] .toggle-setting,
 :root[data-density='dense'] .select-setting { min-height: 48px; gap: 10px; padding: 7px 10px; }
 :root[data-density='dense'] .setting-icon { width: 29px; height: 29px; border-radius: 6px; }
-:root[data-density='dense'] .settings-note { gap: 9px; margin-top: 10px; padding: 9px 11px; border-radius: 7px; }
 :root[data-density='dense'] .account-action { gap: 12px; padding: 11px; }
 :root[data-density='dense'] .diagnostic-grid span { min-height: 40px; padding: 7px 9px; border-radius: 6px; }
 :root[data-density='dense'] .onboarding-card { padding: 24px 30px; }
@@ -1300,7 +1259,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 :root[data-density='dense'] .crm-recent > div { min-height: 238px; }
 :root[data-density='dense'] .contact-compact-row { min-height: 48px; padding: 4px 10px; }
 :root[data-density='dense'] .contact-compact-row .avatar { width: 34px; height: 34px; }
-:root[data-density='dense'] .crm-revenue-strip { min-height: 60px; padding: 8px 12px; }
 :root[data-density='dense'] .crm-filter-row { gap: 4px; margin-bottom: 8px; }
 :root[data-density='dense'] .crm-filter-row button { height: 28px; padding-inline: 8px; }
 :root[data-density='dense'] .crm-table-card { border-radius: 7px; }
@@ -1529,10 +1487,6 @@ button:active:not(:disabled) { transform: none; opacity: .88; }
   transform: translateY(var(--motion-distance-medium)) scale(.992);
   will-change: opacity, transform;
 }
-.motion-presence > .header-menu { opacity: 1; transform: translateY(0) scale(1); animation: none;
-  transition: opacity var(--motion-medium) var(--motion-ease), transform var(--motion-medium) var(--motion-ease); }
-.motion-presence[data-motion-state='entering'] > .header-menu,
-.motion-presence[data-motion-state='exiting'] > .header-menu { opacity: 0; transform: translateY(calc(-1 * var(--motion-distance-short))) scale(.99); }
 .motion-presence > .emoji-picker { opacity: 1; transform: translateY(0); transition: opacity var(--motion-medium) var(--motion-ease), transform var(--motion-medium) var(--motion-ease); }
 .motion-presence[data-motion-state='entering'] > .emoji-picker,
 .motion-presence[data-motion-state='exiting'] > .emoji-picker { opacity: 0; transform: translateY(var(--motion-distance-short)); }
@@ -1592,7 +1546,6 @@ button:active:not(:disabled) { transform: none; opacity: .88; }
 .settings-card, .settings-content > .toggle-setting, .contact-sync-summary, .account-action { border-radius: var(--radius-panel); }
 .option-grid button, .background-option, .select-setting select { border-radius: var(--radius-control); }
 .setting-icon { border-radius: var(--radius-control); }
-.settings-note { border-radius: var(--radius-control); border-left: 2px solid var(--accent); background: var(--panel-soft); }
 .toggle-setting i, .toggle-setting i::after { transition: background-color var(--motion-medium) var(--motion-ease), transform var(--motion-medium) var(--motion-ease); }
 
 .crm-workspace { background: var(--panel-soft); }
@@ -1607,13 +1560,11 @@ button:active:not(:disabled) { transform: none; opacity: .88; }
 .crm-stat-grid { gap: 0; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--panel); }
 .crm-stat { min-height: 92px; border: 0; border-right: 1px solid var(--border); border-radius: 0; box-shadow: none; }
 .crm-stat:last-child { border-right: 0; }
-.crm-revenue-strip > span { border-radius: var(--radius-control); }
 .crm-overview-grid { gap: 0; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--panel); }
 .crm-overview-grid .crm-card { border: 0; border-radius: 0; box-shadow: none; }
 .crm-overview-grid .crm-card + .crm-card { border-left: 1px solid var(--border); }
 .crm-card { border-radius: var(--radius-panel); box-shadow: none; }
 .crm-card > header span { font-weight: 500; }
-.crm-revenue-strip { border-radius: var(--radius-panel); box-shadow: none; }
 .crm-filter-row button { border-radius: var(--radius-control); }
 
 .crm-table-card { border-radius: var(--radius-panel); box-shadow: none; }
@@ -1681,7 +1632,6 @@ button:active:not(:disabled) { transform: none; opacity: .88; }
 .crm-message-reference small,
 .crm-message-reference strong,
 .crm-timeline time,
-.contact-crm-entry small,
 .form-field > span { font-size: 10px; }
 .customer-summary-item > svg { display: none; }
 .customer-summary-item strong { font-size: 12px; }
@@ -1775,6 +1725,7 @@ button:active:not(:disabled) { transform: none; opacity: .88; }
 .ui-option[data-focus-visible], .ui-menu-item[data-focus-visible] { background: var(--hover); box-shadow: inset 0 0 0 1px var(--accent); }
 .ui-empty-option { padding: 16px 12px; color: var(--muted); text-align: center; }
 .ui-menu-popover { min-width: max(190px, var(--trigger-width)); }
+.ui-menu-event-boundary { display: contents; }
 .ui-menu-item.danger-text { color: var(--danger); }
 .ui-menu-item.danger-text > svg { color: currentColor; }
 
@@ -1850,7 +1801,7 @@ button:active:not(:disabled) { transform: none; opacity: .88; }
 @media (hover: hover) {
   .nav-button:hover:not(.active), .icon-button:hover { color: var(--text); background: var(--hover); }
   .chat-row:hover:not(.active), .community-parent:hover, .conversation-identity:hover,
-  .customer-summary-untracked button:hover, .header-menu button:hover, .contact-actions button:hover,
+  .customer-summary-untracked button:hover, .contact-actions button:hover,
   .message-search-result:hover, .settings-nav button:hover:not(.active), .crm-card > header button:hover,
   .crm-pipeline > div > button:hover, .contact-compact-row:hover, .crm-table tbody tr:hover,
   .crm-contact-actions button:hover, .contact-order:hover, .order-lines > header button:hover,
@@ -1873,7 +1824,6 @@ button:active:not(:disabled) { transform: none; opacity: .88; }
   .crm-filter-row button:hover:not(.active) { color: var(--text); border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
     background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
   .catalog-card > footer button:hover { color: var(--danger); }
-  .contact-crm-entry:hover { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
   :root[data-theme='salesforce-black'] .primary-button:hover,
   :root[data-theme='salesforce-black'] .send-button:hover { background: #0b5cab; }
   .ui-option[data-hovered], .ui-menu-item[data-hovered] { background: var(--hover); }

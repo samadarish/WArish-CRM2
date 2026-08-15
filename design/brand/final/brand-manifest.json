@@ -89,12 +89,8 @@
     "design/brand/final/tray-on-light-16.png",
     "design/brand/final/tray-on-light-32.png",
     "src/renderer/src/assets/brand/flow-dark-compact.png",
-    "src/renderer/src/assets/brand/flow-dark-compact.svg",
     "src/renderer/src/assets/brand/flow-dark.png",
-    "src/renderer/src/assets/brand/flow-dark.svg",
     "src/renderer/src/assets/brand/flow-light-compact.png",
-    "src/renderer/src/assets/brand/flow-light-compact.svg",
-    "src/renderer/src/assets/brand/flow-light.png",
-    "src/renderer/src/assets/brand/flow-light.svg"
+    "src/renderer/src/assets/brand/flow-light.png"
   ]
 }

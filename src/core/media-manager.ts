@@ -2,9 +2,10 @@ import { createHash, randomUUID } from 'node:crypto'
 import { createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { pipeline } from 'node:stream/promises'
 import { Transform } from 'node:stream'
-import { basename, extname, join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { downloadContentFromMessage, downloadMediaMessage, normalizeMessageContent, type WASocket } from '@whiskeysockets/baileys'
 import type { Logger } from 'pino'
+import { extensionForMedia } from '../shared/media-types'
 import { WarishDatabase } from './database'
 import { deserializeRawMessage } from './normalizer'
 
@@ -154,22 +155,28 @@ export class MediaManager {
       )
       const hash = createHash('sha256')
       let size = 0
+      const cacheLimitBytes = this.#database.getSettings().cacheLimitBytes
       const meter = new Transform({
         transform(chunk: Buffer, _encoding, callback) {
           size += chunk.length
+          if (size > cacheLimitBytes) {
+            callback(new Error('This media file is larger than the configured cache limit'))
+            return
+          }
           hash.update(chunk)
           callback(null, chunk)
         }
       })
       await pipeline(stream, meter, createWriteStream(partialPath, { flags: 'wx' }))
       if (controller.signal.aborted) throw new Error('Media download cancelled')
-      const extension = extensionForMime(this.#database.getMessage(messageId).attachment?.mimeType)
+      const attachment = this.#database.getMessage(messageId).attachment
+      const extension = extensionForMedia(attachment?.mimeType, attachment?.fileName)
       const token = `${hash.digest('hex')}${extension}`
       const finalPath = this.resolveCache(token)
       if (existsSync(finalPath)) rmSync(partialPath, { force: true })
       else renameSync(partialPath, finalPath)
       this.#database.saveMediaToken(messageId, token, size)
-      this.enforceLimit(this.#database.getSettings().cacheLimitBytes)
+      this.enforceLimit(cacheLimitBytes)
       if (!existsSync(finalPath)) throw new Error('This media file is larger than the configured cache limit')
       return token
     } catch (error) {
@@ -231,7 +238,7 @@ export class MediaManager {
 
   enforceLimit(limitBytes: number): void {
     const files = readdirSync(this.mediaDirectory, { withFileTypes: true })
-      .filter((entry) => entry.isFile())
+      .filter((entry) => entry.isFile() && !entry.name.endsWith('.part'))
       .map((entry) => {
         const path = join(this.mediaDirectory, entry.name)
         const stat = statSync(path)
@@ -255,16 +262,6 @@ function safeChildPath(parent: string, token: string): string {
   const result = resolve(parent, token)
   if (!result.startsWith(`${resolve(parent)}${process.platform === 'win32' ? '\\' : '/'}`)) throw new Error('Invalid media path')
   return result
-}
-
-function extensionForMime(mime?: string): string {
-  const clean = mime?.split(';')[0]?.trim()
-  const map: Record<string, string> = {
-    'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif',
-    'video/mp4': '.mp4', 'video/webm': '.webm', 'audio/ogg': '.ogg', 'audio/mpeg': '.mp3',
-    'audio/mp4': '.m4a', 'application/pdf': '.pdf'
-  }
-  return map[clean ?? ''] ?? (extname(clean ?? '') || '.bin')
 }
 
 function avatarExtension(mime: string): string | undefined {

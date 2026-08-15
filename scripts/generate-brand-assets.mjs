@@ -211,10 +211,6 @@ const svgOutputs = [
   ['design/brand/final/flow-dark-compact.svg', embeddedPngSvg(darkCompact)],
   ['design/brand/final/flow-tray-on-light.svg', embeddedPngSvg(trayOnLightMaster)],
   ['design/brand/final/flow-tray-on-dark.svg', embeddedPngSvg(trayOnDarkMaster)],
-  ['src/renderer/src/assets/brand/flow-light.svg', embeddedPngSvg(selectedMaster)],
-  ['src/renderer/src/assets/brand/flow-dark.svg', embeddedPngSvg(darkMaster)],
-  ['src/renderer/src/assets/brand/flow-light-compact.svg', embeddedPngSvg(lightCompact)],
-  ['src/renderer/src/assets/brand/flow-dark-compact.svg', embeddedPngSvg(darkCompact)],
   ['build/brand.svg', embeddedPngSvg(selectedMaster)]
 ]
 for (const [path, svg] of svgOutputs) await emit(path, svg + '\n')

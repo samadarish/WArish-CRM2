@@ -24,27 +24,20 @@ export const MessageBubble = memo(function MessageBubble({ message, groupPositio
   onRetry?(messageId: string): void
   onError(error: unknown): void
 }): React.JSX.Element {
-  const [media, setMedia] = useState(() => message.attachment?.cacheToken
-    ? { url: `warish-media://cache/${encodeURIComponent(message.attachment.cacheToken)}`, token: message.attachment.cacheToken }
-    : undefined)
+  const mediaSourceKey = attachmentMediaSourceKey(message.attachment)
+  const [mediaOverride, setMediaOverride] = useState<{ sourceKey: string; value?: ResolvedMedia }>()
+  const media = mediaOverride?.sourceKey === mediaSourceKey ? mediaOverride.value : resolveAttachmentMedia(message.attachment)
   const [downloading, setDownloading] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [editText, setEditText] = useState(message.text ?? '')
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [dialogReturnFocus, setDialogReturnFocus] = useState<HTMLElement>()
   const [moreOpen, setMoreOpen] = useState(false)
-  useEffect(() => {
-    const token = message.attachment?.cacheToken
-    const draftToken = message.attachment?.draftToken
-    setMedia(token
-      ? { url: `warish-media://cache/${encodeURIComponent(token)}`, token }
-      : draftToken ? { url: `warish-media://drafts/${encodeURIComponent(draftToken)}`, token: draftToken } : undefined)
-  }, [message.attachment?.cacheToken, message.attachment?.draftToken])
   const download = async (): Promise<void> => {
     setDownloading(true)
     try {
       const downloaded = await window.warish.media.download(message.id)
-      setMedia({ url: downloaded.url, token: downloaded.cacheToken })
+      setMediaOverride({ sourceKey: mediaSourceKey, value: { url: downloaded.url, token: downloaded.cacheToken } })
       onResize()
     } catch (error) { onError(error) } finally { setDownloading(false) }
   }
@@ -84,7 +77,9 @@ export const MessageBubble = memo(function MessageBubble({ message, groupPositio
     <article className={`message-row group-${groupPosition} ${message.fromMe ? 'mine' : ''} ${message.reactions.length ? 'has-reactions' : ''}`}>
       <div className={`message-bubble kind-${message.kind}`} tabIndex={0} aria-label={`${message.fromMe ? 'Sent' : 'Received'} ${message.kind} message`}>
         {showSender && message.senderName && <div className="sender-name">{message.senderName}</div>}
-        {message.quotedMessageId && <button className="quoted-message" onClick={() => onOpenQuote(message.quotedMessageId!)}>
+        {message.quotedMessageId && <button className="quoted-message"
+          aria-label={`${message.quoted?.fromMe ? 'You' : message.quoted?.senderName ?? 'Reply'}: ${message.quoted?.text ?? messageKindLabel(message.quoted?.kind)}`}
+          onClick={() => onOpenQuote(message.quotedMessageId!)}>
           <strong>{message.quoted?.fromMe ? 'You' : message.quoted?.senderName ?? 'Reply'}</strong>
           <span title={message.quoted?.text ?? messageKindLabel(message.quoted?.kind)}>{message.quoted?.text ?? messageKindLabel(message.quoted?.kind)}</span>
         </button>}
@@ -92,7 +87,7 @@ export const MessageBubble = memo(function MessageBubble({ message, groupPositio
           {message.rich && <RichMessageCard message={message} />}
           <Media message={message} url={media?.url} cacheToken={media?.token} downloading={downloading}
             onDownload={() => void download()} onCancel={() => void cancelDownload()} onResize={onResize} onError={onError}
-            onBroken={() => { setMedia(undefined); onError(new Error('The cached media file is unavailable. Download it again.')) }} />
+            onBroken={() => { setMediaOverride({ sourceKey: mediaSourceKey }); onError(new Error('The cached media file is unavailable. Download it again.')) }} />
           {message.text && !message.rich && <p className="message-text">{linkifyMessageText(message.text)}</p>}
         </>}
         <div className="message-meta">{message.edited && <span>edited</span>}<time>{format(message.timestamp, 'HH:mm')}</time>{message.fromMe && <DeliveryReceipt status={message.status} />}</div>
@@ -124,6 +119,24 @@ export const MessageBubble = memo(function MessageBubble({ message, groupPositio
 })
 
 const messageUrlPattern = /(?:https?:\/\/|www\.)[^\s<>"']+/gi
+
+type ResolvedMedia = { url: string; token: string }
+
+function attachmentMediaSourceKey(attachment: MessageDto['attachment']): string {
+  return `${attachment?.cacheToken ?? ''}\u0000${attachment?.draftToken ?? ''}`
+}
+
+function resolveAttachmentMedia(attachment: MessageDto['attachment']): ResolvedMedia | undefined {
+  if (attachment?.cacheToken) return {
+    url: `warish-media://cache/${encodeURIComponent(attachment.cacheToken)}`,
+    token: attachment.cacheToken
+  }
+  if (attachment?.draftToken) return {
+    url: `warish-media://drafts/${encodeURIComponent(attachment.draftToken)}`,
+    token: attachment.draftToken
+  }
+  return undefined
+}
 
 function linkifyMessageText(text: string): ReactNode[] {
   const content: ReactNode[] = []
@@ -169,9 +182,10 @@ function Media({ message, url, cacheToken, downloading, onDownload, onCancel, on
   message: MessageDto; url?: string; cacheToken?: string; downloading: boolean; onDownload(): void; onCancel(): void; onResize(): void; onError(error: unknown): void; onBroken(): void
 }): React.JSX.Element | null {
   const attachment = message.attachment
-  const [thumbnail, setThumbnail] = useState(attachment?.thumbnailDataUrl)
+  const thumbnailSourceKey = `${attachment?.messageId ?? message.id}\u0000${attachment?.thumbnailDataUrl ?? ''}`
+  const [thumbnailOverride, setThumbnailOverride] = useState<{ sourceKey: string; value: string }>()
+  const thumbnail = thumbnailOverride?.sourceKey === thumbnailSourceKey ? thumbnailOverride.value : attachment?.thumbnailDataUrl
   const frameRef = useRef<HTMLDivElement>(null)
-  useEffect(() => setThumbnail(attachment?.thumbnailDataUrl), [attachment?.messageId, attachment?.thumbnailDataUrl])
   useEffect(() => {
     if (url || thumbnail || (message.kind !== 'image' && message.kind !== 'video')) return
     const frame = frameRef.current
@@ -182,14 +196,14 @@ function Media({ message, url, cacheToken, downloading, onDownload, onCancel, on
       observer.disconnect()
       void window.warish.media.thumbnail(message.id).then((result) => {
         if (!disposed && result.thumbnailDataUrl) {
-          setThumbnail(result.thumbnailDataUrl)
+          setThumbnailOverride({ sourceKey: thumbnailSourceKey, value: result.thumbnailDataUrl })
           onResize()
         }
       }).catch(() => { /* A missing preview must not interrupt the conversation. */ })
     }, { rootMargin: '120px 0px', threshold: 0.01 })
     observer.observe(frame)
     return () => { disposed = true; observer.disconnect() }
-  }, [message.id, message.kind, onResize, thumbnail, url])
+  }, [message.id, message.kind, onResize, thumbnail, thumbnailSourceKey, url])
   if (!attachment) return null
   if (url && (message.kind === 'audio' || message.kind === 'voice')) return <audio className="message-audio" src={url} controls preload="metadata" onLoadedMetadata={onResize} onError={onBroken} />
   if (url && cacheToken && message.kind === 'document') return attachment.draftToken

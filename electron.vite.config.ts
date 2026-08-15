@@ -1,6 +1,13 @@
 import { resolve } from 'node:path'
 import react from '@vitejs/plugin-react'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
+import type { Plugin } from 'vite'
+
+const packagedRendererCsp: Plugin = {
+  name: 'warish-packaged-renderer-csp',
+  apply: 'build',
+  transformIndexHtml: (html) => html.replace(" connect-src 'self' ws://localhost:*;", " connect-src 'self';")
+}
 
 export default defineConfig({
   main: {
@@ -28,7 +35,7 @@ export default defineConfig({
   },
   renderer: {
     root: resolve('src/renderer'),
-    plugins: [react()],
+    plugins: [react(), packagedRendererCsp],
     resolve: {
       alias: {
         '@renderer': resolve('src/renderer'),
