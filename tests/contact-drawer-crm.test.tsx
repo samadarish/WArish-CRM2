@@ -39,6 +39,7 @@ afterEach(() => {
 describe('direct-chat CRM drawer', () => {
   it('creates the CRM record only on mutation and retains source-message navigation', async () => {
     const ensure = vi.fn().mockResolvedValue(contact)
+    const listOrders = vi.fn().mockResolvedValue([])
     const saveContact = vi.fn().mockResolvedValue({ ...details, savedName: 'Priya Saved', title: 'Priya Saved' })
     const getCrmContact = vi.fn().mockRejectedValueOnce(new Error('CRM contact not found')).mockResolvedValue(contact)
     Object.defineProperty(window, 'warish', { configurable: true, value: {
@@ -50,7 +51,7 @@ describe('direct-chat CRM drawer', () => {
         contacts: { get: getCrmContact, ensure, update: vi.fn(), setStage: vi.fn().mockResolvedValue(contact) },
         notes: { list: vi.fn().mockResolvedValue([linkedNote]), save: vi.fn(), add: vi.fn(), delete: vi.fn() },
         tasks: { list: vi.fn().mockResolvedValue([]), save: vi.fn(), delete: vi.fn() },
-        orders: { list: vi.fn().mockResolvedValue([]), get: vi.fn(), save: vi.fn(), delete: vi.fn() },
+        orders: { list: listOrders, get: vi.fn(), save: vi.fn(), delete: vi.fn() },
         catalog: { list: vi.fn().mockResolvedValue([]) }, activity: vi.fn().mockResolvedValue([])
       }
     } })
@@ -67,6 +68,17 @@ describe('direct-chat CRM drawer', () => {
     expect((await screen.findAllByText('Priya CRM')).length).toBeGreaterThan(0)
     expect(document.querySelector('.crm-contact-hero .avatar.large img')).toBeInTheDocument()
     expect(screen.queryByText('Pipeline stage')).not.toBeInTheDocument()
+    expect(screen.queryByText('WhatsApp conversation')).not.toBeInTheDocument()
+    const crmPanel = screen.getByRole('complementary', { name: 'CRM contact record' })
+    expect(Array.from(crmPanel.querySelectorAll('.crm-contact-tabs button')).map((button) => button.textContent)).toEqual([
+      'orders', 'overview', 'notes', 'tasks', 'activity'
+    ])
+    expect(within(crmPanel).getByRole('button', { name: 'orders' })).toHaveClass('active')
+    expect(await within(crmPanel).findByRole('button', { name: 'New order' })).toBeInTheDocument()
+    await waitFor(() => expect(listOrders).toHaveBeenCalledWith(contact.id))
+    expect(within(crmPanel).queryByRole('button', { name: 'Pin' })).not.toBeInTheDocument()
+    expect(within(crmPanel).queryByRole('button', { name: 'Mute' })).not.toBeInTheDocument()
+    expect(within(crmPanel).queryByRole('button', { name: 'Archive' })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Save contact' }))
     const name = await screen.findByRole('textbox', { name: 'Contact name' })

@@ -25,7 +25,7 @@ describe('clipboard image extraction', () => {
     expect(clipboardImageFiles(clipboardData([], [image]))).toEqual([image])
   })
 
-  it('returns every image so the composer can reject multi-image paste explicitly', () => {
+  it('returns every image in clipboard order for atomic batch staging', () => {
     const first = new File(['first'], 'first.png', { type: 'image/png' })
     const second = new File(['second'], 'second.jpg', { type: 'image/jpeg' })
     const data = clipboardData([

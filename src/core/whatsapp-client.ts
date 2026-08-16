@@ -8,18 +8,22 @@ import makeWASocket, {
   type Contact,
   type GroupMetadata,
   type WAMessage,
+  type WAMessageKey,
   type WASocket
 } from '@whiskeysockets/baileys'
 import type { Logger } from 'pino'
 import QRCode from 'qrcode'
-import type {
-  ContactDetails,
-  ContactSyncState,
-  CoreEventEnvelope,
-  HistoryBatchEvent,
-  MessageDto,
-  OlderHistoryResult,
-  SessionState
+import {
+  MAX_ALBUM_IMAGES,
+  type AttachmentKind,
+  type ContactDetails,
+  type ContactSyncState,
+  type CoreEventEnvelope,
+  type HistoryBatchEvent,
+  type MessageDto,
+  type OlderHistoryResult,
+  type QuotedMessageDto,
+  type SessionState
 } from '../shared/contracts'
 import { mimeTypeForPath } from '../shared/media-types'
 import { createPersistentAuthState, hasLinkedAuth, mergeAuthCreds, type PersistentAuthState } from './auth-store'
@@ -45,9 +49,21 @@ interface OutgoingMessageInput {
   clientId: string
   text?: string
   attachmentToken?: string
-  attachmentKind?: 'image' | 'video' | 'document' | 'audio' | 'voice' | 'sticker'
+  attachmentKind?: AttachmentKind
   attachmentName?: string
   attachmentMimeType?: string
+  quotedMessageId?: string
+  albumParentKey?: WAMessageKey
+  albumPosition?: number
+  albumTimestamp?: number
+  displayQuotedMessageId?: string
+}
+
+interface OutgoingAlbumInput {
+  chatId: string
+  albumClientId: string
+  images: Array<{ clientId: string; attachmentToken: string }>
+  caption?: string
   quotedMessageId?: string
 }
 
@@ -211,7 +227,7 @@ export class WhatsAppClient {
     if (this.#database.getChat(chatId).readOnly) throw new Error('This conversation is read only')
     const localId = `local:${input.clientId}`
     const draft = this.#database.getDraft(chatId)
-    const draftAttachment = draft?.attachment && draft.attachment.token === input.attachmentToken ? draft.attachment : undefined
+    const draftAttachment = draft?.attachments.find((attachment) => attachment.token === input.attachmentToken)
     const normalizedInput = { ...input, chatId, text: input.text?.trim() || undefined,
       attachmentName: draftAttachment?.name, attachmentMimeType: draftAttachment?.mimeType }
     let local!: MessageDto
@@ -238,12 +254,108 @@ export class WhatsAppClient {
         } : undefined
       })
       const draftText = draft?.text.trim() || undefined
-      if (draft && draftText === normalizedInput.text && draft.attachment?.token === input.attachmentToken) {
+      const draftTokens = draft?.attachments.map((attachment) => attachment.token) ?? []
+      const inputTokens = input.attachmentToken ? [input.attachmentToken] : []
+      if (draft && draftText === normalizedInput.text && sameOrderedValues(draftTokens, inputTokens)) {
         this.#database.clearDraft(chatId)
       }
     })
     this.#emit({ type: 'message.changed', payload: { message: local } })
     return this.#deliver(normalizedInput, localId)
+  }
+
+  async sendAlbum(input: OutgoingAlbumInput): Promise<MessageDto[]> {
+    const socket = this.#requireSocket()
+    if (input.images.length < 2 || input.images.length > MAX_ALBUM_IMAGES) {
+      throw new Error(`Albums require between 2 and ${MAX_ALBUM_IMAGES} images`)
+    }
+    if (new Set(input.images.map((image) => image.clientId)).size !== input.images.length) {
+      throw new Error('Album image client IDs must be unique')
+    }
+    const chatId = this.#database.resolveChatId(input.chatId)
+    if (this.#database.getChat(chatId).readOnly) throw new Error('This conversation is read only')
+    const caption = input.caption?.trim() || undefined
+    const draft = this.#database.getDraft(chatId)
+    const draftByToken = new Map(draft?.attachments.map((attachment) => [attachment.token, attachment]) ?? [])
+    for (const image of input.images) {
+      const attachment = draftByToken.get(image.attachmentToken)
+      if (!attachment || attachment.kind !== 'image') throw new Error('Every album item must be a staged image')
+    }
+
+    const quotedRaw = input.quotedMessageId ? this.#database.getRawMessage(input.quotedMessageId) : undefined
+    const quoted = quotedRaw ? deserializeRawMessage(quotedRaw) : undefined
+    const displayQuoted = input.quotedMessageId ? this.#quotedMessage(input.quotedMessageId) : undefined
+    const parent = await socket.sendMessage(chatId, { album: { expectedImageCount: input.images.length } }, {
+      ...(quoted ? { quoted } : {}),
+      messageId: stableWhatsAppMessageId(input.albumClientId)
+    })
+    if (!parent?.key.id) throw new Error('WhatsApp did not return the album parent')
+    const albumParentKey: WAMessageKey = {
+      ...parent.key,
+      id: parent.key.id,
+      remoteJid: parent.key.remoteJid ?? chatId,
+      fromMe: parent.key.fromMe ?? true
+    }
+    const albumTimestamp = Date.now()
+    const deliveries = input.images.map((image, position): OutgoingMessageInput => {
+      const attachment = draftByToken.get(image.attachmentToken)!
+      return {
+        chatId,
+        clientId: image.clientId,
+        text: position === 0 ? caption : undefined,
+        attachmentToken: image.attachmentToken,
+        attachmentKind: 'image',
+        attachmentName: attachment.name,
+        attachmentMimeType: attachment.mimeType,
+        albumParentKey,
+        albumPosition: position,
+        albumTimestamp,
+        displayQuotedMessageId: position === 0 ? input.quotedMessageId : undefined
+      }
+    })
+    let localMessages: MessageDto[] = []
+    this.#database.transaction(() => {
+      localMessages = deliveries.map((delivery) => {
+        this.#database.enqueueOutbox(delivery.clientId, chatId, delivery)
+        this.#database.updateOutbox(delivery.clientId, 'sending')
+        const attachment = draftByToken.get(delivery.attachmentToken!)!
+        return this.#database.upsertMessage({
+          id: `local:${delivery.clientId}`,
+          chatId,
+          fromMe: true,
+          kind: 'image',
+          text: delivery.text,
+          timestamp: albumTimestamp + (delivery.albumPosition ?? 0),
+          status: 'sending',
+          clientId: delivery.clientId,
+          quotedMessageId: delivery.displayQuotedMessageId,
+          quoted: delivery.displayQuotedMessageId ? displayQuoted : undefined,
+          attachment: {
+            id: `attachment:local:${delivery.clientId}`,
+            kind: 'image',
+            fileName: attachment.name,
+            mimeType: attachment.mimeType,
+            size: attachment.size,
+            draftToken: attachment.token,
+            downloadState: 'ready'
+          }
+        })
+      })
+      const draftText = draft?.text.trim() || undefined
+      if (draft && draftText === caption && sameOrderedValues(
+        draft.attachments.map((attachment) => attachment.token),
+        input.images.map((image) => image.attachmentToken)
+      )) this.#database.clearDraft(chatId)
+    })
+    this.#emit({ type: 'message.batch', payload: { messages: localMessages } })
+
+    const results: MessageDto[] = []
+    for (const delivery of deliveries) {
+      const localId = `local:${delivery.clientId}`
+      try { results.push(await this.#deliver(delivery, localId)) }
+      catch { results.push(this.#database.getMessage(localId)) }
+    }
+    return results
   }
 
   async retry(messageId: string): Promise<MessageDto> {
@@ -268,12 +380,18 @@ export class WhatsAppClient {
         ? mediaContent(this.media.resolveDraft(input.attachmentToken), input.attachmentKind ?? 'document', input.text,
           input.attachmentName, input.attachmentMimeType)
         : { text: input.text!.trim() }
+      if (input.albumParentKey) content.albumParentKey = input.albumParentKey
       const options = { ...(quoted ? { quoted } : {}), messageId: stableWhatsAppMessageId(input.clientId) }
       const sent = await socket.sendMessage(input.chatId, content as any, options)
       if (!sent) throw new Error('WhatsApp did not return the sent message')
       const normalized = normalizeWhatsAppMessage(sent)
       if (!normalized.message) throw new Error('Sent message could not be normalized')
       normalized.message.clientId = input.clientId
+      if (input.albumTimestamp !== undefined) normalized.message.timestamp = input.albumTimestamp + (input.albumPosition ?? 0)
+      if (input.displayQuotedMessageId) {
+        normalized.message.quotedMessageId = input.displayQuotedMessageId
+        normalized.message.quoted = this.#quotedMessage(input.displayQuotedMessageId)
+      }
       let stored!: MessageDto
       this.#database.transaction(() => {
         this.#database.deleteStoredMessage(localId)
@@ -295,6 +413,16 @@ export class WhatsAppClient {
       const failed = this.#database.getMessage(localId)
       this.#emit({ type: 'message.changed', payload: { message: failed } })
       throw error
+    }
+  }
+
+  #quotedMessage(messageId: string): QuotedMessageDto | undefined {
+    try {
+      const message = this.#database.getMessage(messageId)
+      return { id: message.id, senderName: message.senderName, fromMe: message.fromMe, kind: message.kind,
+        text: message.deleted ? 'This message was deleted' : message.text }
+    } catch {
+      return undefined
     }
   }
 
@@ -1130,6 +1258,10 @@ function safeAttachmentName(fileName?: string): string | undefined {
 
 function stableWhatsAppMessageId(clientId: string): string {
   return clientId.replaceAll('-', '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 32).toUpperCase()
+}
+
+function sameOrderedValues(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index])
 }
 
 function contactEventId(contact: Partial<Contact>): string | undefined {

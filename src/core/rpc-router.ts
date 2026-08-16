@@ -1,7 +1,10 @@
 import type { Logger } from 'pino'
-import type {
-  AppError, AppSettings, ChatCrmStageFilter, CoreEventEnvelope, CrmCatalogItemDto, CrmContactPatch, CrmLifecycle, CrmNoteInput, CrmOrderInput,
-  CrmOrderItemDto, CrmPaymentDto, CrmTaskDto, CrmTaskInput, DraftDto, PickedAttachment, RpcMethod
+import {
+  MAX_ALBUM_IMAGES,
+  type AppError, type AppSettings, type AttachmentKind, type ChatCrmStageFilter, type CoreEventEnvelope, type CrmCatalogItemDto,
+  type CrmContactPatch, type CrmLifecycle,
+  type CrmNoteInput, type CrmOrderInput, type CrmOrderItemDto, type CrmPaymentDto, type CrmTaskDto, type CrmTaskInput,
+  type DraftAttachmentDto, type DraftDto, type RpcMethod
 } from '../shared/contracts'
 import { WarishDatabase } from './database'
 import { ContactRestrictedError, CrmRepository } from './crm-repository'
@@ -93,6 +96,18 @@ export class RpcRouter {
           quotedMessageId: optionalString(input.quotedMessageId)
         })
       }
+      case 'message.sendAlbum': {
+        const input = objectValue(params.input)
+        const chatId = requiredString(input, 'chatId')
+        this.#crm.assertCanContact(chatId, optionalBoolean(input.restrictedContactAcknowledged) ?? false)
+        return this.#whatsapp.sendAlbum({
+          chatId,
+          albumClientId: requiredString(input, 'albumClientId'),
+          images: albumImages(input.images),
+          caption: optionalString(input.caption),
+          quotedMessageId: optionalString(input.quotedMessageId)
+        })
+      }
       case 'message.retry': return this.#whatsapp.retry(requiredString(params, 'messageId'))
       case 'message.react': return this.#whatsapp.react(requiredString(params, 'chatId'), requiredString(params, 'messageId'), optionalString(params.emoji))
       case 'message.edit': return this.#whatsapp.edit(requiredString(params, 'chatId'), requiredString(params, 'messageId'), requiredString(params, 'text'))
@@ -161,12 +176,10 @@ export class RpcRouter {
       case 'draft.get': return this.#database.getDraft(requiredString(params, 'chatId'))
       case 'draft.save': {
         const draft = objectValue(params.draft)
-        const attachment = optionalAttachment(draft.attachment)
         this.#database.saveDraft({
           chatId: requiredString(draft, 'chatId'),
           text: optionalString(draft.text) ?? '',
-          attachment,
-          attachmentKind: attachmentKind(draft.attachmentKind),
+          attachments: draftAttachments(draft.attachments),
           updatedAt: optionalNumber(draft.updatedAt) ?? Date.now()
         } satisfies DraftDto)
         return undefined
@@ -213,7 +226,9 @@ export function toAppError(error: unknown): AppError {
   if (error instanceof ContactRestrictedError) return { code: 'CONTACT_RESTRICTED', message, retryable: false }
   if (/offline|connection/i.test(message)) return { code: 'OFFLINE', message, retryable: true }
   if (/not found|unavailable/i.test(message)) return { code: 'NOT_FOUND', message, retryable: false }
-  if (/invalid|valid international|cannot be empty/i.test(message)) return { code: 'INVALID_INPUT', message, retryable: false }
+  if (/invalid|valid international|cannot be empty|albums require|must be (?:a staged|unique)|support up to|limited to|can contain only/i.test(message)) {
+    return { code: 'INVALID_INPUT', message, retryable: false }
+  }
   if (/logged out|auth/i.test(message)) return { code: 'AUTH_LOST', message, retryable: false }
   return { code: 'INTERNAL', message, retryable: false }
 }
@@ -230,7 +245,9 @@ function chatCategory(value: unknown): 'all' | 'direct' | 'group' | 'community' 
     : undefined
 }
 function chatCrmStageFilter(value: unknown): ChatCrmStageFilter | undefined {
-  return value === 'all' || value === 'new' || value === 'won' || value === 'lost' ? value : undefined
+  return value === 'all' || value === 'new' || value === 'qualified' || value === 'quoted' || value === 'won' || value === 'lost'
+    ? value
+    : undefined
 }
 function optionalString(value: unknown): string | undefined { return typeof value === 'string' ? value : undefined }
 function optionalNumber(value: unknown): number | undefined { return typeof value === 'number' && Number.isFinite(value) ? value : undefined }
@@ -246,7 +263,7 @@ function stringArray(value: unknown): string[] {
 function optionalStringArray(value: unknown): string[] {
   return value === undefined ? [] : stringArray(value)
 }
-function attachmentKind(value: unknown): 'image' | 'video' | 'document' | 'audio' | 'voice' | 'sticker' | undefined {
+function attachmentKind(value: unknown): AttachmentKind | undefined {
   return value === 'image' || value === 'video' || value === 'document' || value === 'audio' || value === 'voice' || value === 'sticker'
     ? value
     : undefined
@@ -267,16 +284,46 @@ function navigationModeValue(value: unknown): AppSettings['navigationMode'] | un
 function conversationBackgroundValue(value: unknown): AppSettings['conversationBackground'] | undefined {
   return value === 'subtle' || value === 'plain' || value === 'grid' ? value : undefined
 }
-function optionalAttachment(value: unknown): PickedAttachment | undefined {
-  if (value === undefined || value === null) return undefined
+function draftAttachment(value: unknown): DraftAttachmentDto {
   const input = objectValue(value)
   return {
     token: requiredString(input, 'token'),
     name: requiredString(input, 'name'),
     size: optionalNumber(input.size) ?? 0,
     mimeType: requiredString(input, 'mimeType'),
-    previewUrl: requiredString(input, 'previewUrl')
+    previewUrl: requiredString(input, 'previewUrl'),
+    kind: requiredAttachmentKind(input.kind)
   }
+}
+
+function draftAttachments(value: unknown): DraftAttachmentDto[] {
+  if (!Array.isArray(value)) throw new Error('Invalid draft attachments')
+  if (value.length > MAX_ALBUM_IMAGES) throw new Error(`Drafts support up to ${MAX_ALBUM_IMAGES} attachments`)
+  const attachments = value.map(draftAttachment)
+  if (attachments.length > 1 && attachments.some((attachment) => attachment.kind !== 'image')) {
+    throw new Error('Multi-file drafts can contain only images')
+  }
+  return attachments
+}
+
+function requiredAttachmentKind(value: unknown): AttachmentKind {
+  const kind = attachmentKind(value)
+  if (!kind) throw new Error('Invalid attachment kind')
+  return kind
+}
+
+function albumImages(value: unknown): Array<{ clientId: string; attachmentToken: string }> {
+  if (!Array.isArray(value) || value.length < 2 || value.length > MAX_ALBUM_IMAGES) {
+    throw new Error(`Albums require between 2 and ${MAX_ALBUM_IMAGES} images`)
+  }
+  const images = value.map((entry) => {
+    const image = objectValue(entry)
+    return { clientId: requiredString(image, 'clientId'), attachmentToken: requiredString(image, 'attachmentToken') }
+  })
+  if (new Set(images.map((image) => image.clientId)).size !== images.length) {
+    throw new Error('Album image client IDs must be unique')
+  }
+  return images
 }
 
 function crmLifecycle(value: unknown): CrmLifecycle {

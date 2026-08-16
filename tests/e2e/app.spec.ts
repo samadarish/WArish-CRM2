@@ -279,6 +279,25 @@ test('keeps local history in the workspace when an existing account needs relink
   const details = page.getByRole('complementary', { name: 'CRM contact record' })
   await expect(details).toBeVisible()
   await expect(details.getByRole('button', { name: 'Close customer details' })).toBeHidden()
+  const conversationActions = conversationHeader.getByRole('group', { name: 'Conversation actions' })
+  await expect(conversationActions.getByRole('button')).toHaveCount(3)
+  await expect(conversationActions.getByRole('button', { name: 'Pin chat' })).toBeVisible()
+  await expect(conversationActions.getByRole('button', { name: 'Mute chat' })).toBeVisible()
+  await expect(conversationActions.getByRole('button', { name: 'Archive chat' })).toBeVisible()
+  await expect(details.getByText('WhatsApp conversation')).toHaveCount(0)
+  await expect(details.getByRole('button', { name: 'Pin', exact: true })).toHaveCount(0)
+  await expect(details.getByRole('button', { name: 'Mute', exact: true })).toHaveCount(0)
+  await expect(details.getByRole('button', { name: 'Archive', exact: true })).toHaveCount(0)
+  await conversationActions.getByRole('button', { name: 'Pin chat' }).click()
+  await expect(conversationActions.getByRole('button', { name: 'Unpin chat' })).toBeVisible()
+  await expect(savedContact.locator('.chat-pinned-indicator')).toBeVisible()
+  await conversationActions.getByRole('button', { name: 'Unpin chat' }).click()
+  await expect(conversationActions.getByRole('button', { name: 'Pin chat' })).toBeVisible()
+  await expect(savedContact.locator('.chat-pinned-indicator')).toHaveCount(0)
+  await conversationActions.getByRole('button', { name: 'Mute chat' }).click()
+  await expect(conversationActions.getByRole('button', { name: 'Unmute chat' })).toBeVisible()
+  await conversationActions.getByRole('button', { name: 'Unmute chat' }).click()
+  await expect(conversationActions.getByRole('button', { name: 'Mute chat' })).toBeVisible()
   const lifecycle = page.getByRole('region', { name: 'Sales lifecycle' })
   await expect(lifecycle).toBeVisible()
   const lifecyclePresentation = await lifecycle.locator('.sales-lifecycle-path button').evaluateAll((buttons) => buttons.map((button) => {
@@ -301,6 +320,9 @@ test('keeps local history in the workspace when an existing account needs relink
   await expect(details.getByText('Pipeline stage')).toHaveCount(0)
   await lifecycle.getByRole('button', { name: 'Set sales stage to Qualified' }).click()
   await expect(lifecycle.getByRole('button', { name: 'Set sales stage to Qualified' })).toHaveAttribute('aria-current', 'step')
+  await expect(details.locator('.crm-contact-tabs button')).toHaveText(['orders', 'overview', 'notes', 'tasks', 'activity'])
+  await expect(details.getByRole('button', { name: 'orders' })).toHaveClass(/active/)
+  await expect(details.getByRole('button', { name: 'New order' })).toBeVisible()
   await expect(details.getByText('Phone number')).toHaveCount(0)
   await expect(details.getByText('+15550001111')).toHaveCount(1)
   await expect.poll(() => details.evaluate((element: unknown) =>
@@ -335,6 +357,8 @@ test('keeps local history in the workspace when an existing account needs relink
   await expect(crmRecord).toBeVisible()
   await expect(crmRecord.getByText('Profile Only', { exact: true }).first()).toBeVisible()
   await expect(crmRecord.getByRole('button', { name: 'Save contact' })).toBeVisible()
+  await expect(crmRecord.getByRole('button', { name: 'orders' })).toHaveClass(/active/)
+  await expect(crmRecord.getByRole('button', { name: 'New order' })).toBeVisible()
   await expect(conversationHeader.getByText('Orders')).toBeVisible()
   await expect(conversationHeader.getByText('Lifetime value')).toBeVisible()
   await expect(conversationHeader.getByText('Open tasks')).toBeVisible()
@@ -379,6 +403,7 @@ test('keeps local history in the workspace when an existing account needs relink
 
   await page.setViewportSize({ width: 900, height: 620 })
   await expect(crmRecord).toBeHidden()
+  await expect(conversationActions).toBeVisible()
   await page.screenshot({ path: join(visualDirectory, 'warish-black-900x620.png'), animations: 'disabled' })
   await conversationHeader.locator('.conversation-identity').click()
   await expect(crmRecord).toBeVisible()
@@ -454,7 +479,7 @@ test('filters direct chats by exact CRM stage while keeping the open conversatio
     for (const name of visible) await expect(chatList.getByRole('button', { name: new RegExp(name) })).toBeVisible()
     for (const name of hidden) await expect(chatList.getByRole('button', { name: new RegExp(name) })).toHaveCount(0)
   }
-  const selectStage = async (name: 'All' | 'New enquiry' | 'Won' | 'Lost'): Promise<void> => {
+  const selectStage = async (name: 'All' | 'New enquiry' | 'Qualified' | 'Quoted' | 'Won' | 'Lost'): Promise<void> => {
     await stageFilter.click()
     await page.getByRole('option', { name, exact: true }).click()
     await expect(stageFilter).toContainText(name)
@@ -463,8 +488,11 @@ test('filters direct chats by exact CRM stage while keeping the open conversatio
   await expect(stageFilter).toBeVisible()
   await expectChatNames(fixtures.map((fixture) => fixture.name), [])
   await stageFilter.click()
+  await expect(page.getByRole('option')).toHaveText(['All', 'New enquiry', 'Qualified', 'Quoted', 'Won', 'Lost'])
   for (const [name, color] of [
     ['New enquiry', 'rgb(245, 158, 11)'],
+    ['Qualified', 'rgb(234, 179, 8)'],
+    ['Quoted', 'rgb(139, 92, 246)'],
     ['Won', 'rgb(132, 204, 22)'],
     ['Lost', 'rgb(239, 68, 68)']
   ] as const) {
@@ -489,6 +517,10 @@ test('filters direct chats by exact CRM stage while keeping the open conversatio
   const excludedFromNew = ['Qualified Prospect', 'Quoted Prospect', 'Won Prospect', 'Lost Prospect', 'Untracked Prospect']
   await selectStage('New enquiry')
   await expectChatNames(['New Prospect'], excludedFromNew)
+  await selectStage('Qualified')
+  await expectChatNames(['Qualified Prospect'], fixtures.filter((fixture) => fixture.key !== 'qualified').map((fixture) => fixture.name))
+  await selectStage('Quoted')
+  await expectChatNames(['Quoted Prospect'], fixtures.filter((fixture) => fixture.key !== 'quoted').map((fixture) => fixture.name))
   await selectStage('Won')
   await expectChatNames(['Won Prospect'], fixtures.filter((fixture) => fixture.key !== 'won').map((fixture) => fixture.name))
   expect(await stageFilter.locator('.ui-choice-swatch').evaluate((element: unknown) => {
@@ -612,7 +644,7 @@ test('keeps grouped replies and remote/downloaded media visually stable', async 
   await expect(quote.locator('span')).toHaveCSS('white-space', 'nowrap')
 })
 
-test('stages a pasted image as a persistent composer draft', async () => {
+test('stages, edits, and restores an ordered pasted-image album draft', async () => {
   await application.close()
   const chatId = '15550008888@s.whatsapp.net'
   const database = new DatabaseSync(join(userDataPath, 'warish.sqlite'))
@@ -637,30 +669,51 @@ test('stages a pasted image as a persistent composer draft', async () => {
   await page.locator('.chat-list').getByRole('button', { name: /Clipboard Paste/ }).click()
   const composer = page.getByRole('textbox', { name: 'Message' })
   await composer.fill('Image caption')
-  await composer.evaluate((element, encodedPng) => {
+  await composer.evaluate((element, images) => {
     const target = element as unknown as BrowserClipboardElement
     const browser = target.ownerDocument.defaultView
-    const binary = browser.atob(encodedPng)
-    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
     const transfer = new browser.DataTransfer()
-    transfer.items.add(new browser.File([bytes], 'clipboard.png', { type: 'image/png' }))
+    for (const image of images) {
+      const binary = browser.atob(image.data)
+      const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
+      transfer.items.add(new browser.File([bytes], image.name, { type: image.type }))
+    }
     target.dispatchEvent(new browser.ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: transfer }))
-  }, 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=')
+  }, [
+    { name: 'first.png', type: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=' },
+    { name: 'second.gif', type: 'image/gif', data: 'R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==' },
+    { name: 'third.jpg', type: 'image/jpeg', data: '/9j/2Q==' }
+  ])
 
-  await expect(page.getByRole('img', { name: 'Pasted image.png preview' })).toBeVisible()
+  const imageList = page.getByRole('list', { name: '3 selected images' })
+  await expect(imageList).toBeVisible()
+  await expect(imageList.getByRole('img')).toHaveCount(3)
+  await expect(imageList.getByRole('img').nth(0)).toHaveAttribute('alt', 'Pasted image.png preview')
+  await expect(imageList.getByRole('img').nth(1)).toHaveAttribute('alt', 'Pasted image.gif preview')
+  await expect(imageList.getByRole('img').nth(2)).toHaveAttribute('alt', 'Pasted image.jpg preview')
   await expect(composer).toHaveValue('Image caption')
-  await expect(page.getByText('Pasted image.png')).toBeVisible()
+  await expect(page.getByText('3 images selected')).toBeVisible()
 
-  let draftToken = ''
+  await page.getByRole('button', { name: 'Remove Pasted image.gif, image 2 of 3' }).click()
+  const editedList = page.getByRole('list', { name: '2 selected images' })
+  await expect(editedList.getByRole('img')).toHaveCount(2)
+  await expect(editedList.getByRole('img').nth(0)).toHaveAttribute('alt', 'Pasted image.png preview')
+  await expect(editedList.getByRole('img').nth(1)).toHaveAttribute('alt', 'Pasted image.jpg preview')
+
+  let draftTokens: string[] = []
   await expect.poll(() => {
     const draftDatabase = new DatabaseSync(join(userDataPath, 'warish.sqlite'))
-    const row = draftDatabase.prepare('SELECT text, attachment_token FROM drafts WHERE chat_id=?').get(chatId) as
-      { text: string; attachment_token: string | null } | undefined
+    const row = draftDatabase.prepare('SELECT text FROM drafts WHERE chat_id=?').get(chatId) as { text: string } | undefined
+    const attachments = draftDatabase.prepare(
+      'SELECT token, name, position FROM draft_attachments WHERE chat_id=? ORDER BY position'
+    ).all(chatId) as Array<{ token: string; name: string; position: number }>
     draftDatabase.close()
-    draftToken = row?.attachment_token ?? ''
-    return row
-  }).toMatchObject({ text: 'Image caption', attachment_token: expect.stringMatching(/\.png$/) })
-  expect(existsSync(join(userDataPath, 'drafts', draftToken))).toBe(true)
+    draftTokens = attachments.map((attachment) => attachment.token)
+    return { text: row?.text, names: attachments.map((attachment) => attachment.name),
+      positions: attachments.map((attachment) => attachment.position) }
+  }).toEqual({ text: 'Image caption', names: ['Pasted image.png', 'Pasted image.jpg'], positions: [0, 1] })
+  expect(draftTokens).toHaveLength(2)
+  for (const token of draftTokens) expect(existsSync(join(userDataPath, 'drafts', token))).toBe(true)
 
   await application.close()
   application = await electron.launch({
@@ -670,16 +723,39 @@ test('stages a pasted image as a persistent composer draft', async () => {
   page = await application.firstWindow()
   await page.locator('.chat-list').getByRole('button', { name: /Clipboard Paste/ }).click()
   await expect(page.getByRole('textbox', { name: 'Message' })).toHaveValue('Image caption')
-  await expect(page.getByRole('img', { name: 'Pasted image.png preview' })).toBeVisible()
+  const restoredList = page.getByRole('list', { name: '2 selected images' })
+  await expect(restoredList.getByRole('img').nth(0)).toHaveAttribute('alt', 'Pasted image.png preview')
+  await expect(restoredList.getByRole('img').nth(1)).toHaveAttribute('alt', 'Pasted image.jpg preview')
+  const stripBounds = await restoredList.boundingBox()
+  const contextBounds = await page.locator('.composer-context').boundingBox()
+  if (!stripBounds || !contextBounds) throw new Error('The dense album preview has no visible geometry')
+  expect(stripBounds.x).toBeGreaterThanOrEqual(contextBounds.x)
+  expect(stripBounds.x + stripBounds.width).toBeLessThanOrEqual(contextBounds.x + contextBounds.width + 1)
 
   await page.getByRole('button', { name: 'Clear reply or attachment' }).click()
-  await expect(page.getByRole('img', { name: 'Pasted image.png preview' })).toHaveCount(0)
-  await expect.poll(() => existsSync(join(userDataPath, 'drafts', draftToken))).toBe(false)
+  await expect(page.getByRole('list', { name: '2 selected images' })).toHaveCount(0)
+  for (const token of draftTokens) await expect.poll(() => existsSync(join(userDataPath, 'drafts', token))).toBe(false)
   await expect.poll(() => {
     const draftDatabase = new DatabaseSync(join(userDataPath, 'warish.sqlite'))
     const row = draftDatabase.prepare('SELECT text, attachment_token FROM drafts WHERE chat_id=?').get(chatId) as
       { text: string; attachment_token: string | null } | undefined
+    const attachmentCount = (draftDatabase.prepare('SELECT COUNT(*) AS count FROM draft_attachments WHERE chat_id=?')
+      .get(chatId) as { count: number }).count
     draftDatabase.close()
-    return row
-  }).toEqual({ text: 'Image caption', attachment_token: null })
+    return { ...row, attachmentCount }
+  }).toEqual({ text: 'Image caption', attachment_token: null, attachmentCount: 0 })
+
+  await page.getByRole('textbox', { name: 'Message' }).evaluate((element) => {
+    const target = element as unknown as BrowserClipboardElement
+    const browser = target.ownerDocument.defaultView
+    const bytes = Uint8Array.from(browser.atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII='),
+      (character) => character.charCodeAt(0))
+    const transfer = new browser.DataTransfer()
+    for (let index = 0; index < 31; index += 1) {
+      transfer.items.add(new browser.File([bytes], `${index}.png`, { type: 'image/png' }))
+    }
+    target.dispatchEvent(new browser.ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: transfer }))
+  })
+  await expect(page.getByText('WhatsApp albums are limited to 30 images.')).toBeVisible()
+  await expect(page.locator('.composer-image-item')).toHaveCount(0)
 })

@@ -33,19 +33,19 @@ describe('normalizeWhatsAppMessage', () => {
     })
   })
 
-  it('turns product, album, and template payloads into readable rich cards', () => {
+  it('turns product and template payloads into readable rich cards while hiding album transport parents', () => {
     const product = normalizeWhatsAppMessage(message({ productMessage: {
       product: { title: 'Desk lamp', description: 'Warm white', currencyCode: 'USD', priceAmount1000: 1299000 },
       body: 'Available now'
     } })).message
-    const album = normalizeWhatsAppMessage(message({ albumMessage: { expectedImageCount: 2, expectedVideoCount: 1 } })).message
+    const album = normalizeWhatsAppMessage(message({ albumMessage: { expectedImageCount: 2, expectedVideoCount: 1 } }))
     const template = normalizeWhatsAppMessage(message({ templateMessage: {
       hydratedTemplate: { hydratedTitleText: 'Order update', hydratedContentText: 'Your order has shipped', hydratedFooterText: 'Thank you' }
     } })).message
 
     expect(product).toMatchObject({ kind: 'rich', text: 'Desk lamp', rich: { type: 'product', title: 'Desk lamp', body: 'Available now' } })
     expect(product?.rich?.footer).toContain('$')
-    expect(album).toMatchObject({ kind: 'rich', rich: { type: 'album', itemCount: 3, body: '3 media items' } })
+    expect(album).toEqual({})
     expect(template).toMatchObject({ kind: 'rich', rich: { type: 'template', title: 'Order update', body: 'Your order has shipped' } })
   })
 

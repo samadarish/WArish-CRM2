@@ -189,6 +189,7 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .chat-row-bottom { margin-top: 5px; font-size: 13px; }
 .chat-preview { display: flex; min-width: 0; flex: 1; align-items: center; gap: 3px; overflow: hidden; }
 .chat-delivery-receipt.delivery-receipt { width: 14px; height: 14px; }
+.chat-pinned-indicator { width: 13px; height: 13px; flex: 0 0 auto; color: var(--muted); stroke-width: 2; }
 .contact-identity-details { display: flex; min-width: 0; align-items: center; gap: 6px; overflow: hidden; color: var(--muted); white-space: nowrap; }
 .chat-row-identity { margin-top: 3px; font-size: 11px; }
 .whatsapp-profile-pill { min-width: 0; max-width: 58%; overflow: hidden; padding: 2px 7px; border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border)); border-radius: 999px; color: var(--accent-strong); background: color-mix(in srgb, var(--accent) 8%, var(--panel)); font-size: 11px; font-weight: 600; line-height: 1.2; text-overflow: ellipsis; }
@@ -250,6 +251,9 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .conversation-crm-line .whatsapp-profile-pill { max-width: 150px; }
 .conversation-crm-alias { max-width: 180px; color: var(--text); font-weight: 600; }
 .conversation-header .icon-button.active { color: var(--accent); background: var(--active); }
+.conversation-chat-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-section); }
+.conversation-chat-actions .icon-button { width: 34px; height: 34px; }
+.conversation-chat-actions .icon-button svg { width: 16px; height: 16px; }
 .customer-summary { display: flex; min-width: 0; height: calc(var(--conversation-header-height) - 12px); flex: 1 1 620px; align-items: stretch; overflow: hidden; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-section); }
 .customer-summary-item { display: flex; min-width: 86px; flex: 0 1 112px; align-items: center; gap: 7px; padding: 4px 10px; border-right: 1px solid var(--border); }
 .customer-summary-item:last-child { border-right: 0; }
@@ -428,10 +432,17 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 
 .composer-context { display: flex; grid-column: 1; grid-row: 4; align-items: center; gap: 9px; padding: 6px 12px; border-top: 1px solid var(--border); background: var(--panel-soft); }
 .composer-attachment-preview { width: 48px; height: 48px; flex: 0 0 auto; border: 1px solid var(--border); border-radius: 5px; object-fit: cover; background: var(--panel); }
-.composer-context > div { min-width: 0; flex: 1; padding: 5px 9px; border-left: 3px solid var(--accent); border-radius: 5px; background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
+.composer-image-album { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; gap: 9px; }
+.composer-image-strip { display: flex; min-width: 72px; flex: 1 1 auto; gap: 6px; overflow-x: auto; padding: 2px; scrollbar-color: var(--muted) transparent; scrollbar-width: thin; }
+.composer-image-item { position: relative; flex: 0 0 auto; }
+.composer-image-remove { position: absolute; top: -4px; right: -4px; display: grid; width: 19px; height: 19px; place-items: center; border: 1px solid var(--panel-soft); border-radius: 50%; color: white !important; background: var(--danger) !important; box-shadow: 0 1px 4px rgb(0 0 0 / 24%); }
+.composer-image-remove svg { width: 11px; height: 11px; stroke-width: 2.5; }
+.composer-context-copy, .composer-album-summary { min-width: 0; flex: 1; padding: 5px 9px; border-left: 3px solid var(--accent); border-radius: 5px; background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
+.composer-album-summary { max-width: 170px; flex: 0 1 170px; }
 .composer-context strong, .composer-context span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer-context span { margin-top: 2px; color: var(--muted); font-size: 12px; }
 .composer-context button { display: grid; place-items: center; color: var(--muted); background: transparent; }
+.composer-clear-context { flex: 0 0 auto; }
 .composer { display: flex; min-height: 62px; grid-column: 1; grid-row: 5; align-items: flex-end; gap: 5px; padding: 9px 12px; border-top: 1px solid var(--border); background: var(--panel-soft); }
 .composer-tool { position: relative; flex: 0 0 auto; }
 .composer-tool > .icon-button.active { color: var(--accent-strong); background: var(--active); }
@@ -773,7 +784,9 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 :root[data-density='compact'] .message-search-result { padding: 9px 13px; }
 :root[data-density='compact'] .composer-context { gap: 8px; padding: 5px 10px; }
 :root[data-density='compact'] .composer-attachment-preview { width: 42px; height: 42px; }
-:root[data-density='compact'] .composer-context > div { padding: 4px 9px; }
+:root[data-density='compact'] .composer-context-copy,
+:root[data-density='compact'] .composer-album-summary { padding: 4px 9px; }
+:root[data-density='compact'] .composer-image-strip { gap: 5px; }
 :root[data-density='compact'] .composer { min-height: 52px; gap: 3px; padding: 6px 10px; }
 :root[data-density='compact'] .read-only-composer { min-height: 52px; padding: 7px 10px; }
 :root[data-density='compact'] .composer textarea { min-height: 36px; padding: 8px 13px; line-height: 19px; }
@@ -951,14 +964,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 .crm-profile-section > header strong { flex: 1; font-size: 13px; }
 .crm-profile-section > header .secondary-button { min-height: 30px; padding: 5px 9px; font-size: 10px; }
 .crm-profile-section > header svg { width: 13px; height: 13px; }
-.conversation-overview { margin: 15px 0 0 !important; padding-top: 14px; border-top: 1px solid var(--border-strong); }
-.conversation-overview > header { display: flex; align-items: center; margin-bottom: 8px; }
-.conversation-overview > header strong { font-size: 13px; }
-.conversation-overview .contact-actions { gap: 6px; padding: 0; border: 0; }
-.conversation-overview .contact-actions button { min-height: 48px; padding: 7px 4px; }
-.conversation-overview .contact-detail-list { padding: 0; }
-.conversation-overview .contact-detail { padding: 8px 2px; }
-.conversation-overview .contact-detail > span { width: 28px; height: 28px; }
 .crm-start-tracking { display: flex; min-height: 58px; align-items: center; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
 .crm-start-tracking > svg { width: 18px; height: 18px; color: var(--accent-strong); }
 .crm-start-tracking > strong { min-width: 0; flex: 1; font-size: 11px; }
@@ -1139,6 +1144,7 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 :root[data-density='dense'] .chat-row-top strong { font-size: 13px; }
 :root[data-density='dense'] .chat-row-top time { font-size: 10px; }
 :root[data-density='dense'] .chat-row-bottom { margin-top: 2px; font-size: 12px; }
+:root[data-density='dense'] .chat-pinned-indicator { width: 11px; height: 11px; }
 :root[data-density='dense'] .chat-row-metadata { display: flex; min-width: 0; align-items: center; gap: 6px; margin-top: 2px; overflow: hidden; }
 :root[data-density='dense'] .chat-row-identity { max-width: 42%; flex: 0 1 auto; margin: 0; }
 :root[data-density='dense'] .chat-row-identity .whatsapp-profile-pill { max-width: 100%; padding: 1px 5px; border-radius: 7px; font-size: 9px; }
@@ -1194,7 +1200,10 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 :root[data-density='dense'] .contact-detail > span { width: 27px; height: 27px; }
 :root[data-density='dense'] .composer-context { gap: 6px; padding: 4px 8px; }
 :root[data-density='dense'] .composer-attachment-preview { width: 36px; height: 36px; }
-:root[data-density='dense'] .composer-context > div { padding: 3px 7px; }
+:root[data-density='dense'] .composer-context-copy,
+:root[data-density='dense'] .composer-album-summary { padding: 3px 7px; }
+:root[data-density='dense'] .composer-image-album { gap: 6px; }
+:root[data-density='dense'] .composer-image-strip { gap: 4px; }
 :root[data-density='dense'] .composer { min-height: 46px; gap: 2px; padding: 5px 8px; }
 :root[data-density='dense'] .read-only-composer { min-height: 46px; padding: 6px 8px; }
 :root[data-density='dense'] .composer textarea { min-height: 34px; padding: 7px 11px; border-radius: 8px; line-height: 18px; }
@@ -1326,6 +1335,7 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 :root[data-density-mode='ultra-dense'] .avatar { width: 34px; height: 34px; border-radius: 7px; }
 :root[data-density-mode='ultra-dense'] .chat-row-bottom,
 :root[data-density-mode='ultra-dense'] .chat-row-metadata { margin-top: 1px; }
+:root[data-density-mode='ultra-dense'] .chat-pinned-indicator { width: 10px; height: 10px; }
 :root[data-density-mode='ultra-dense'] .skeleton-row { min-height: 48px; padding: 2px 6px; }
 :root[data-density-mode='ultra-dense'] .skeleton-row > i { width: 34px; height: 34px; }
 :root[data-density-mode='ultra-dense'] .community-parent { min-height: 50px; padding: 2px 6px 2px 3px; }
@@ -1349,6 +1359,10 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 :root[data-density-mode='ultra-dense'] .message-meta { min-height: 12px; margin-left: 27px; }
 :root[data-density-mode='ultra-dense'] .composer-context { gap: 5px; padding: 3px 6px; }
 :root[data-density-mode='ultra-dense'] .composer-attachment-preview { width: 32px; height: 32px; }
+:root[data-density-mode='ultra-dense'] .composer-image-album { gap: 4px; }
+:root[data-density-mode='ultra-dense'] .composer-image-strip { gap: 3px; }
+:root[data-density-mode='ultra-dense'] .composer-album-summary { max-width: 145px; flex-basis: 145px; }
+:root[data-density-mode='ultra-dense'] .composer-image-remove { width: 17px; height: 17px; }
 :root[data-density-mode='ultra-dense'] .composer { min-height: 40px; padding: 4px 6px; }
 :root[data-density-mode='ultra-dense'] .read-only-composer { min-height: 40px; padding: 4px 6px; }
 :root[data-density-mode='ultra-dense'] .composer textarea { min-height: 30px; padding: 5px 9px; }
@@ -1379,7 +1393,6 @@ button, input, textarea, select, .message-bubble, .crm-card, .crm-stat, .custome
 :root[data-density-mode='ultra-dense'] .crm-contact-tabs { padding-inline: 6px; }
 :root[data-density-mode='ultra-dense'] .crm-contact-body { padding: 8px 11px 14px; }
 :root[data-density-mode='ultra-dense'] .crm-profile-section dl > div { min-height: 48px; padding: 8px 9px; }
-:root[data-density-mode='ultra-dense'] .conversation-overview .contact-actions button { min-height: 40px; }
 :root[data-density-mode='ultra-dense'] .crm-dialog { --crm-dialog-body-padding: 10px; grid-template-rows: 44px minmax(0, 1fr); }
 :root[data-density-mode='ultra-dense'] .crm-form { gap: 7px; }
 :root[data-density-mode='ultra-dense'] .form-field input,
@@ -1607,10 +1620,6 @@ button:active:not(:disabled) { transform: none; opacity: .88; }
   transition: transform var(--motion-medium) var(--motion-ease); }
 .crm-profile-section dl { gap: 0; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: transparent; }
 .crm-profile-section dl > div { border-bottom: 1px solid var(--border); background: transparent; }
-.conversation-overview .contact-actions { overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-control); }
-.conversation-overview .contact-actions button { border: 0; border-right: 1px solid var(--border); border-radius: 0; background: transparent; }
-.conversation-overview .contact-actions button:last-child { border-right: 0; }
-
 /* Density changes geometry, while operational labels retain a readable floor. */
 .chat-crm-signal,
 .customer-summary-item small,

@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { WarishDatabase } from '../src/core/database'
 import { CrmRepository } from '../src/core/crm-repository'
 import { createPersistentAuthState, mergeAuthCreds } from '../src/core/auth-store'
-import { DEFAULT_SETTINGS } from '../src/shared/contracts'
+import { DEFAULT_SETTINGS, type ChatCrmStageFilter } from '../src/shared/contracts'
 
 const directories: string[] = []
 
@@ -68,7 +68,7 @@ describe('WarishDatabase', () => {
     const migrated = new WarishDatabase(path, Buffer.alloc(32, 7), pino({ enabled: false }))
     expect(migrated.getChat(lid)).toMatchObject({ title: 'Migrated name', savedName: 'Migrated name',
       whatsappName: 'Migrated profile', phoneNumber: '+33612345678' })
-    expect((migrated.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as { version: number }).version).toBe(12)
+    expect((migrated.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as { version: number }).version).toBe(13)
     migrated.close()
   })
 
@@ -160,7 +160,7 @@ describe('WarishDatabase', () => {
     expect(activityTypes.map((row) => row.type)).toEqual(expect.arrayContaining(['lead-created', 'note-added']))
     expect(activityTypes.map((row) => row.type)).not.toContain('google-saved')
     expect(retiredTable).toBeUndefined()
-    expect((migrated.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as { version: number }).version).toBe(12)
+    expect((migrated.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as { version: number }).version).toBe(13)
     migrated.close()
   })
 
@@ -192,8 +192,56 @@ describe('WarishDatabase', () => {
       'stage-won': '#84CC16',
       'stage-lost': '#EF4444'
     })
-    expect((migrated.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as { version: number }).version).toBe(12)
+    expect((migrated.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as { version: number }).version).toBe(13)
     migrated.close()
+  })
+
+  it('migrates legacy single-file drafts into ordered v13 attachments', () => {
+    const { database, directory } = createDatabase()
+    const path = join(directory, 'warish.sqlite')
+    const chatId = '15550001313@s.whatsapp.net'
+    database.upsertChat({ id: chatId, title: 'Draft migration', kind: 'direct' })
+    database.saveDraft({ chatId, text: 'Legacy caption', attachments: [{
+      token: 'legacy.png', kind: 'image', name: 'Legacy.png', size: 321, mimeType: 'image/png',
+      previewUrl: 'warish-media://drafts/legacy.png'
+    }], updatedAt: Date.now() })
+    database.close()
+
+    const legacy = new DatabaseSync(path)
+    legacy.exec('DROP TABLE draft_attachments; DELETE FROM schema_migrations WHERE version>=13;')
+    legacy.close()
+
+    const migrated = new WarishDatabase(path, Buffer.alloc(32, 7), pino({ enabled: false }))
+    expect(migrated.getDraft(chatId)).toMatchObject({
+      text: 'Legacy caption',
+      attachments: [{ token: 'legacy.png', kind: 'image', name: 'Legacy.png', size: 321 }]
+    })
+    expect((migrated.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as { version: number }).version).toBe(13)
+    migrated.close()
+  })
+
+  it('preserves ordered multi-image drafts across restarts, clearing, and orphan-token scans', () => {
+    const { database, directory } = createDatabase()
+    const path = join(directory, 'warish.sqlite')
+    const chatId = '15550002313@s.whatsapp.net'
+    const attachments = [
+      { token: 'second.png', kind: 'image' as const, name: 'Second.png', size: 22, mimeType: 'image/png',
+        previewUrl: 'warish-media://drafts/second.png' },
+      { token: 'first.jpg', kind: 'image' as const, name: 'First.jpg', size: 11, mimeType: 'image/jpeg',
+        previewUrl: 'warish-media://drafts/first.jpg' }
+    ]
+    database.upsertChat({ id: chatId, title: 'Ordered draft', kind: 'direct' })
+    database.saveDraft({ chatId, text: 'Album caption', attachments, updatedAt: Date.now() })
+    expect([...database.referencedDraftTokens()]).toEqual(expect.arrayContaining(['second.png', 'first.jpg']))
+    database.close()
+
+    const reopened = new WarishDatabase(path, Buffer.alloc(32, 7), pino({ enabled: false }))
+    expect(reopened.getDraft(chatId)?.attachments.map((attachment) => attachment.token)).toEqual(['second.png', 'first.jpg'])
+    reopened.clearDraft(chatId)
+    expect(reopened.getDraft(chatId)).toBeUndefined()
+    expect(reopened.referencedDraftTokens().has('second.png')).toBe(false)
+    expect(reopened.db.prepare('SELECT COUNT(*) AS count FROM draft_attachments').get()).toMatchObject({ count: 0 })
+    reopened.close()
   })
 
   it('stores encrypted auth state and isolates its context', () => {
@@ -488,9 +536,11 @@ describe('WarishDatabase', () => {
     database.storeMessage({ id: 'untracked-message', chatId: untrackedId, fromMe: false, kind: 'text', text: 'Untracked Match',
       timestamp: 20_000, status: 'read', incrementUnread: false })
 
-    const ids = (crmStage: 'all' | 'new' | 'won' | 'lost', query?: string) =>
+    const ids = (crmStage: ChatCrmStageFilter, query?: string) =>
       database.listChats({ category: 'direct', crmStage, query }).items.map((chat) => chat.id)
     expect(ids('new')).toEqual(['15550100001@s.whatsapp.net'])
+    expect(ids('qualified')).toEqual(['15550100002@s.whatsapp.net'])
+    expect(ids('quoted')).toEqual(['15550100003@s.whatsapp.net'])
     expect(ids('won')).toEqual(['15550100005@s.whatsapp.net', '15550100004@s.whatsapp.net'])
     expect(ids('lost')).toEqual(['15550100006@s.whatsapp.net'])
     expect(ids('all')).toEqual([untrackedId, ...stages.map(([chatId]) => chatId).reverse()])
@@ -816,7 +866,7 @@ describe('WarishDatabase', () => {
     database.upsertChat({ id: chatId, title: 'Metadata only', kind: 'direct' })
     expect(database.listChats({}).items).toEqual([])
 
-    database.saveDraft({ chatId, text: 'A saved draft', updatedAt: Date.now() })
+    database.saveDraft({ chatId, text: 'A saved draft', attachments: [], updatedAt: Date.now() })
     expect(database.listChats({}).items.map((chat) => chat.id)).toEqual([chatId])
     database.clearDraft(chatId)
     expect(database.listChats({}).items).toEqual([])
@@ -831,12 +881,12 @@ describe('WarishDatabase', () => {
     const { database } = createDatabase()
     const chatId = '15550006666@s.whatsapp.net'
     database.upsertChat({ id: chatId, title: 'Draft chat', kind: 'direct' })
-    database.saveDraft({ chatId, text: 'caption', attachment: {
+    database.saveDraft({ chatId, text: 'caption', attachments: [{
       token: 'draft.pdf', name: 'Draft.pdf', size: 1234, mimeType: 'application/pdf',
-      previewUrl: 'warish-media://drafts/draft.pdf'
-    }, attachmentKind: 'document', updatedAt: Date.now() })
-    expect(database.getDraft(chatId)).toMatchObject({ text: 'caption', attachmentKind: 'document',
-      attachment: { token: 'draft.pdf', name: 'Draft.pdf', size: 1234 } })
+      previewUrl: 'warish-media://drafts/draft.pdf', kind: 'document'
+    }], updatedAt: Date.now() })
+    expect(database.getDraft(chatId)).toMatchObject({ text: 'caption',
+      attachments: [{ token: 'draft.pdf', name: 'Draft.pdf', size: 1234, kind: 'document' }] })
 
     for (let index = 0; index < 60; index += 1) {
       database.storeMessage({ id: `search-${String(index).padStart(2, '0')}`, chatId, fromMe: false, kind: 'text',

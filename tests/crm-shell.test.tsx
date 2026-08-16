@@ -77,7 +77,12 @@ describe('CrmShell', () => {
     expect(await screen.findByRole('columnheader', { name: 'Contact' })).toBeInTheDocument()
     fireEvent.click(screen.getByText('Priya Enquiry'))
     await waitFor(() => expect(useUiStore.getState().selectedCrmContactId).toBe('crm-1'))
-    expect(await screen.findByRole('complementary', { name: 'CRM contact record' })).toBeInTheDocument()
+    const contactPanel = await screen.findByRole('complementary', { name: 'CRM contact record' })
+    expect(Array.from(contactPanel.querySelectorAll('.crm-contact-tabs button')).map((button) => button.textContent)).toEqual([
+      'orders', 'overview', 'notes', 'tasks', 'activity'
+    ])
+    expect(within(contactPanel).getByRole('button', { name: 'orders' })).toHaveClass('active')
+    expect(await within(contactPanel).findByRole('button', { name: 'New order' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Save contact' })).toBeInTheDocument()
     expect(screen.getAllByText('+919876543210').length).toBeGreaterThan(0)
   })

@@ -20,7 +20,8 @@ import { WhatsAppContactDialog } from './WhatsAppContactDialog'
 import { ComboBoxField, IconButton, SelectField, Tooltip } from './ui-primitives'
 
 type CrmView = 'overview' | 'leads' | 'customers' | 'orders' | 'tasks' | 'catalog'
-type ContactTab = 'overview' | 'notes' | 'tasks' | 'orders' | 'activity'
+const CONTACT_TABS = ['orders', 'overview', 'notes', 'tasks', 'activity'] as const
+type ContactTab = (typeof CONTACT_TABS)[number]
 
 const CRM_VIEWS: Array<{ id: CrmView; label: string; icon: ReactNode }> = [
   { id: 'overview', label: 'Overview', icon: <LayoutDashboard /> },
@@ -344,18 +345,17 @@ function CatalogView({ items, loading, error, onRetry, onEdit, onError }: { item
       onClick={() => archive.mutate(item.id)}><Trash2 />Archive</button> : <span>Archived</span>}</footer></article>)}</div>
 }
 
-export function CrmContactPanel({ contactId, stages, onClose, inConversation = false, overviewPrefix, onJumpToMessage,
+export function CrmContactPanel({ contactId, stages, onClose, inConversation = false, onJumpToMessage,
   persistent = false, overlayOpen = false }: {
   contactId: string
   stages: CrmStageDto[]
   onClose(): void
   inConversation?: boolean
-  overviewPrefix?: ReactNode
   onJumpToMessage?(messageId: string): void
   persistent?: boolean
   overlayOpen?: boolean
 }): React.JSX.Element {
-  const [tab, setTab] = useState<ContactTab>('overview')
+  const [tab, setTab] = useState<ContactTab>('orders')
   const [editing, setEditing] = useState(false)
   const [contactSaveOpen, setContactSaveOpen] = useState(false)
   const [taskEditor, setTaskEditor] = useState<CrmTaskDto | null>()
@@ -405,12 +405,12 @@ export function CrmContactPanel({ contactId, stages, onClose, inConversation = f
         value={contact.stageId} disabled={stage.isPending} onChange={(value) => stage.mutate(value)}
         options={stages.map((item) => ({ value: item.id, label: item.name }))} />
       }
-      <nav className="crm-contact-tabs">{(['overview', 'notes', 'tasks', 'orders', 'activity'] as const).map((item) => <button key={item}
+      <nav className="crm-contact-tabs">{CONTACT_TABS.map((item) => <button key={item}
         className={tab === item ? 'active' : ''} onMouseEnter={() => prefetchTab(item)} onFocus={() => prefetchTab(item)}
         onClick={() => setTab(item)}>{item}</button>)}</nav>
       <div className="crm-contact-body">
         {tab === 'overview' && (editing ? <ContactEditForm contact={contact} onDone={() => setEditing(false)} />
-          : <ContactProfile contact={contact} onEdit={() => setEditing(true)} prefix={overviewPrefix} />)}
+          : <ContactProfile contact={contact} onEdit={() => setEditing(true)} />)}
         {tab === 'notes' && <ContactNotes contactId={contactId} onJumpToMessage={onJumpToMessage} />}
         {tab === 'tasks' && <ContactTasks contactId={contactId} onNew={() => setTaskEditor(null)}
           onEdit={(task) => setTaskEditor(task)} onJumpToMessage={onJumpToMessage} />}
@@ -430,14 +430,13 @@ export function CrmContactPanel({ contactId, stages, onClose, inConversation = f
   </>
 }
 
-function ContactProfile({ contact, onEdit, prefix }: { contact: CrmContactDetailsDto; onEdit(): void; prefix?: ReactNode }): React.JSX.Element {
+function ContactProfile({ contact, onEdit }: { contact: CrmContactDetailsDto; onEdit(): void }): React.JSX.Element {
   return <div className="crm-profile-section"><header><strong>Business details</strong><button className="secondary-button" onClick={onEdit}><Pencil />Edit</button></header>
     <dl><ProfileField label="Email" value={contact.email} /><ProfileField label="Company" value={contact.company} />
       <ProfileField label="Address" value={contact.address} /><ProfileField label="Tax ID / GST" value={contact.taxId} />
       <ProfileField label="Birthday" value={contact.birthday} /><ProfileField label="Lead source" value={contact.source} />
       <ProfileField label="Consent" value={contact.consentStatus} /><ProfileField label="Contact preference" value={contact.doNotContact ? 'Do not contact' : contact.preferences} /></dl>
     {contact.tags.length > 0 && <section><small>Tags</small><div className="crm-tags large"><TagList contact={contact} /></div></section>}
-    {prefix}
   </div>
 }
 

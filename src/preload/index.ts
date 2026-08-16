@@ -40,6 +40,7 @@ const api: WarishApi = {
     context: (chatId, messageId, radius) => invoke<MessageContextDto>('message.context', { chatId, messageId, radius }),
     loadEarlier: (chatId) => invoke<OlderHistoryResult>('message.loadEarlier', { chatId }),
     send: (input) => invoke<MessageDto>('message.send', { input }),
+    sendAlbum: (input) => invoke<MessageDto[]>('message.sendAlbum', { input }),
     retry: (messageId) => invoke<MessageDto>('message.retry', { messageId }),
     react: (chatId, messageId, emoji) => invoke<void>('message.react', { chatId, messageId, emoji }),
     edit: (chatId, messageId, text) => invoke<void>('message.edit', { chatId, messageId, text }),
@@ -49,7 +50,7 @@ const api: WarishApi = {
     })
   },
   media: {
-    pick: () => ipcRenderer.invoke('warish:pick-attachment') as Promise<PickedAttachment | null>,
+    pick: (maxFiles) => ipcRenderer.invoke('warish:pick-attachment', maxFiles) as Promise<PickedAttachment[] | null>,
     saveClipboardImage: (data, mimeType) => ipcRenderer.invoke('warish:save-clipboard-image', data, mimeType) as Promise<PickedAttachment>,
     saveRecording: (data, mimeType) => ipcRenderer.invoke('warish:save-recording', data, mimeType) as Promise<PickedAttachment>,
     thumbnail: (messageId) => invoke<{ thumbnailDataUrl?: string }>('media.thumbnail', { messageId }),

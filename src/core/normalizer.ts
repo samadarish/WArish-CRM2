@@ -24,7 +24,8 @@ export interface NormalizedEnvelope {
 const CONTROL_MESSAGE_TYPES = new Set([
   'senderKeyDistributionMessage',
   'fastRatchetKeySenderKeyDistributionMessage',
-  'messageContextInfo'
+  'messageContextInfo',
+  'albumMessage'
 ])
 
 export function isVisibleChatJid(jid: string | null | undefined): jid is string {
@@ -168,13 +169,6 @@ function extractContent(type: string, content: Record<string, any>): ExtractedCo
         footer: firstText(price, value.footer)
       }
       return { kind: 'rich', text: rich.title, contextInfo: value.contextInfo, rich }
-    }
-    case 'albumMessage': {
-      const value = content.albumMessage ?? {}
-      const itemCount = Number(value.expectedImageCount ?? 0) + Number(value.expectedVideoCount ?? 0)
-      const rich: RichMessageDto = { type: 'album', title: 'Media album',
-        body: itemCount > 0 ? `${itemCount} media items` : 'Shared media album', itemCount: itemCount || undefined }
-      return { kind: 'rich', text: rich.body, contextInfo: value.contextInfo, rich }
     }
     case 'commentMessage': {
       const value = content.commentMessage ?? {}

@@ -22,6 +22,7 @@ export const RPC_METHODS = [
   'message.context',
   'message.loadEarlier',
   'message.send',
+  'message.sendAlbum',
   'message.retry',
   'message.react',
   'message.edit',
@@ -178,7 +179,7 @@ export interface ContactSyncState {
 
 export type ChatKind = 'direct' | 'group' | 'community' | 'channel' | 'broadcast' | 'unknown'
 export type ChatCategory = 'all' | 'direct' | 'group' | 'community' | 'channel'
-export type ChatCrmStageFilter = 'all' | 'new' | 'won' | 'lost'
+export type ChatCrmStageFilter = 'all' | CrmStageKey
 
 export interface ChatSummary {
   id: string
@@ -231,10 +232,12 @@ export type MessageKind =
 
 export type DeliveryState = 'queued' | 'sending' | 'sent' | 'delivered' | 'read' | 'failed'
 
+export type AttachmentKind = 'image' | 'video' | 'document' | 'audio' | 'voice' | 'sticker'
+
 export interface AttachmentDto {
   id: string
   messageId: string
-  kind: 'image' | 'video' | 'document' | 'audio' | 'voice' | 'sticker' | 'location' | 'contact' | 'poll'
+  kind: AttachmentKind | 'location' | 'contact' | 'poll'
   fileName?: string
   mimeType?: string
   size?: number
@@ -307,13 +310,18 @@ export interface PickedAttachment {
   previewUrl: string
 }
 
+export interface DraftAttachmentDto extends PickedAttachment {
+  kind: AttachmentKind
+}
+
 export interface DraftDto {
   chatId: string
   text: string
-  attachment?: PickedAttachment
-  attachmentKind?: 'image' | 'video' | 'document' | 'audio' | 'voice' | 'sticker'
+  attachments: DraftAttachmentDto[]
   updatedAt: number
 }
+
+export const MAX_ALBUM_IMAGES = 30
 
 export type CrmLifecycle = 'lead' | 'customer' | 'ignored' | 'spam'
 export type CrmStageKey = 'new' | 'qualified' | 'quoted' | 'won' | 'lost'
@@ -650,10 +658,18 @@ export interface WarishApi {
       clientId: string
       text?: string
       attachmentToken?: string
-      attachmentKind?: 'image' | 'video' | 'document' | 'audio' | 'voice' | 'sticker'
+      attachmentKind?: AttachmentKind
       quotedMessageId?: string
       restrictedContactAcknowledged?: boolean
     }): Promise<MessageDto>
+    sendAlbum(input: {
+      chatId: string
+      albumClientId: string
+      images: Array<{ clientId: string; attachmentToken: string }>
+      caption?: string
+      quotedMessageId?: string
+      restrictedContactAcknowledged?: boolean
+    }): Promise<MessageDto[]>
     retry(messageId: string): Promise<MessageDto>
     react(chatId: string, messageId: string, emoji?: string): Promise<void>
     edit(chatId: string, messageId: string, text: string): Promise<void>
@@ -661,7 +677,7 @@ export interface WarishApi {
     forward(messageId: string, chatIds: string[], restrictedContactAcknowledgements?: string[]): Promise<void>
   }
   media: {
-    pick(): Promise<PickedAttachment | null>
+    pick(maxFiles?: number): Promise<PickedAttachment[] | null>
     saveClipboardImage(data: Uint8Array, mimeType: string): Promise<PickedAttachment>
     saveRecording(data: Uint8Array, mimeType: string): Promise<PickedAttachment>
     thumbnail(messageId: string): Promise<{ thumbnailDataUrl?: string }>

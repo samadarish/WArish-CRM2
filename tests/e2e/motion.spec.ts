@@ -721,7 +721,10 @@ test('keeps chat and message motion meaningful under rapid updates and reduced m
   await page.waitForTimeout(340)
   await page.locator('html').evaluate((element: unknown, chatId: string) =>
     (element as BrowserStyledElement).ownerDocument.defaultView.warish.chats.update(chatId, { pinned: true }), fixtureChatId(120))
-  await expect(chatList.locator('.chat-row').first().locator('.chat-row-top > strong')).toHaveText('Motion Chat 120')
+  const pinnedRow = chatList.locator('.chat-row').first()
+  await expect(pinnedRow.locator('.chat-row-top > strong')).toHaveText('Motion Chat 120')
+  await expect(pinnedRow.locator('.chat-pinned-indicator')).toBeVisible()
+  await expect(pinnedRow).toHaveAccessibleName(/Pinned chat/)
   await expect(page.locator('.chat-row-enter')).toHaveCount(0)
 
   for (let attempt = 0; attempt < 5; attempt += 1) {

@@ -12,7 +12,8 @@ const REQUEST_TIMEOUT_MS: Partial<Record<RpcMethod, number>> = {
   'message.forward': 10 * 60_000,
   'message.loadEarlier': 60_000,
   'message.retry': 10 * 60_000,
-  'message.send': 10 * 60_000
+  'message.send': 10 * 60_000,
+  'message.sendAlbum': 30 * 60_000
 }
 
 export class CoreBridge extends EventEmitter {

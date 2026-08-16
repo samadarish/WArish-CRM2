@@ -4,7 +4,9 @@ import { DatabaseSync, backup } from 'node:sqlite'
 import type { Logger } from 'pino'
 import {
   DEFAULT_SETTINGS,
+  MAX_ALBUM_IMAGES,
   type AppSettings,
+  type AttachmentKind,
   type AttachmentDto,
   type ChatCategory,
   type ChatCrmStageFilter,
@@ -12,12 +14,12 @@ import {
   type CommunitySummary,
   type ContactDetails,
   type DeliveryState,
+  type DraftAttachmentDto,
   type DraftDto,
   type MessageContextDto,
   type MessageDto,
   type MessageKind,
   type Page,
-  type PickedAttachment,
   type QuotedMessageDto,
   type RichMessageDto
 } from '../shared/contracts'
@@ -711,7 +713,9 @@ export class WarishDatabase {
          edited, deleted, client_id, error, raw_payload, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET sender_name=COALESCE(excluded.sender_name, messages.sender_name), kind=excluded.kind,
-         text=COALESCE(excluded.text, messages.text), status=excluded.status,
+         text=COALESCE(excluded.text, messages.text),
+         timestamp=CASE WHEN excluded.client_id IS NOT NULL THEN excluded.timestamp ELSE messages.timestamp END,
+         status=excluded.status, client_id=COALESCE(excluded.client_id, messages.client_id),
          quoted_message_id=COALESCE(excluded.quoted_message_id, messages.quoted_message_id),
          quoted_sender_name=COALESCE(excluded.quoted_sender_name, messages.quoted_sender_name),
          quoted_from_me=COALESCE(excluded.quoted_from_me, messages.quoted_from_me),
@@ -810,37 +814,59 @@ export class WarishDatabase {
     chatId = this.resolveChatId(chatId)
     const row = this.db.prepare('SELECT * FROM drafts WHERE chat_id=?').get(chatId) as Record<string, unknown> | undefined
     if (!row) return undefined
-    const token = nullableString(row.attachment_token)
-    const attachment = token ? {
-      token,
-      name: nullableString(row.attachment_name) ?? 'Attachment',
-      size: Number(row.attachment_size ?? 0),
-      mimeType: nullableString(row.attachment_mime) ?? 'application/octet-stream',
-      previewUrl: `warish-media://drafts/${encodeURIComponent(token)}`
-    } satisfies PickedAttachment : undefined
+    const attachmentRows = this.db.prepare(
+      'SELECT * FROM draft_attachments WHERE chat_id=? ORDER BY position'
+    ).all(chatId) as Record<string, unknown>[]
+    const attachments = attachmentRows.flatMap((attachmentRow): DraftAttachmentDto[] => {
+      const token = nullableString(attachmentRow.token)
+      const kind = attachmentKindValue(attachmentRow.kind)
+      if (!token || !kind) return []
+      return [{
+        token,
+        kind,
+        name: nullableString(attachmentRow.name) ?? 'Attachment',
+        size: Number(attachmentRow.size ?? 0),
+        mimeType: nullableString(attachmentRow.mime_type) ?? 'application/octet-stream',
+        previewUrl: `warish-media://drafts/${encodeURIComponent(token)}`
+      }]
+    })
     return {
       chatId,
       text: nullableString(row.text) ?? '',
-      attachment,
-      attachmentKind: attachmentKindValue(row.attachment_kind),
+      attachments,
       updatedAt: Number(row.updated_at)
     }
   }
 
   saveDraft(input: DraftDto): void {
     const chatId = this.resolveChatId(input.chatId)
-    if (!input.text && !input.attachment) {
+    if (input.attachments.length > MAX_ALBUM_IMAGES) throw new Error(`Drafts support up to ${MAX_ALBUM_IMAGES} attachments`)
+    if (input.attachments.length > 1 && input.attachments.some((attachment) => attachment.kind !== 'image')) {
+      throw new Error('Multi-file drafts can contain only images')
+    }
+    if (!input.text && !input.attachments.length) {
       this.clearDraft(chatId)
       return
     }
-    this.db.prepare(
-      `INSERT INTO drafts(chat_id, text, attachment_token, attachment_kind, attachment_name, attachment_size, attachment_mime, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(chat_id) DO UPDATE SET text=excluded.text, attachment_token=excluded.attachment_token,
-       attachment_kind=excluded.attachment_kind, attachment_name=excluded.attachment_name,
-       attachment_size=excluded.attachment_size, attachment_mime=excluded.attachment_mime, updated_at=excluded.updated_at`
-    ).run(chatId, input.text, input.attachment?.token ?? null, input.attachmentKind ?? null,
-      input.attachment?.name ?? null, input.attachment?.size ?? null, input.attachment?.mimeType ?? null, Date.now())
+    const first = input.attachments[0]
+    this.transaction(() => {
+      this.db.prepare(
+        `INSERT INTO drafts(chat_id, text, attachment_token, attachment_kind, attachment_name, attachment_size, attachment_mime, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(chat_id) DO UPDATE SET text=excluded.text, attachment_token=excluded.attachment_token,
+         attachment_kind=excluded.attachment_kind, attachment_name=excluded.attachment_name,
+         attachment_size=excluded.attachment_size, attachment_mime=excluded.attachment_mime, updated_at=excluded.updated_at`
+      ).run(chatId, input.text, first?.token ?? null, first?.kind ?? null,
+        first?.name ?? null, first?.size ?? null, first?.mimeType ?? null, Date.now())
+      this.db.prepare('DELETE FROM draft_attachments WHERE chat_id=?').run(chatId)
+      const insert = this.db.prepare(
+        `INSERT INTO draft_attachments(chat_id, position, token, kind, name, size, mime_type)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      for (const [position, attachment] of input.attachments.entries()) {
+        insert.run(chatId, position, attachment.token, attachment.kind, attachment.name, attachment.size, attachment.mimeType)
+      }
+    })
   }
 
   clearDraft(chatId: string): void {
@@ -850,6 +876,7 @@ export class WarishDatabase {
   referencedDraftTokens(): Set<string> {
     const rows = this.db.prepare(
       `SELECT attachment_token AS token FROM drafts WHERE attachment_token IS NOT NULL
+       UNION SELECT token FROM draft_attachments
        UNION SELECT draft_token AS token FROM attachments WHERE draft_token IS NOT NULL`
     ).all() as Array<{ token: string }>
     return new Set(rows.map((row) => row.token))
@@ -1137,8 +1164,12 @@ export class WarishDatabase {
 
     const draftRows = this.db.prepare(`SELECT * FROM drafts WHERE chat_id IN (${placeholders}) ORDER BY updated_at DESC`)
       .all(...candidates) as Record<string, unknown>[]
-    this.db.prepare(`DELETE FROM drafts WHERE chat_id IN (${placeholders})`).run(...candidates)
     const newestDraft = draftRows[0]
+    const newestDraftAttachments = newestDraft
+      ? this.db.prepare('SELECT * FROM draft_attachments WHERE chat_id=? ORDER BY position')
+        .all(String(newestDraft.chat_id)) as Record<string, unknown>[]
+      : []
+    this.db.prepare(`DELETE FROM drafts WHERE chat_id IN (${placeholders})`).run(...candidates)
     if (newestDraft) this.db.prepare(
       `INSERT INTO drafts(chat_id, text, attachment_token, attachment_kind, attachment_name, attachment_size, attachment_mime, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
@@ -1146,6 +1177,16 @@ export class WarishDatabase {
       nullableString(newestDraft.attachment_kind) ?? null, nullableString(newestDraft.attachment_name) ?? null,
       nullableNumber(newestDraft.attachment_size) ?? null, nullableString(newestDraft.attachment_mime) ?? null,
       Number(newestDraft.updated_at))
+    if (newestDraftAttachments.length) {
+      const insertDraftAttachment = this.db.prepare(
+        `INSERT INTO draft_attachments(chat_id, position, token, kind, name, size, mime_type)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      for (const attachment of newestDraftAttachments) {
+        insertDraftAttachment.run(canonicalId, Number(attachment.position), String(attachment.token), String(attachment.kind),
+          String(attachment.name), Number(attachment.size), String(attachment.mime_type))
+      }
+    }
 
     this.db.prepare(`UPDATE messages SET chat_id=?, updated_at=? WHERE chat_id IN (${placeholders})`)
       .run(canonicalId, Date.now(), ...candidates)
@@ -1745,6 +1786,31 @@ export class WarishDatabase {
           (12, CAST(strftime('%s','now') AS INTEGER) * 1000);
       `))
     }
+    if (version.version < 13) {
+      this.#logger.info({ version: 13 }, 'adding ordered draft attachments')
+      this.transaction(() => this.db.exec(`
+        CREATE TABLE IF NOT EXISTS draft_attachments(
+          chat_id TEXT NOT NULL,
+          position INTEGER NOT NULL CHECK(position >= 0),
+          token TEXT NOT NULL,
+          kind TEXT NOT NULL CHECK(kind IN ('image','video','document','audio','voice','sticker')),
+          name TEXT NOT NULL,
+          size INTEGER NOT NULL,
+          mime_type TEXT NOT NULL,
+          PRIMARY KEY(chat_id, position),
+          FOREIGN KEY(chat_id) REFERENCES drafts(chat_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS draft_attachments_token_v13_idx ON draft_attachments(token);
+        INSERT OR IGNORE INTO draft_attachments(chat_id, position, token, kind, name, size, mime_type)
+          SELECT chat_id, 0, attachment_token,
+            CASE WHEN attachment_kind IN ('image','video','document','audio','voice','sticker') THEN attachment_kind ELSE 'document' END,
+            COALESCE(attachment_name, 'Attachment'), COALESCE(attachment_size, 0),
+            COALESCE(attachment_mime, 'application/octet-stream')
+          FROM drafts WHERE attachment_token IS NOT NULL;
+        INSERT INTO schema_migrations(version, applied_at) VALUES
+          (13, CAST(strftime('%s','now') AS INTEGER) * 1000);
+      `))
+    }
   }
 }
 
@@ -1817,7 +1883,7 @@ function parseRichMessage(value: unknown): RichMessageDto | undefined {
     return parsed && typeof parsed === 'object' && typeof parsed.type === 'string' ? parsed : undefined
   } catch { return undefined }
 }
-function attachmentKindValue(value: unknown): DraftDto['attachmentKind'] {
+function attachmentKindValue(value: unknown): AttachmentKind | undefined {
   return value === 'image' || value === 'video' || value === 'document' || value === 'audio' || value === 'voice' || value === 'sticker'
     ? value
     : undefined

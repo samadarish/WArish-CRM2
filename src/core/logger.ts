@@ -33,7 +33,8 @@ export function createCoreLogger(logDirectory: string): Logger {
           'message', '*.message', 'text', '*.text', 'body', '*.body',
           'phoneNumber', '*.phoneNumber', 'remoteJid', '*.remoteJid', 'participant', '*.participant',
           'chatId', '*.chatId', 'channelId', '*.channelId', 'messageId', '*.messageId',
-          'attachmentToken', '*.attachmentToken', 'identityId', '*.identityId'
+          'attachmentToken', '*.attachmentToken', 'images.*.attachmentToken', '*.images.*.attachmentToken',
+          'imageTokens', '*.imageTokens', 'imageTokens.*', '*.imageTokens.*', 'identityId', '*.identityId'
         ],
         censor: '[REDACTED]'
       }

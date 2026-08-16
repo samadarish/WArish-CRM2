@@ -97,10 +97,10 @@ describe('WhatsAppClient connection compatibility', () => {
     await connectClient(client)
     const chatId = '15550002222@s.whatsapp.net'
     database.upsertChat({ id: chatId, title: 'Customer', kind: 'direct' })
-    database.saveDraft({ chatId, text: 'Proposal attached', attachmentKind: 'document', updatedAt: Date.now(), attachment: {
+    database.saveDraft({ chatId, text: 'Proposal attached', updatedAt: Date.now(), attachments: [{
       token: 'draft-token.pdf', name: 'Customer proposal.pdf', size: 8, mimeType: 'application/pdf',
-      previewUrl: 'warish-media://drafts/draft-token.pdf'
-    } })
+      previewUrl: 'warish-media://drafts/draft-token.pdf', kind: 'document'
+    }] })
     const sentMessage = {
       key: { id: 'remote-proposal', remoteJid: chatId, fromMe: true },
       messageTimestamp: Math.floor(Date.now() / 1_000), status: 2,
@@ -122,6 +122,150 @@ describe('WhatsAppClient connection compatibility', () => {
     expect(database.db.prepare('SELECT COUNT(*) AS count FROM outbox').get()).toMatchObject({ count: 0 })
     expect(events.some((event) => event.type === 'message.changed'
       && event.payload.replacedId === 'local:client-proposal')).toBe(true)
+    await waitForContactRefresh(client)
+  })
+
+  it('sends a native album parent first, then ordered children with one caption and shared association', async () => {
+    const media = {
+      resolveDraft: vi.fn((token: string) => `C:\\WArish\\drafts\\${token}`),
+      discardDraft: vi.fn()
+    } as unknown as MediaManager
+    const { client, database, events } = createLinkedClient(media)
+    await connectClient(client)
+    const chatId = '15550004444@s.whatsapp.net'
+    database.upsertChat({ id: chatId, title: 'Album customer', kind: 'direct' })
+    database.storeMessage({ id: 'quoted-album-message', chatId, fromMe: false, kind: 'text', text: 'Original request',
+      timestamp: 1_000, status: 'read', incrementUnread: false, rawPayload: Buffer.from(JSON.stringify({
+        key: { id: 'quoted-album-message', remoteJid: chatId, fromMe: false }, messageTimestamp: 1,
+        message: { conversation: 'Original request' }
+      })) })
+    database.saveDraft({ chatId, text: 'Album caption', attachments: albumDraftAttachments(), updatedAt: Date.now() })
+    let childIndex = 0
+    const persistedBeforeFirstChild: Array<{ messages: number; outbox: number }> = []
+    vi.mocked(sockets[0]!.sendMessage).mockImplementation((_jid, content) => {
+      const payload = content as Record<string, unknown>
+      if (payload.album) return Promise.resolve({
+        key: { id: 'remote-album-parent', remoteJid: chatId, fromMe: true },
+        messageTimestamp: 2, status: 2, message: { albumMessage: { expectedImageCount: 3 } }
+      } as WAMessage)
+      if (childIndex === 0) {
+        const messages = database.db.prepare("SELECT COUNT(*) AS count FROM messages WHERE id LIKE 'local:album-child-%'").get() as { count: number }
+        const outbox = database.db.prepare("SELECT COUNT(*) AS count FROM outbox WHERE client_id LIKE 'album-child-%'").get() as { count: number }
+        persistedBeforeFirstChild.push({ messages: messages.count, outbox: outbox.count })
+      }
+      const index = childIndex++
+      return Promise.resolve(albumChildMessage(chatId, `remote-album-child-${index}`,
+        typeof payload.caption === 'string' ? payload.caption : undefined))
+    })
+
+    const result = await client.sendAlbum({
+      chatId,
+      albumClientId: 'album-client-parent',
+      images: [0, 1, 2].map((index) => ({ clientId: `album-child-${index}`, attachmentToken: `album-${index}.png` })),
+      caption: 'Album caption',
+      quotedMessageId: 'quoted-album-message'
+    })
+
+    const calls = vi.mocked(sockets[0]!.sendMessage).mock.calls
+    expect(calls).toHaveLength(4)
+    expect(calls[0]?.[0]).toBe(chatId)
+    expect(calls[0]?.[1]).toEqual({ album: { expectedImageCount: 3 } })
+    const parentOptions = calls[0]?.[2] as { messageId?: string; quoted?: WAMessage } | undefined
+    expect(parentOptions?.messageId).toBe('ALBUMCLIENTPARENT')
+    expect(parentOptions?.quoted?.key.id).toBe('quoted-album-message')
+    const childContents = calls.slice(1).map((call) => call[1] as Record<string, unknown>)
+    expect(childContents.map((content) => content.caption)).toEqual(['Album caption', undefined, undefined])
+    for (const content of childContents) {
+      expect(content.albumParentKey).toEqual({ id: 'remote-album-parent', remoteJid: chatId, fromMe: true })
+    }
+    expect(persistedBeforeFirstChild).toEqual([{ messages: 3, outbox: 3 }])
+    expect(result.map((message) => [message.id, message.status])).toEqual([
+      ['remote-album-child-0', 'sent'], ['remote-album-child-1', 'sent'], ['remote-album-child-2', 'sent']
+    ])
+    expect(result[0]).toMatchObject({ quotedMessageId: 'quoted-album-message',
+      quoted: { id: 'quoted-album-message', text: 'Original request' } })
+    expect(database.listMessages(chatId).items.filter((message) => message.kind === 'image').map((message) => message.id))
+      .toEqual(['remote-album-child-0', 'remote-album-child-1', 'remote-album-child-2'])
+    expect(database.getDraft(chatId)).toBeUndefined()
+    expect(media.discardDraft).toHaveBeenCalledTimes(3)
+    const batchEvent = events.find((event) => event.type === 'message.batch')
+    expect(batchEvent?.payload.messages.map((message) => message.id)).toContain('local:album-child-0')
+    await waitForContactRefresh(client)
+  })
+
+  it('continues after child failures and retries the failed image against the same album parent', async () => {
+    const media = {
+      resolveDraft: vi.fn((token: string) => `C:\\WArish\\drafts\\${token}`),
+      discardDraft: vi.fn()
+    } as unknown as MediaManager
+    const { client, database } = createLinkedClient(media)
+    await connectClient(client)
+    const chatId = '15550005555@s.whatsapp.net'
+    database.upsertChat({ id: chatId, title: 'Partial album', kind: 'direct' })
+    database.saveDraft({ chatId, text: 'Partial caption', attachments: albumDraftAttachments(), updatedAt: Date.now() })
+    let mediaCall = 0
+    vi.mocked(sockets[0]!.sendMessage).mockImplementation((_jid, content) => {
+      const payload = content as Record<string, unknown>
+      if (payload.album) return Promise.resolve({
+        key: { id: 'partial-parent', remoteJid: chatId, fromMe: true }, messageTimestamp: 2, status: 2,
+        message: { albumMessage: { expectedImageCount: 3 } }
+      } as WAMessage)
+      const index = mediaCall++
+      if (index === 1) return Promise.reject(new Error('Second image upload failed'))
+      return Promise.resolve(albumChildMessage(chatId, `partial-child-${index}`,
+        typeof payload.caption === 'string' ? payload.caption : undefined))
+    })
+
+    const result = await client.sendAlbum({
+      chatId,
+      albumClientId: 'partial-parent-client',
+      images: [0, 1, 2].map((index) => ({ clientId: `partial-client-${index}`, attachmentToken: `album-${index}.png` })),
+      caption: 'Partial caption'
+    })
+
+    expect(result.map((message) => message.status)).toEqual(['sent', 'failed', 'sent'])
+    expect(media.discardDraft).toHaveBeenCalledWith('album-0.png')
+    expect(media.discardDraft).not.toHaveBeenCalledWith('album-1.png')
+    expect(media.discardDraft).toHaveBeenCalledWith('album-2.png')
+    const queued = database.getOutboxForMessage('local:partial-client-1')
+    expect(queued?.payload).toMatchObject({
+      attachmentToken: 'album-1.png', albumPosition: 1,
+      albumParentKey: { id: 'partial-parent', remoteJid: chatId, fromMe: true }
+    })
+
+    vi.mocked(sockets[0]!.sendMessage).mockResolvedValueOnce(albumChildMessage(chatId, 'retried-partial-child'))
+    const retried = await client.retry('local:partial-client-1')
+
+    expect(retried).toMatchObject({ id: 'retried-partial-child', status: 'sent' })
+    expect(vi.mocked(sockets[0]!.sendMessage).mock.calls.at(-1)?.[1]).toEqual(expect.objectContaining({
+      albumParentKey: { id: 'partial-parent', remoteJid: chatId, fromMe: true }
+    }))
+    expect(media.discardDraft).toHaveBeenCalledWith('album-1.png')
+    await waitForContactRefresh(client)
+  })
+
+  it('retains the complete composer draft when the album parent fails', async () => {
+    const media = { resolveDraft: vi.fn(), discardDraft: vi.fn() } as unknown as MediaManager
+    const { client, database } = createLinkedClient(media)
+    await connectClient(client)
+    const chatId = '15550006666@s.whatsapp.net'
+    database.upsertChat({ id: chatId, title: 'Parent failure', kind: 'direct' })
+    const attachments = albumDraftAttachments()
+    database.saveDraft({ chatId, text: 'Keep this caption', attachments, updatedAt: Date.now() })
+    vi.mocked(sockets[0]!.sendMessage).mockRejectedValueOnce(new Error('Album parent rejected'))
+
+    await expect(client.sendAlbum({
+      chatId,
+      albumClientId: 'failed-parent-client',
+      images: attachments.map((attachment, index) => ({ clientId: `failed-child-${index}`, attachmentToken: attachment.token })),
+      caption: 'Keep this caption'
+    })).rejects.toThrow('Album parent rejected')
+
+    expect(database.getDraft(chatId)?.attachments.map((attachment) => attachment.token))
+      .toEqual(['album-0.png', 'album-1.png', 'album-2.png'])
+    expect(database.db.prepare('SELECT COUNT(*) AS count FROM outbox').get()).toMatchObject({ count: 0 })
+    expect(database.listMessages(chatId).items).toEqual([])
+    expect(media.discardDraft).not.toHaveBeenCalled()
     await waitForContactRefresh(client)
   })
 
@@ -174,4 +318,31 @@ function createLinkedClient(media = {} as MediaManager): {
     database,
     events
   }
+}
+
+function albumDraftAttachments(): Array<{
+  token: string
+  kind: 'image'
+  name: string
+  size: number
+  mimeType: string
+  previewUrl: string
+}> {
+  return [0, 1, 2].map((index) => ({
+    token: `album-${index}.png`,
+    kind: 'image',
+    name: `Album ${index + 1}.png`,
+    size: index + 1,
+    mimeType: 'image/png',
+    previewUrl: `warish-media://drafts/album-${index}.png`
+  }))
+}
+
+function albumChildMessage(chatId: string, id: string, caption?: string): WAMessage {
+  return {
+    key: { id, remoteJid: chatId, fromMe: true },
+    messageTimestamp: Math.floor(Date.now() / 1_000),
+    status: 2,
+    message: { imageMessage: { caption, mimetype: 'image/png', fileLength: 1 } }
+  } as WAMessage
 }

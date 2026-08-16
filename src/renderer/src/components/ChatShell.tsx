@@ -3,11 +3,16 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteD
 import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual'
 import { format, isSameDay, isToday, isYesterday } from 'date-fns'
 import {
-  Archive, ArchiveRestore, ArrowDown, ArrowUp, BadgeIndianRupee, BriefcaseBusiness, Check, CheckCheck, ChevronDown, ChevronRight,
+  Archive, ArchiveRestore, ArrowDown, ArrowUp, BadgeIndianRupee, BellOff, BellRing, BriefcaseBusiness, Check, CheckCheck, ChevronDown, ChevronRight,
   CalendarClock, CircleAlert, Link2, ListTodo, LoaderCircle, Menu, MessageCircle, Mic, NotebookPen, Paperclip,
   Pin, PinOff, Radio, RefreshCw, Search, Send, Settings, ShoppingBag, Smile, Square, WifiOff, X
 } from 'lucide-react'
-import type { AppSettings, ChatCategory, ChatCrmStageFilter, ChatSummary, CommunitySummary, CrmChatIndicatorDto, CrmContactDetailsDto, CrmTaskDto, DraftDto, MessageDto, Page, PickedAttachment, SessionState } from '../../../shared/contracts'
+import {
+  MAX_ALBUM_IMAGES,
+  type AppSettings, type AttachmentKind, type ChatCategory, type ChatCrmStageFilter, type ChatSummary, type CommunitySummary,
+  type CrmChatIndicatorDto, type CrmContactDetailsDto, type CrmTaskDto, type DraftAttachmentDto, type DraftDto,
+  type MessageDto, type Page, type PickedAttachment, type SessionState
+} from '../../../shared/contracts'
 import { clipboardImageFiles } from '../clipboard-image'
 import { useUiStore } from '../store'
 import { shouldSubmitComposer } from '../composer-keyboard'
@@ -43,6 +48,19 @@ const COMPOSER_EMOJIS = [
   ['✅', 'Check mark'], ['💯', 'Hundred points'], ['📞', 'Telephone'], ['💬', 'Speech balloon'],
   ['📦', 'Package'], ['💰', 'Money bag'], ['🕒', 'Clock'], ['📍', 'Location pin']
 ] as const
+
+const CHAT_STAGE_FALLBACKS = [
+  { value: 'new', label: 'New enquiry', color: '#F59E0B', position: 0 },
+  { value: 'qualified', label: 'Qualified', color: '#EAB308', position: 1 },
+  { value: 'quoted', label: 'Quoted', color: '#8B5CF6', position: 2 },
+  { value: 'won', label: 'Won', color: '#84CC16', position: 3 },
+  { value: 'lost', label: 'Lost', color: '#EF4444', position: 4 }
+] satisfies ReadonlyArray<{
+  value: Exclude<ChatCrmStageFilter, 'all'>
+  label: string
+  color: string
+  position: number
+}>
 
 export const ChatShell = memo(function ChatShell({ session }: { session: SessionState }): React.JSX.Element {
   const destination = useUiStore((state) => state.destination)
@@ -87,13 +105,23 @@ function ConversationShell({ session }: { session: SessionState }): React.JSX.El
     staleTime: 5 * 60_000, enabled: destination === 'direct' })
   const stageFilterOptions = useMemo(() => {
     const stages = new Map(stagesQuery.data?.map((stage) => [stage.key, stage]) ?? [])
+    const stageOptions = CHAT_STAGE_FALLBACKS.map((fallback) => {
+      const stage = stages.get(fallback.value)
+      return {
+        value: fallback.value,
+        label: stage?.name ?? fallback.label,
+        color: stage?.color ?? fallback.color,
+        position: stage?.position ?? fallback.position
+      }
+    }).sort((left, right) => left.position - right.position)
     return [
       { value: 'all', label: 'All', color: 'var(--muted)' },
-      { value: 'new', label: stages.get('new')?.name ?? 'New enquiry', color: stages.get('new')?.color ?? '#F59E0B' },
-      { value: 'won', label: stages.get('won')?.name ?? 'Won', color: stages.get('won')?.color ?? '#84CC16' },
-      { value: 'lost', label: stages.get('lost')?.name ?? 'Lost', color: stages.get('lost')?.color ?? '#EF4444' }
+      ...stageOptions.map((option) => ({ value: option.value, label: option.label, color: option.color }))
     ]
   }, [stagesQuery.data])
+  const selectedStageLabel = chatStageFilter === 'all'
+    ? undefined
+    : stageFilterOptions.find((option) => option.value === chatStageFilter)?.label
   const reconnectMutation = useMutation({
     mutationFn: () => window.warish.session.reconnect(),
     onSuccess: (state) => queryClient.setQueryData(['session'], state),
@@ -341,7 +369,7 @@ function ConversationShell({ session }: { session: SessionState }): React.JSX.El
         <div className="chat-list" ref={chatListRef}>
           {sidebarPending && <SkeletonRows />}
           {!sidebarPending && !sidebarError && sidebarItems.length === 0 && <EmptyChatList destination={destination}
-            stageFilter={destination === 'direct' ? chatStageFilter : 'all'} />}
+            stageLabel={destination === 'direct' ? selectedStageLabel : undefined} />}
           {sidebarError && <QueryError label={destination === 'community' ? 'Could not load communities' : 'Could not load conversations'}
             onRetry={() => void (destination === 'community' ? communitiesQuery.refetch() : chatsQuery.refetch())} />}
           {!sidebarPending && !sidebarError && <div className="virtual-chat-list" style={{ height: sidebarVirtualizer.getTotalSize() }}>
@@ -438,9 +466,8 @@ type SidebarItem =
   | { type: 'community'; community: CommunitySummary }
   | { type: 'chat'; chat: ChatSummary; nested?: boolean }
 
-function EmptyChatList({ destination, stageFilter = 'all' }: { destination: SidebarDestination; stageFilter?: ChatCrmStageFilter }): React.JSX.Element {
+function EmptyChatList({ destination, stageLabel }: { destination: SidebarDestination; stageLabel?: string }): React.JSX.Element {
   const archived = destination === 'archived'
-  const stageLabel = stageFilter === 'new' ? 'New enquiry' : stageFilter === 'won' ? 'Won' : stageFilter === 'lost' ? 'Lost' : undefined
   const label = stageLabel ? `No ${stageLabel.toLowerCase()} chats found`
     : archived ? 'No archived conversations' : destination === 'community' ? 'No communities found'
     : destination === 'channel' ? 'No channels found' : destination === 'group' ? 'No groups found'
@@ -472,7 +499,9 @@ const ChatRow = memo(function ChatRow({ chat, active, showPreview, nested = fals
   return <button className={`chat-row ${chat.kind === 'direct' ? 'direct' : ''} ${identity.hasSecondary ? 'has-identity' : ''} ${chat.crm ? 'has-crm' : ''} ${nested ? 'nested' : ''} ${active ? 'active' : ''} ${enterIndex === undefined ? '' : 'chat-row-enter'}`}
     style={enterIndex === undefined ? undefined : { '--row-enter-delay': `${Math.min(100, enterIndex * 20)}ms` } as React.CSSProperties}
     onMouseEnter={() => onPrefetch(chat)} onFocus={() => onPrefetch(chat)} onClick={() => onSelect(chat)}>
-    <Avatar title={identity.primary} src={chat.avatarUrl} /><span className="chat-row-copy"><span className="chat-row-top"><strong title={identity.primary}>{identity.primary}</strong>{chat.lastMessageAt && <time>{chatTime(chat.lastMessageAt)}</time>}{!showPreview && chat.unreadCount > 0 && <b>{chat.unreadCount > 99 ? '99+' : chat.unreadCount}</b>}</span>
+    <Avatar title={identity.primary} src={chat.avatarUrl} /><span className="chat-row-copy"><span className="chat-row-top"><strong title={identity.primary}>{identity.primary}</strong>{chat.lastMessageAt && <time>{chatTime(chat.lastMessageAt)}</time>}
+      {!showPreview && chat.pinned && <Pin className="chat-pinned-indicator" aria-label="Pinned chat" />}
+      {!showPreview && chat.unreadCount > 0 && <b>{chat.unreadCount > 99 ? '99+' : chat.unreadCount}</b>}</span>
       {(identity.hasSecondary || chat.crm) && <span className="chat-row-metadata">
         {identity.hasSecondary && <ContactIdentityDetails identity={identity} />}
         {chat.crm && <ChatCrmSignal crm={chat.crm} />}
@@ -480,7 +509,8 @@ const ChatRow = memo(function ChatRow({ chat, active, showPreview, nested = fals
       {showPreview && <span className="chat-row-bottom"><span className="chat-preview">
         {!chat.typing && chat.lastMessageFromMe && chat.lastMessageStatus && <DeliveryReceipt className="chat-delivery-receipt" status={chat.lastMessageStatus} />}
         <span className="chat-preview-text">{chat.typing ? 'typing…' : chat.lastMessage ?? 'No messages yet'}</span>
-      </span>{chat.unreadCount > 0 && <b>{chat.unreadCount > 99 ? '99+' : chat.unreadCount}</b>}</span>}</span>
+      </span>{chat.pinned && <Pin className="chat-pinned-indicator" aria-label="Pinned chat" />}
+      {chat.unreadCount > 0 && <b>{chat.unreadCount > 99 ? '99+' : chat.unreadCount}</b>}</span>}</span>
   </button>
 })
 
@@ -564,9 +594,9 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
   const [crmCapture, setCrmCapture] = useState<{ kind: 'note' | 'task'; message: MessageDto }>()
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [restrictedSendOpen, setRestrictedSendOpen] = useState(false)
-  const [attachment, setAttachment] = useState<PickedAttachment>()
-  const [attachmentKind, setAttachmentKind] = useState<'image' | 'video' | 'document' | 'audio' | 'voice' | 'sticker'>()
-  const [isStagingImage, setIsStagingImage] = useState(false)
+  const [attachments, setAttachments] = useState<DraftAttachmentDto[]>([])
+  const [isStagingAttachments, setIsStagingAttachments] = useState(false)
+  const [isSending, setIsSending] = useState(false)
   const showPersistentDetails = useMediaQuery('(min-width: 1180px)')
   const showContactDetails = contactDrawerOpen || (chat.kind === 'direct' && showPersistentDetails)
   const emojiToolRef = useRef<HTMLDivElement>(null)
@@ -585,7 +615,7 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
   const scrollStateFrameRef = useRef<number | undefined>(undefined)
   const rowResizeFrameRef = useRef<number | undefined>(undefined)
   const messageEnterTimersRef = useRef<Map<string, number>>(new Map())
-  const clipboardImageRequestRef = useRef(0)
+  const attachmentStageRequestRef = useRef(0)
   const activeRef = useRef(true)
   const draftReadyRef = useRef(false)
   const pushNotice = useUiStore((state) => state.pushNotice)
@@ -619,18 +649,17 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
     if (!draftQuery.isFetched || draftReadyRef.current) return
     const draft = draftQuery.data
     setText(draft?.text ?? '')
-    setAttachment(draft?.attachment)
-    setAttachmentKind(draft?.attachmentKind)
+    setAttachments(draft?.attachments ?? [])
     draftReadyRef.current = true
   }, [draftQuery.data, draftQuery.isFetched])
   useEffect(() => {
-    if (chat.readOnly || !draftReadyRef.current) return
+    if (chat.readOnly || !draftReadyRef.current || isStagingAttachments || isSending) return
     const timer = window.setTimeout(() => {
-      void window.warish.drafts.save({ chatId: chat.id, text, attachment, attachmentKind, updatedAt: Date.now() })
+      void window.warish.drafts.save({ chatId: chat.id, text, attachments, updatedAt: Date.now() })
         .catch((error) => pushNotice(errorMessage(error)))
     }, 350)
     return () => window.clearTimeout(timer)
-  }, [attachment, attachmentKind, chat.id, chat.readOnly, pushNotice, text])
+  }, [attachments, chat.id, chat.readOnly, isSending, isStagingAttachments, pushNotice, text])
   useEffect(() => {
     if (messageQuery.isPending || messageHistoryReady) return
     if (motionDuration(1) === 0) {
@@ -826,39 +855,99 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
     })
   }, [alignInitialScroll, measureRenderedRows, restoreAnchor, scrollToNewest])
   const sendMutation = useMutation({
-    mutationFn: (input: { chatId: string; clientId: string; text?: string; attachmentToken?: string;
-      attachmentKind?: 'image' | 'video' | 'document' | 'audio' | 'voice' | 'sticker'; quotedMessageId?: string;
-      restrictedContactAcknowledged?: boolean }) =>
-      window.warish.messages.send(input),
+    mutationFn: async (input: {
+      mode: 'single'
+      payload: { chatId: string; clientId: string; text?: string; attachmentToken?: string; attachmentKind?: AttachmentKind;
+        quotedMessageId?: string; restrictedContactAcknowledged?: boolean }
+    } | {
+      mode: 'album'
+      payload: { chatId: string; albumClientId: string; images: Array<{ clientId: string; attachmentToken: string }>;
+        caption?: string; quotedMessageId?: string; restrictedContactAcknowledged?: boolean }
+      draft: DraftDto
+    }): Promise<MessageDto | MessageDto[]> => {
+      if (input.mode === 'single') return window.warish.messages.send(input.payload)
+      await window.warish.drafts.save(input.draft)
+      return window.warish.messages.sendAlbum(input.payload)
+    },
     onMutate: (input) => {
       pendingOwnSendRef.current = true
-      if (input.text === text.trim()) setText('')
-      if (input.attachmentToken === attachment?.token) { setAttachment(undefined); setAttachmentKind(undefined) }
-      if (input.quotedMessageId === replyTo?.id) setReplyTo(undefined)
-      queryClient.setQueryData<DraftDto>(['draft', chat.id], { chatId: chat.id, text: '', updatedAt: Date.now() })
+      setIsSending(true)
+      if (input.mode === 'single') {
+        if (input.payload.text === text.trim()) setText('')
+        if (!input.payload.attachmentToken || attachments.some((attachment) => attachment.token === input.payload.attachmentToken)) {
+          setAttachments([])
+        }
+        if (input.payload.quotedMessageId === replyTo?.id) setReplyTo(undefined)
+        queryClient.setQueryData<DraftDto>(['draft', chat.id], {
+          chatId: chat.id, text: '', attachments: [], updatedAt: Date.now()
+        })
+      }
     },
-    onSuccess: () => {
+    onSuccess: (result, input) => {
+      if (input.mode === 'album') {
+        const sentTokens = input.payload.images.map((image) => image.attachmentToken)
+        if ((input.payload.caption ?? '') === text.trim()
+          && sameOrderedValues(attachments.map((attachment) => attachment.token), sentTokens)) {
+          setText('')
+          setAttachments([])
+        }
+        if (input.payload.quotedMessageId === replyTo?.id) setReplyTo(undefined)
+        queryClient.setQueryData<DraftDto>(['draft', chat.id], {
+          chatId: chat.id, text: '', attachments: [], updatedAt: Date.now()
+        })
+        const children = Array.isArray(result) ? result : []
+        const failed = children.filter((message) => message.status === 'failed').length
+        if (failed) pushNotice(`${failed} of ${children.length} images failed.`)
+      }
       scrollToNewest()
     },
-    onError: (error) => {
+    onError: (error, input) => {
       pushNotice(errorMessage(error))
+      if (input.mode === 'album') return
       void window.warish.drafts.get(chat.id).then((draft) => {
         queryClient.setQueryData(['draft', chat.id], draft)
         if (!draft) return
         setText((current) => current || draft.text)
-        setAttachment((current) => current ?? draft.attachment)
-        setAttachmentKind((current) => current ?? draft.attachmentKind)
+        setAttachments((current) => current.length ? current : draft.attachments)
       }).catch(() => undefined)
     },
-    onSettled: () => { pendingOwnSendRef.current = false }
+    onSettled: () => {
+      pendingOwnSendRef.current = false
+      setIsSending(false)
+    }
   })
   const sendMessage = (restrictedContactAcknowledged = false): void => {
-    if (chat.readOnly || sendMutation.isPending || isStagingImage || session.phase !== 'connected' || (!text.trim() && !attachment)) return
-    sendMutation.mutate({ chatId: chat.id, clientId: crypto.randomUUID(), text: text.trim() || undefined,
-      attachmentToken: attachment?.token, attachmentKind, quotedMessageId: replyTo?.id, restrictedContactAcknowledged })
+    if (chat.readOnly || sendMutation.isPending || isStagingAttachments || session.phase !== 'connected'
+      || (!text.trim() && !attachments.length)) return
+    if (attachments.length >= 2) {
+      sendMutation.mutate({
+        mode: 'album',
+        payload: {
+          chatId: chat.id,
+          albumClientId: crypto.randomUUID(),
+          images: attachments.map((attachment) => ({ clientId: crypto.randomUUID(), attachmentToken: attachment.token })),
+          caption: text.trim() || undefined,
+          quotedMessageId: replyTo?.id,
+          restrictedContactAcknowledged
+        },
+        draft: { chatId: chat.id, text, attachments, updatedAt: Date.now() }
+      })
+      return
+    }
+    const attachment = attachments[0]
+    sendMutation.mutate({ mode: 'single', payload: {
+      chatId: chat.id,
+      clientId: crypto.randomUUID(),
+      text: text.trim() || undefined,
+      attachmentToken: attachment?.token,
+      attachmentKind: attachment?.kind,
+      quotedMessageId: replyTo?.id,
+      restrictedContactAcknowledged
+    } })
   }
   const submitMessage = (): void => {
-    if (chat.readOnly || sendMutation.isPending || isStagingImage || session.phase !== 'connected' || (!text.trim() && !attachment)) return
+    if (chat.readOnly || sendMutation.isPending || isStagingAttachments || session.phase !== 'connected'
+      || (!text.trim() && !attachments.length)) return
     if (chat.crm?.restricted) {
       setEmojiOpen(false)
       setRestrictedSendOpen(true)
@@ -1085,23 +1174,48 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
     }
   }), [messageQuery.isPending])
 
-  const replaceAttachment = (picked: PickedAttachment, kind: NonNullable<DraftDto['attachmentKind']>): void => {
-    setAttachment((current) => {
-      if (current && current.token !== picked.token) discardDraftQuietly(current.token)
-      return picked
-    })
-    setAttachmentKind(kind)
+  const replaceSingleAttachment = async (picked: PickedAttachment, kind: AttachmentKind): Promise<void> => {
+    const next = { ...picked, kind }
+    const discarded = attachments.filter((attachment) => attachment.token !== picked.token)
+    setAttachments([next])
+    await discardDrafts(discarded.map((attachment) => attachment.token))
+  }
+  const applyPickedAttachments = async (picked: PickedAttachment[]): Promise<void> => {
+    const next = picked.map((attachment): DraftAttachmentDto => ({ ...attachment, kind: inferAttachmentKind(attachment) }))
+    if (next.length > 1 && next.some((attachment) => attachment.kind !== 'image')) {
+      await discardDrafts(next.map((attachment) => attachment.token))
+      throw new Error('Select only images when choosing multiple files.')
+    }
+    const images = next.every((attachment) => attachment.kind === 'image')
+    const append = images && attachments.every((attachment) => attachment.kind === 'image')
+    const combined = append ? [...attachments, ...next] : next
+    if (images && combined.length > MAX_ALBUM_IMAGES) {
+      await discardDrafts(next.map((attachment) => attachment.token))
+      throw new Error(`WhatsApp albums are limited to ${MAX_ALBUM_IMAGES} images.`)
+    }
+    const retainedTokens = new Set(combined.map((attachment) => attachment.token))
+    const discarded = attachments.filter((attachment) => !retainedTokens.has(attachment.token))
+    setAttachments(combined)
+    await discardDrafts(discarded.map((attachment) => attachment.token))
   }
   const chooseAttachment = async (): Promise<void> => {
+    if (isStagingAttachments || isSending) return
+    const requestId = ++attachmentStageRequestRef.current
+    setIsStagingAttachments(true)
     try {
-      const picked = await window.warish.media.pick()
+      const currentImageCount = attachments.every((attachment) => attachment.kind === 'image') ? attachments.length : 0
+      const picked = await window.warish.media.pick(Math.max(1, MAX_ALBUM_IMAGES - currentImageCount))
       if (!picked) return
-      if (!activeRef.current) {
-        await window.warish.media.discardDraft(picked.token)
+      if (!activeRef.current || requestId !== attachmentStageRequestRef.current) {
+        await discardDrafts(picked.map((attachment) => attachment.token))
         return
       }
-      replaceAttachment(picked, inferAttachmentKind(picked))
-    } catch (error) { pushNotice(errorMessage(error)) }
+      await applyPickedAttachments(picked)
+    } catch (error) {
+      if (activeRef.current && requestId === attachmentStageRequestRef.current) pushNotice(errorMessage(error))
+    } finally {
+      if (activeRef.current && requestId === attachmentStageRequestRef.current) setIsStagingAttachments(false)
+    }
   }
   const pasteClipboardImage = (event: React.ClipboardEvent<HTMLTextAreaElement>): void => {
     const images = clipboardImageFiles(event.clipboardData)
@@ -1111,27 +1225,38 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
       pushNotice('Finish or cancel the voice recording before adding an image.')
       return
     }
-    if (images.length > 1) {
-      pushNotice('Paste one image at a time.')
+    if (isSending || isStagingAttachments) {
+      pushNotice('Wait for the current attachment operation to finish.')
+      return
+    }
+    const existingImageCount = attachments.every((attachment) => attachment.kind === 'image') ? attachments.length : 0
+    if (images.length > MAX_ALBUM_IMAGES || existingImageCount + images.length > MAX_ALBUM_IMAGES) {
+      pushNotice(`WhatsApp albums are limited to ${MAX_ALBUM_IMAGES} images.`)
       return
     }
 
-    const image = images[0]!
-    const requestId = ++clipboardImageRequestRef.current
-    setIsStagingImage(true)
+    const requestId = ++attachmentStageRequestRef.current
+    setIsStagingAttachments(true)
     void (async () => {
-      let picked: PickedAttachment | undefined
+      const picked: PickedAttachment[] = []
       try {
-        picked = await window.warish.media.saveClipboardImage(new Uint8Array(await image.arrayBuffer()), image.type)
-        if (!activeRef.current || requestId !== clipboardImageRequestRef.current) {
-          await window.warish.media.discardDraft(picked.token)
+        for (const image of images) {
+          picked.push(await window.warish.media.saveClipboardImage(new Uint8Array(await image.arrayBuffer()), image.type))
+          if (!activeRef.current || requestId !== attachmentStageRequestRef.current) {
+            await discardDrafts(picked.map((attachment) => attachment.token))
+            return
+          }
+        }
+        if (!activeRef.current || requestId !== attachmentStageRequestRef.current) {
+          await discardDrafts(picked.map((attachment) => attachment.token))
           return
         }
-        replaceAttachment(picked, 'image')
+        await applyPickedAttachments(picked)
       } catch (error) {
-        if (activeRef.current && requestId === clipboardImageRequestRef.current) pushNotice(errorMessage(error))
+        await discardDrafts(picked.map((attachment) => attachment.token))
+        if (activeRef.current && requestId === attachmentStageRequestRef.current) pushNotice(errorMessage(error))
       } finally {
-        if (activeRef.current && requestId === clipboardImageRequestRef.current) setIsStagingImage(false)
+        if (activeRef.current && requestId === attachmentStageRequestRef.current) setIsStagingAttachments(false)
       }
     })()
   }
@@ -1172,7 +1297,7 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
             if (!blob.size) throw new Error('The recording was empty')
             const picked = await window.warish.media.saveRecording(new Uint8Array(await blob.arrayBuffer()), mimeType)
             if (!activeRef.current) { await window.warish.media.discardDraft(picked.token); return }
-            replaceAttachment(picked, 'voice')
+            await replaceSingleAttachment(picked, 'voice')
           } catch (error) { pushNotice(errorMessage(error)) }
         })()
       }
@@ -1248,11 +1373,26 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
     void window.warish.messages.retry(messageId).catch((error) => pushNotice(errorMessage(error)))
   }, [pushNotice])
   const handleMessageError = useCallback((error: unknown): void => pushNotice(errorMessage(error)), [pushNotice])
+  const muted = Boolean(chat.mutedUntil && chat.mutedUntil > Date.now())
+  const imageAttachments = attachments.length > 0 && attachments.every((attachment) => attachment.kind === 'image')
+  const singleAttachment = attachments.length === 1 ? attachments[0] : undefined
+  const attachmentBytes = attachments.reduce((total, attachment) => total + attachment.size, 0)
   return <>
     <header className={`conversation-header ${conversationMenuOpen ? 'menu-open' : ''}`}><button className="conversation-identity" title={chat.kind === 'direct' ? 'Open customer details' : 'Open conversation info'} onClick={openContactDetails}><Avatar title={conversationIdentity.primary} src={chat.avatarUrl} /><span title={chat.description}><strong>{conversationIdentity.primary}</strong>{chat.kind === 'direct'
       ? <span className="conversation-crm-line">{chat.crm?.name && chat.crm.name !== conversationIdentity.primary && <span className="conversation-crm-alias">CRM: {chat.crm.name}</span>}
         {conversationIdentity.profileName && <span className="whatsapp-profile-pill">{conversationIdentity.profileName}</span>}</span>
       : <span>{chatSubtitle(chat)}</span>}</span></button>
+      {chat.kind === 'direct' && <div className="conversation-chat-actions" role="group" aria-label="Conversation actions">
+        <Tooltip label={chat.pinned ? 'Unpin chat' : 'Pin chat'}><button className={`icon-button ${chat.pinned ? 'active' : ''}`}
+          aria-label={chat.pinned ? 'Unpin chat' : 'Pin chat'} disabled={chatAction.isPending}
+          onClick={() => chatAction.mutate({ patch: { pinned: !chat.pinned } })}>{chat.pinned ? <PinOff /> : <Pin />}</button></Tooltip>
+        <Tooltip label={muted ? 'Unmute chat' : 'Mute chat'}><button className={`icon-button ${muted ? 'active' : ''}`}
+          aria-label={muted ? 'Unmute chat' : 'Mute chat'} disabled={chatAction.isPending}
+          onClick={() => chatAction.mutate({ patch: { mutedUntil: muted ? 0 : Number.MAX_SAFE_INTEGER } })}>{muted ? <BellRing /> : <BellOff />}</button></Tooltip>
+        <Tooltip label={chat.archived ? 'Unarchive chat' : 'Archive chat'}><button className={`icon-button ${chat.archived ? 'active' : ''}`}
+          aria-label={chat.archived ? 'Unarchive chat' : 'Archive chat'} disabled={chatAction.isPending}
+          onClick={() => chatAction.mutate({ patch: { archived: !chat.archived }, hide: true })}>{chat.archived ? <ArchiveRestore /> : <Archive />}</button></Tooltip>
+      </div>}
       {chat.kind === 'direct' && <CustomerSummaryStrip chat={chat} onOpenDetails={openContactDetails} />}
       <Tooltip label="Search this conversation"><button className={`icon-button ${searchOpen ? 'active' : ''}`}
         aria-label="Search this conversation" aria-expanded={searchOpen}
@@ -1325,39 +1465,57 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
         sendMessage(true)
       }} />}</MotionPresence>
     {newMessageCount > 0 && <button className="new-messages-button" onClick={() => scrollToNewest()}><ArrowDown />{newMessageCount} new {newMessageCount === 1 ? 'message' : 'messages'}</button>}
-    {!chat.readOnly && (replyTo || attachment || isStagingImage) && <div className="composer-context">
-      {attachment && attachmentKind === 'image' && <img className="composer-attachment-preview" src={attachment.previewUrl} alt={`${attachment.name} preview`} />}
-      <div>{replyTo && <><strong>Replying to {replyTo.senderName ?? (replyTo.fromMe ? 'yourself' : chat.title)}</strong><span>{replyTo.text ?? replyTo.kind}</span></>}
-        {attachment ? <><strong>{attachmentKind === 'voice' ? 'Voice message' : attachment.name}</strong><span>{isStagingImage ? 'Preparing replacement image…' : formatBytes(attachment.size)}</span></>
-          : isStagingImage && <><strong>Preparing pasted image…</strong><span>Please wait</span></>}</div>
-      <IconButton className="" label="Clear reply or attachment" onClick={() => {
-        clipboardImageRequestRef.current += 1
-        setIsStagingImage(false)
+    {!chat.readOnly && (replyTo || attachments.length > 0 || isStagingAttachments) && <div className="composer-context">
+      {imageAttachments && <div className="composer-image-album">
+        <div className="composer-image-strip" role="list"
+          aria-label={`${attachments.length} selected ${attachments.length === 1 ? 'image' : 'images'}`}>
+          {attachments.map((attachment, index) => <div className="composer-image-item" role="listitem" key={attachment.token}>
+            <img className="composer-attachment-preview" src={attachment.previewUrl} alt={`${attachment.name} preview`} />
+            <IconButton className="composer-image-remove"
+              label={`Remove ${attachment.name}, image ${index + 1} of ${attachments.length}`}
+              disabled={isStagingAttachments || isSending} onClick={() => {
+                setAttachments((current) => current.filter((candidate) => candidate.token !== attachment.token))
+                discardDraftQuietly(attachment.token)
+              }}><X /></IconButton>
+          </div>)}
+        </div>
+        <div className="composer-album-summary"><strong>{attachments.length} {attachments.length === 1 ? 'image' : 'images'} selected</strong>
+          <span>{isStagingAttachments ? 'Preparing more images…' : formatBytes(attachmentBytes)}</span></div>
+      </div>}
+      {(replyTo || !imageAttachments || (!attachments.length && isStagingAttachments)) && <div className="composer-context-copy">
+        {replyTo && <><strong>Replying to {replyTo.senderName ?? (replyTo.fromMe ? 'yourself' : chat.title)}</strong><span>{replyTo.text ?? replyTo.kind}</span></>}
+        {singleAttachment && !imageAttachments && <><strong>{singleAttachment.kind === 'voice' ? 'Voice message' : singleAttachment.name}</strong>
+          <span>{formatBytes(singleAttachment.size)}</span></>}
+        {!attachments.length && isStagingAttachments && <><strong>Preparing images…</strong><span>Please wait</span></>}
+      </div>}
+      <IconButton className="composer-clear-context" label="Clear reply or attachment" disabled={isSending} onClick={() => {
+        attachmentStageRequestRef.current += 1
+        setIsStagingAttachments(false)
         setReplyTo(undefined)
-        if (attachment) discardDraftQuietly(attachment.token)
-        setAttachment(undefined)
-        setAttachmentKind(undefined)
+        void discardDrafts(attachments.map((attachment) => attachment.token))
+        setAttachments([])
       }}><X /></IconButton>
     </div>}
     {chat.readOnly ? <footer className="read-only-composer"><Radio /><span>Channels are read-only in WArish</span></footer> : <footer className="composer">
       <div className="composer-tool" ref={emojiToolRef}><Tooltip label="Emoji"><button className={`icon-button ${emojiOpen ? 'active' : ''}`}
-        aria-label="Choose an emoji" aria-haspopup="dialog" aria-expanded={emojiOpen} disabled={isRecording || isStagingImage}
+        aria-label="Choose an emoji" aria-haspopup="dialog" aria-expanded={emojiOpen} disabled={isRecording || isStagingAttachments || isSending}
         onClick={() => setEmojiOpen((open) => !open)}><Smile /></button></Tooltip>
         <MotionPresence show={emojiOpen}>{emojiOpen && <EmojiPicker onSelect={insertEmoji} onClose={() => setEmojiOpen(false)} />}</MotionPresence></div>
-      <Tooltip label="Attach a file"><button className="icon-button" aria-label="Attach a file" disabled={isRecording || isStagingImage}
+      <Tooltip label="Attach a file"><button className="icon-button" aria-label="Attach a file" disabled={isRecording || isStagingAttachments || isSending}
         onClick={() => void chooseAttachment()}><Paperclip /></button></Tooltip>
-      <textarea ref={composerRef} value={text} rows={1} aria-label="Message" placeholder={isRecording ? `Recording… ${formatDuration(recordingSeconds)}` : session.phase === 'connected' ? 'Type a message' : 'Type a draft — reconnect to send'} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => {
+      <textarea ref={composerRef} value={text} rows={1} aria-label="Message" disabled={isSending}
+        placeholder={isRecording ? `Recording… ${formatDuration(recordingSeconds)}` : session.phase === 'connected' ? 'Type a message' : 'Type a draft — reconnect to send'} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => {
         if (shouldSubmitComposer(event, enterToSend)) { event.preventDefault(); submitMessage() }
       }} onPaste={pasteClipboardImage} />
       {isRecording ? <><Tooltip label="Cancel recording"><button className="icon-button recording" aria-label="Cancel recording"
         onClick={() => stopRecording(true)}><X /></button></Tooltip>
         <Tooltip label="Finish recording"><button className="send-button" aria-label="Finish recording"
           onClick={() => stopRecording(false)}><Square /></button></Tooltip></>
-        : isStagingImage ? <Tooltip label="Preparing pasted image"><button className="send-button" aria-label="Preparing pasted image" disabled><LoaderCircle className="spin" /></button></Tooltip>
-        : !text.trim() && !attachment ? <Tooltip label="Voice message"><button className="icon-button" aria-label="Record a voice message"
+        : isStagingAttachments ? <Tooltip label="Preparing images"><button className="send-button" aria-label="Preparing images" disabled><LoaderCircle className="spin" /></button></Tooltip>
+        : !text.trim() && !attachments.length ? <Tooltip label="Voice message"><button className="icon-button" aria-label="Record a voice message"
           onClick={() => void toggleRecording()}><Mic /></button></Tooltip>
           : <Tooltip label={session.phase === 'connected' ? 'Send' : 'Reconnect to send'}><button className="send-button" aria-label="Send message"
-            disabled={sendMutation.isPending || isStagingImage || session.phase !== 'connected'} onClick={submitMessage}>{sendMutation.isPending ? <LoaderCircle className="spin" /> : <Send />}</button></Tooltip>}
+            disabled={sendMutation.isPending || isStagingAttachments || session.phase !== 'connected'} onClick={submitMessage}>{sendMutation.isPending ? <LoaderCircle className="spin" /> : <Send />}</button></Tooltip>}
     </footer>}
   </>
 }
@@ -1566,6 +1724,12 @@ function errorMessage(error: unknown): string { return error instanceof Error ? 
 function discardDraftQuietly(token: string): void {
   void window.warish.media.discardDraft(token).catch(() => undefined)
 }
+async function discardDrafts(tokens: readonly string[]): Promise<void> {
+  await Promise.all(tokens.map((token) => window.warish.media.discardDraft(token).catch(() => undefined)))
+}
+function sameOrderedValues(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index])
+}
 function messagePreview(message: MessageDto): string {
   return (message.text ?? message.rich?.body ?? message.rich?.title ?? message.attachment?.fileName ?? message.kind).trim().slice(0, 500)
 }
@@ -1582,7 +1746,7 @@ function formatDuration(seconds: number): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
 }
 function formatPairingCode(code: string): string { return code.replace(/(.{4})/g, '$1 ').trim() }
-function inferAttachmentKind(file: PickedAttachment): 'image' | 'video' | 'document' | 'audio' | 'sticker' {
+function inferAttachmentKind(file: PickedAttachment): AttachmentKind {
   if (file.mimeType.startsWith('image/')) return 'image'
   if (file.mimeType.startsWith('video/')) return 'video'
   if (file.mimeType.startsWith('audio/')) return 'audio'

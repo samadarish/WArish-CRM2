@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { rmSync } from 'node:fs'
-import { copyFile, mkdir, rm, stat, writeFile } from 'node:fs/promises'
-import { basename, extname, join, resolve } from 'node:path'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { basename, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
   app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, Notification, protocol,
@@ -15,7 +15,7 @@ import {
   rpcInvocationSchema, type AppSettings, type ChatSummary, type CoreEventEnvelope,
   type MessageDto, type PickedAttachment, type SessionState
 } from '../shared/contracts'
-import { mimeTypeForPath } from '../shared/media-types'
+import { normalizedPickerLimit, stagePickedAttachments } from './attachment-picker'
 import { saveClipboardImageDraft } from './clipboard-image'
 import { CoreBridge } from './core-bridge'
 import { loadOrCreateMasterKey } from './security'
@@ -137,7 +137,10 @@ function registerIpc(userDataPath: string): void {
     }
     return result
   })
-  ipcMain.handle('warish:pick-attachment', (event) => { assertTrustedSender(event.sender); return pickAttachment(userDataPath) })
+  ipcMain.handle('warish:pick-attachment', (event, maxFiles: unknown) => {
+    assertTrustedSender(event.sender)
+    return pickAttachment(userDataPath, maxFiles)
+  })
   ipcMain.handle('warish:save-clipboard-image', (event, data: unknown, mimeType: unknown) => {
     assertTrustedSender(event.sender)
     return saveClipboardImageDraft(userDataPath, data, mimeType)
@@ -203,31 +206,18 @@ async function saveRecording(userDataPath: string, data: unknown, mimeType: unkn
     previewUrl: `warish-media://drafts/${encodeURIComponent(token)}` }
 }
 
-async function pickAttachment(userDataPath: string): Promise<PickedAttachment | null> {
+async function pickAttachment(userDataPath: string, maxFiles: unknown): Promise<PickedAttachment[] | null> {
+  const limit = normalizedPickerLimit(maxFiles === undefined ? undefined : Number(maxFiles))
   const result = await dialog.showOpenDialog(mainWindow!, {
     title: 'Choose an attachment',
-    properties: ['openFile'],
+    properties: limit > 1 ? ['openFile', 'multiSelections'] : ['openFile'],
     filters: [
       { name: 'Media and documents', extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'mp4', 'webm', 'ogg', 'opus', 'mp3', 'm4a', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'txt'] },
       { name: 'All files', extensions: ['*'] }
     ]
   })
-  const source = result.filePaths[0]
-  if (result.canceled || !source) return null
-  const drafts = join(userDataPath, 'drafts')
-  await mkdir(drafts, { recursive: true })
-  const token = `${randomUUID()}${extname(source).toLowerCase()}`
-  const sourceStat = await stat(source)
-  if (sourceStat.size > 2 * 1024 * 1024 * 1024) throw new Error('Attachments are limited to 2 GB')
-  const destination = safeMediaPath(drafts, token)
-  try {
-    await copyFile(source, destination)
-  } catch (error) {
-    await rm(destination, { force: true }).catch(() => undefined)
-    throw error
-  }
-  return { token, name: basename(source), size: sourceStat.size, mimeType: mimeTypeForPath(source),
-    previewUrl: `warish-media://drafts/${encodeURIComponent(token)}` }
+  if (result.canceled || !result.filePaths.length) return null
+  return stagePickedAttachments(userDataPath, result.filePaths, limit)
 }
 
 async function openMedia(userDataPath: string, token: unknown): Promise<void> {

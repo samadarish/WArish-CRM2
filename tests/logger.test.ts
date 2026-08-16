@@ -51,6 +51,7 @@ describe('readErrorLogs', () => {
       chatId: 'private-chat',
       phoneNumber: '+919999999999',
       nested: { messageId: 'private-message' },
+      images: [{ attachmentToken: 'private-image-token-1' }, { attachmentToken: 'private-image-token-2' }],
       safeContext: 'visible detail'
     }, 'a safe warning')
 
@@ -63,6 +64,7 @@ describe('readErrorLogs', () => {
     expect(entry?.context).not.toContain('private-chat')
     expect(entry?.context).not.toContain('+919999999999')
     expect(entry?.context).not.toContain('private-message')
+    expect(entry?.context).not.toContain('private-image-token')
   })
 
   it('removes the oldest daily logs when retained diagnostics exceed 64 MB', async () => {

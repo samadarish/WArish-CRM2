@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
@@ -103,6 +103,37 @@ describe('MediaManager', () => {
     media.enforceLimit(0)
 
     expect(existsSync(partialPath)).toBe(true)
+    database.close()
+  })
+
+  it('protects every ordered draft attachment while removing orphan draft files', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'warish-media-test-'))
+    directories.push(directory)
+    const database = new WarishDatabase(join(directory, 'warish.sqlite'), Buffer.alloc(32, 7), pino({ enabled: false }))
+    const chatId = '15550008888@s.whatsapp.net'
+    database.upsertChat({ id: chatId, title: 'Album draft', kind: 'direct' })
+    database.saveDraft({
+      chatId,
+      text: 'Two images',
+      attachments: [
+        { token: 'first.png', kind: 'image', name: 'First.png', size: 5, mimeType: 'image/png',
+          previewUrl: 'warish-media://drafts/first.png' },
+        { token: 'second.jpg', kind: 'image', name: 'Second.jpg', size: 6, mimeType: 'image/jpeg',
+          previewUrl: 'warish-media://drafts/second.jpg' }
+      ],
+      updatedAt: Date.now()
+    })
+    const draftsDirectory = join(directory, 'drafts')
+    mkdirSync(draftsDirectory, { recursive: true })
+    writeFileSync(join(draftsDirectory, 'first.png'), 'first')
+    writeFileSync(join(draftsDirectory, 'second.jpg'), 'second')
+    writeFileSync(join(draftsDirectory, 'orphan.webp'), 'orphan')
+
+    const media = new MediaManager(directory, database, pino({ enabled: false }))
+
+    expect(existsSync(media.resolveDraft('first.png'))).toBe(true)
+    expect(existsSync(media.resolveDraft('second.jpg'))).toBe(true)
+    expect(existsSync(media.resolveDraft('orphan.webp'))).toBe(false)
     database.close()
   })
 
