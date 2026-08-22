@@ -15,7 +15,7 @@ import {
 } from '../../../shared/contracts'
 import { clipboardImageFiles } from '../clipboard-image'
 import { useUiStore } from '../store'
-import { shouldSubmitComposer } from '../composer-keyboard'
+import { shouldFocusComposerForTyping, shouldSubmitComposer } from '../composer-keyboard'
 import { contactIdentityPresentation, type ContactIdentityPresentation } from '../contact-identity'
 import { messageGroupPositions } from '../message-grouping'
 import { MotionPresence } from '../motion'
@@ -48,6 +48,30 @@ const COMPOSER_EMOJIS = [
   ['✅', 'Check mark'], ['💯', 'Hundred points'], ['📞', 'Telephone'], ['💬', 'Speech balloon'],
   ['📦', 'Package'], ['💰', 'Money bag'], ['🕒', 'Clock'], ['📍', 'Location pin']
 ] as const
+
+const TYPE_TO_COMPOSE_EXCLUDED_SURFACE = '.persistent-contact-panel, .contact-drawer, .conversation-search-panel'
+const TYPE_TO_COMPOSE_SCOPE_PRESERVING_LAYER = '.ui-popover, .modal-backdrop'
+const TYPE_TO_COMPOSE_KEYBOARD_LAYER = [
+  '[role="dialog"]',
+  '[role="alertdialog"]',
+  '[role="menu"]',
+  '[role="listbox"]',
+  '.ui-popover',
+  '.conversation-search-panel',
+  '.contact-drawer',
+  '.persistent-contact-panel.details-overlay-open'
+].join(',')
+const TYPE_TO_COMPOSE_INACTIVE_LAYER = '[inert], [aria-hidden="true"], [data-exiting], [data-motion-state="exiting"]'
+
+function isTypeToComposeSurfaceTarget(target: EventTarget | null, conversationPane: HTMLElement): boolean {
+  if (!(target instanceof Node) || !conversationPane.contains(target)) return false
+  return !(target instanceof Element && target.closest(TYPE_TO_COMPOSE_EXCLUDED_SURFACE))
+}
+
+function hasOpenTypeToComposeKeyboardLayer(): boolean {
+  return [...document.querySelectorAll<HTMLElement>(TYPE_TO_COMPOSE_KEYBOARD_LAYER)]
+    .some((layer) => !layer.closest(TYPE_TO_COMPOSE_INACTIVE_LAYER))
+}
 
 const CHAT_STAGE_FALLBACKS = [
   { value: 'new', label: 'New enquiry', color: '#F59E0B', position: 0 },
@@ -577,6 +601,7 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
 }): React.JSX.Element {
   const parentRef = useRef<HTMLDivElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
+  const typeToComposeArmedRef = useRef(false)
   const [text, setText] = useState('')
   const [isRecording, setIsRecording] = useState(false)
   const [recordingSeconds, setRecordingSeconds] = useState(0)
@@ -597,6 +622,7 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
   const [attachments, setAttachments] = useState<DraftAttachmentDto[]>([])
   const [isStagingAttachments, setIsStagingAttachments] = useState(false)
   const [isSending, setIsSending] = useState(false)
+  const typeToComposeTransientBlockedRef = useRef(false)
   const showPersistentDetails = useMediaQuery('(min-width: 1180px)')
   const showContactDetails = contactDrawerOpen || (chat.kind === 'direct' && showPersistentDetails)
   const emojiToolRef = useRef<HTMLDivElement>(null)
@@ -1017,6 +1043,38 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
     textarea.style.height = 'auto'
     textarea.style.height = `${Math.min(textarea.scrollHeight, 112)}px`
   }, [text])
+
+  useLayoutEffect(() => {
+    typeToComposeTransientBlockedRef.current = isRecording || isStagingAttachments
+  }, [isRecording, isStagingAttachments])
+
+  useEffect(() => {
+    const composer = composerRef.current
+    const conversationPane = composer?.closest<HTMLElement>('.conversation-panel')
+    if (!composer || !conversationPane) return
+
+    const updateTypingScope = (event: Event): void => {
+      if (event.type === 'focusin' && (event.target === document.body || event.target === document.documentElement)) return
+      if (event.target instanceof Element && event.target.closest(TYPE_TO_COMPOSE_SCOPE_PRESERVING_LAYER)) return
+      typeToComposeArmedRef.current = isTypeToComposeSurfaceTarget(event.target, conversationPane)
+    }
+    const handleTypeToCompose = (event: KeyboardEvent): void => {
+      if (!typeToComposeArmedRef.current || typeToComposeTransientBlockedRef.current || !composer.isConnected) return
+      if (!shouldFocusComposerForTyping(event, composer, hasOpenTypeToComposeKeyboardLayer())) return
+      composer.focus({ preventScroll: true })
+    }
+
+    document.addEventListener('pointerdown', updateTypingScope, true)
+    document.addEventListener('wheel', updateTypingScope, { capture: true, passive: true })
+    document.addEventListener('focusin', updateTypingScope, true)
+    window.addEventListener('keydown', handleTypeToCompose)
+    return () => {
+      document.removeEventListener('pointerdown', updateTypingScope, true)
+      document.removeEventListener('wheel', updateTypingScope, true)
+      document.removeEventListener('focusin', updateTypingScope, true)
+      window.removeEventListener('keydown', handleTypeToCompose)
+    }
+  }, [])
 
   useEffect(() => {
     if (!emojiOpen) return
@@ -1503,7 +1561,7 @@ function Conversation({ chat, initialUnreadCount, session, enterToSend, onForwar
         <MotionPresence show={emojiOpen}>{emojiOpen && <EmojiPicker onSelect={insertEmoji} onClose={() => setEmojiOpen(false)} />}</MotionPresence></div>
       <Tooltip label="Attach a file"><button className="icon-button" aria-label="Attach a file" disabled={isRecording || isStagingAttachments || isSending}
         onClick={() => void chooseAttachment()}><Paperclip /></button></Tooltip>
-      <textarea ref={composerRef} value={text} rows={1} aria-label="Message" disabled={isSending}
+      <textarea ref={composerRef} value={text} rows={1} aria-label="Message" readOnly={isSending} aria-busy={isSending}
         placeholder={isRecording ? `Recording… ${formatDuration(recordingSeconds)}` : session.phase === 'connected' ? 'Type a message' : 'Type a draft — reconnect to send'} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => {
         if (shouldSubmitComposer(event, enterToSend)) { event.preventDefault(); submitMessage() }
       }} onPaste={pasteClipboardImage} />

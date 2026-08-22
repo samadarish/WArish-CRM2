@@ -78,6 +78,63 @@ describe('MessageBubble', () => {
     expect(container.querySelector('.media-frame')).toHaveStyle({ aspectRatio: '1200 / 800', width: '360px' })
   })
 
+  it('overlays metadata inside a captionless image for both sent and received messages', () => {
+    const attachment = { id: 'attachment-overlay', messageId: 'message-1', kind: 'image' as const,
+      width: 1200, height: 800, downloadState: 'remote' as const }
+    const props = { showSender: false, onReply: vi.fn(), onForward: vi.fn(), onOpenQuote: vi.fn(),
+      onResize: vi.fn(), onError: vi.fn() }
+    const { container, rerender } = render(<MessageBubble message={createMessage({
+      kind: 'image', text: undefined, fromMe: true, status: 'read', attachment
+    })} {...props} />)
+
+    let bubble = container.querySelector('.message-bubble')
+    let frame = container.querySelector('.media-frame')
+    let metadata = container.querySelector('.message-meta')
+    expect(bubble).toHaveClass('image-meta-overlay', 'bare-image')
+    expect(metadata).toHaveClass('image-message-meta')
+    expect(metadata?.parentElement).toBe(frame)
+    expect(screen.getByRole('img', { name: 'Read' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Download Photo' })).toBeInTheDocument()
+
+    rerender(<MessageBubble message={createMessage({ kind: 'image', text: undefined, fromMe: false, attachment })} {...props} />)
+    bubble = container.querySelector('.message-bubble')
+    frame = container.querySelector('.media-frame')
+    metadata = container.querySelector('.message-meta')
+    expect(bubble).toHaveClass('image-meta-overlay', 'bare-image')
+    expect(metadata?.parentElement).toBe(frame)
+    expect(container.querySelector('.delivery-receipt')).not.toBeInTheDocument()
+  })
+
+  it('keeps captioned images and other media metadata in normal bubble flow', () => {
+    const props = { showSender: false, onReply: vi.fn(), onForward: vi.fn(), onOpenQuote: vi.fn(),
+      onResize: vi.fn(), onError: vi.fn() }
+    const imageAttachment = { id: 'attachment-caption', messageId: 'message-1', kind: 'image' as const,
+      width: 800, height: 600, downloadState: 'remote' as const }
+    const { container, rerender } = render(<MessageBubble message={createMessage({
+      kind: 'image', text: 'Image caption', attachment: imageAttachment
+    })} {...props} />)
+
+    let bubble = container.querySelector('.message-bubble')
+    let metadata = container.querySelector('.message-meta')
+    expect(screen.getByText('Image caption')).toBeInTheDocument()
+    expect(bubble).not.toHaveClass('image-meta-overlay', 'bare-image')
+    expect(metadata?.parentElement).toBe(bubble)
+
+    rerender(<MessageBubble message={createMessage({ kind: 'video', text: undefined, attachment: {
+      ...imageAttachment, id: 'attachment-video', kind: 'video'
+    } })} {...props} />)
+    bubble = container.querySelector('.message-bubble')
+    metadata = container.querySelector('.message-meta')
+    expect(bubble).not.toHaveClass('image-meta-overlay', 'bare-image')
+    expect(metadata?.parentElement).toBe(bubble)
+
+    rerender(<MessageBubble message={createMessage({ kind: 'image', text: undefined, attachment: undefined })} {...props} />)
+    bubble = container.querySelector('.message-bubble')
+    metadata = container.querySelector('.message-meta')
+    expect(bubble).not.toHaveClass('image-meta-overlay', 'bare-image')
+    expect(metadata?.parentElement).toBe(bubble)
+  })
+
   it('keeps the same media frame before and after download', () => {
     const remoteAttachment = { id: 'attachment-stable', messageId: 'message-1', kind: 'image' as const,
       width: 800, height: 1200, downloadState: 'remote' as const }
@@ -140,10 +197,15 @@ describe('MessageBubble', () => {
 
   it('shows an explicit retry action for failed outgoing messages', () => {
     const onRetry = vi.fn()
-    render(<MessageBubble message={createMessage({ fromMe: true, status: 'failed', error: 'Network error' })}
+    const { container } = render(<MessageBubble message={createMessage({ fromMe: true, status: 'failed', error: 'Network error',
+      kind: 'image', text: undefined, attachment: {
+        id: 'attachment-failed', messageId: 'message-1', kind: 'image', width: 640, height: 480, downloadState: 'remote'
+      }
+    })}
       showSender={false} onReply={vi.fn()} onForward={vi.fn()} onOpenQuote={vi.fn()} onResize={vi.fn()}
       onRetry={onRetry} onError={vi.fn()} />)
 
+    expect(container.querySelector('.message-meta')?.parentElement).toBe(container.querySelector('.media-frame'))
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
     expect(onRetry).toHaveBeenCalledWith('message-1')
   })

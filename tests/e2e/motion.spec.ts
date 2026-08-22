@@ -167,6 +167,42 @@ async function expectInsideViewport(locator: ReturnType<Page['locator']>): Promi
   expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1)
 }
 
+async function expectMessageActionsBesideBubble(item: ReturnType<Page['locator']>, owner: 'received' | 'sent'): Promise<void> {
+  const bubble = item.locator('.message-bubble')
+  const actions = item.locator('.message-actions')
+  const messageText = item.locator('.message-text')
+  await bubble.hover()
+  await expect(actions).toBeVisible()
+  const [bubbleBounds, actionBounds, textBounds, scrollerBounds] = await Promise.all([
+    bubble.boundingBox(), actions.boundingBox(), messageText.boundingBox(), page.locator('.message-scroller').boundingBox()
+  ])
+  if (!bubbleBounds || !actionBounds || !textBounds || !scrollerBounds) {
+    throw new Error(`The ${owner} message action rail has missing geometry`)
+  }
+  const bubbleRight = bubbleBounds.x + bubbleBounds.width
+  const actionRight = actionBounds.x + actionBounds.width
+  const textRight = textBounds.x + textBounds.width
+  const textBottom = textBounds.y + textBounds.height
+  const actionBottom = actionBounds.y + actionBounds.height
+  if (owner === 'received') expect(actionBounds.x).toBeGreaterThanOrEqual(bubbleRight)
+  else expect(actionRight).toBeLessThanOrEqual(bubbleBounds.x)
+  expect(Math.abs(actionBounds.y - bubbleBounds.y)).toBeLessThanOrEqual(2)
+  expect(actionBounds.x < textRight && actionRight > textBounds.x
+    && actionBounds.y < textBottom && actionBottom > textBounds.y).toBe(false)
+  expect(actionBounds.x).toBeGreaterThanOrEqual(scrollerBounds.x - 1)
+  expect(actionRight).toBeLessThanOrEqual(scrollerBounds.x + scrollerBounds.width + 1)
+  expect(actionBounds.y).toBeGreaterThanOrEqual(scrollerBounds.y - 1)
+  expect(actionBottom).toBeLessThanOrEqual(scrollerBounds.y + scrollerBounds.height + 1)
+
+  const bridgeX = owner === 'received'
+    ? (bubbleRight + actionBounds.x) / 2
+    : (actionRight + bubbleBounds.x) / 2
+  await page.mouse.move(bridgeX, actionBounds.y + actionBounds.height / 2)
+  await expect(actions).toBeVisible()
+  await page.mouse.move(actionBounds.x + actionBounds.width / 2, actionBounds.y + actionBounds.height / 2)
+  await expect(actions).toBeVisible()
+}
+
 async function installViewTransitionProbe(): Promise<boolean> {
   return page.locator('html').evaluate((element: unknown) => {
     const document = (element as BrowserViewTransitionElement).ownerDocument
@@ -666,7 +702,8 @@ test('keeps chat and message motion meaningful under rapid updates and reduced m
 
   const outgoingMessage = {
     ...liveMessage, id: 'motion-local-outgoing', senderId: 'me', senderName: undefined, fromMe: true,
-    text: 'Meaningful local outgoing message', timestamp: liveMessage.timestamp + 100, status: 'queued'
+    text: 'Meaningful local outgoing message\nwith a second line for action placement',
+    timestamp: liveMessage.timestamp + 100, status: 'queued'
   }
   await emitCoreEvent({ type: 'message.changed', payload: { message: outgoingMessage } })
   const outgoingItem = page.locator('[data-message-id="motion-local-outgoing"]')
@@ -675,6 +712,43 @@ test('keeps chat and message motion meaningful under rapid updates and reduced m
     (element as BrowserStyledElement).ownerDocument.defaultView.getComputedStyle(element).animationName))
     .toContain('motion-message-in')
   await expect(outgoingItem).not.toHaveClass(/message-enter/, { timeout: 1_500 })
+
+  const incomingItem = page.locator('[data-message-id="motion-live-one"]')
+  await expect(page.locator('.conversation-panel.has-persistent-details')).toBeVisible()
+  await expect(page.locator('.persistent-contact-panel')).toBeVisible()
+  for (const density of ['comfortable', 'ultra-dense'] as const) {
+    await page.locator('html').evaluate((element: unknown, nextDensity: string) =>
+      (element as BrowserStyledElement).ownerDocument.defaultView.warish.settings.update({ density: nextDensity }), density)
+    await expect.poll(() => page.locator('html').getAttribute('data-density-mode')).toBe(density)
+    await expectMessageActionsBesideBubble(incomingItem, 'received')
+    await expectMessageActionsBesideBubble(outgoingItem, 'sent')
+  }
+  await page.locator('html').evaluate((element: unknown) =>
+    (element as BrowserStyledElement).ownerDocument.defaultView.warish.settings.update({ density: 'comfortable' }))
+  await expect.poll(() => page.locator('html').getAttribute('data-density-mode')).toBe('comfortable')
+
+  await incomingItem.locator('.message-bubble').hover()
+  const incomingMenuButton = incomingItem.locator('button[aria-label="More message actions"]')
+  const incomingMenuButtonBounds = await incomingMenuButton.boundingBox()
+  if (!incomingMenuButtonBounds) throw new Error('The received message menu trigger has missing geometry')
+  await incomingMenuButton.click()
+  const incomingMenu = page.locator('.ui-menu-popover').filter({
+    has: page.getByRole('menuitem', { name: 'Delete message' })
+  })
+  await expect(incomingMenu).toBeVisible()
+  await expectInsideViewport(incomingMenu)
+  const incomingMenuBounds = await incomingMenu.boundingBox()
+  if (!incomingMenuBounds) throw new Error('The received message menu has missing geometry')
+  expect(Math.abs(incomingMenuBounds.x - incomingMenuButtonBounds.x)).toBeLessThanOrEqual(3)
+  const typeToComposeComposer = page.getByRole('textbox', { name: 'Message' })
+  await expect(typeToComposeComposer).toHaveValue('')
+  await page.keyboard.type('x')
+  await expect(typeToComposeComposer).toHaveValue('')
+  await page.getByRole('menuitem', { name: 'Copy text' }).click()
+  await expect(incomingMenu).toBeHidden()
+  await page.keyboard.type('copied')
+  await expect(typeToComposeComposer).toHaveValue('copied')
+  await typeToComposeComposer.fill('')
 
   await outgoingItem.locator('.message-bubble').hover()
   const messageMenuButton = outgoingItem.locator('button[aria-label="More message actions"]')
@@ -766,6 +840,27 @@ test('keeps chat and message motion meaningful under rapid updates and reduced m
   await expect.poll(() => page.locator('html').getAttribute('data-surface-transition')).toBeNull()
   expect(await page.locator('html').evaluate((element: unknown) =>
     (element as BrowserStyledElement).ownerDocument.defaultView.matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(false)
+  await chatList.getByRole('button', { name: /Motion Chat 125/ }).click()
+  await expect(page.locator('.conversation-identity > span > strong')).toHaveText('Motion Chat 125')
+  await expect(outgoingItem).toBeVisible()
+  const composer = page.getByRole('textbox', { name: 'Message' })
+  await outgoingItem.locator('.message-text').click({ clickCount: 3 })
+  await page.keyboard.press('Control+C')
+  await page.keyboard.type('selection-first')
+  await expect(composer).toHaveValue('selection-first')
+  await composer.fill('')
+  await composer.evaluate((element: unknown) => { (element as { blur(): void }).blur() })
+  await scroller.hover()
+  await page.mouse.wheel(0, -240)
+  await page.keyboard.type('wheel-first')
+  await expect(composer).toHaveValue('wheel-first')
+  await composer.fill('')
+  await composer.fill('Composer focus regression')
+  await composer.press('Enter')
+  await expect(composer).toBeFocused()
+  await expect(composer).toHaveAttribute('aria-busy', 'false')
+  await page.keyboard.type('next')
+  await expect(composer).toHaveValue(/next$/)
   await page.getByRole('button', { name: 'Settings', exact: true }).click()
   const appearanceDialog = page.getByRole('dialog', { name: 'Appearance' })
   await expect(appearanceDialog).toBeVisible()

@@ -1,12 +1,15 @@
 import { execFile } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 
 const root = resolve(import.meta.dirname, '..')
+const require = createRequire(import.meta.url)
 
 if (process.platform === 'win32') {
-  const electronDirectory = join(root, 'node_modules', 'electron', 'dist')
-  const target = join(electronDirectory, 'electron.exe')
+  // Electron 43+ downloads its runtime lazily when the package is loaded.
+  // Resolving it here ensures the executable exists before rcedit opens it.
+  const target = require('electron')
   const editor = join(root, 'node_modules', 'electron-winstaller', 'vendor', 'rcedit.exe')
   const icon = join(root, 'build', 'icon.ico')
 

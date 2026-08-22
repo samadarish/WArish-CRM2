@@ -16,6 +16,10 @@ interface BrowserBoxElement {
   getBoundingClientRect(): { width: number; height: number }
 }
 
+interface BrowserSettingsElement {
+  ownerDocument: { defaultView: { warish: { settings: { update(patch: { density: string }): Promise<unknown> } } } }
+}
+
 interface BrowserAnimatedElement {
   getAnimations(): Array<{ playState: string }>
 }
@@ -591,6 +595,7 @@ test('keeps grouped replies and remote/downloaded media visually stable', async 
       VALUES ('group-first', 'primary', '${chatId}', '${chatId}', 'Media Review', 0, 'text', 'First grouped message with a deliberately long quoted preview', 1784390000000, 'read', 1),
              ('remote-media', 'primary', '${chatId}', '${chatId}', 'Media Review', 0, 'image', NULL, 1784390060000, 'read', 1),
              ('cached-media', 'primary', '${chatId}', '${chatId}', 'Media Review', 0, 'image', NULL, 1784390120000, 'read', 1),
+             ('outgoing-media', 'primary', '${chatId}', 'me', NULL, 1, 'image', NULL, 1784390660000, 'read', 1),
              ('later-single', 'primary', '${chatId}', '${chatId}', 'Media Review', 0, 'text', 'Standalone follow-up', 1784390600000, 'read', 1);
     INSERT INTO messages(id, account_id, chat_id, sender_id, sender_name, from_me, kind, text, timestamp, status,
       quoted_message_id, quoted_sender_name, quoted_from_me, quoted_kind, quoted_text, updated_at)
@@ -598,7 +603,8 @@ test('keeps grouped replies and remote/downloaded media visually stable', async 
         'group-first', 'Media Review', 0, 'text', 'First grouped message with a deliberately long quoted preview', 1);
     INSERT INTO attachments(id, message_id, kind, width, height, thumbnail_data_url, cache_token, download_state)
       VALUES ('attachment:remote-media', 'remote-media', 'image', 1200, 800, '${thumbnail}', NULL, 'remote'),
-             ('attachment:cached-media', 'cached-media', 'image', 1200, 800, '${thumbnail}', '${cachedToken}', 'ready');
+             ('attachment:cached-media', 'cached-media', 'image', 1200, 800, '${thumbnail}', '${cachedToken}', 'ready'),
+             ('attachment:outgoing-media', 'outgoing-media', 'image', 1200, 800, '${thumbnail}', '${cachedToken}', 'ready');
   `)
   database.close()
 
@@ -610,13 +616,14 @@ test('keeps grouped replies and remote/downloaded media visually stable', async 
   await page.locator('.chat-list').getByRole('button', { name: /Media Review/ }).click()
 
   const frames = page.locator('.media-frame')
-  await expect(frames).toHaveCount(2)
+  await expect(frames).toHaveCount(3)
   const sizes = await frames.evaluateAll((elements: unknown[]) => elements.map((element: unknown) => {
     const box = (element as BrowserBoxElement).getBoundingClientRect()
     return { width: Math.round(box.width), height: Math.round(box.height) }
   }))
-  expect(sizes).toHaveLength(2)
+  expect(sizes).toHaveLength(3)
   expect(sizes[0]).toEqual(sizes[1])
+  expect(sizes[1]).toEqual(sizes[2])
   for (const size of sizes) {
     expect(size.width).toBeGreaterThanOrEqual(280)
     expect(size.width).toBeLessThanOrEqual(320)
@@ -624,13 +631,14 @@ test('keeps grouped replies and remote/downloaded media visually stable', async 
   }
   await expect(page.getByRole('button', { name: 'Download Photo' })).toBeVisible()
   await expect(frames.nth(1).locator('.message-image')).toBeVisible()
+  await expect(page.locator('[data-message-id="outgoing-media"] .media-frame').getByRole('img', { name: 'Read' })).toBeVisible()
   await expect(page.locator('.message-item.group-first')).toHaveCount(1)
   await expect(page.locator('.message-item.group-middle')).toHaveCount(2)
   await expect(page.locator('.message-item.group-last')).toHaveCount(1)
-  await expect(page.locator('.message-item.group-single')).toHaveCount(1)
+  await expect(page.locator('.message-item.group-single')).toHaveCount(2)
   const groupedMiddleBox = await page.locator('.message-item.group-middle').last().locator('.message-bubble').boundingBox()
   const groupedLastBox = await page.locator('.message-item.group-last .message-bubble').boundingBox()
-  const standaloneBox = await page.locator('.message-item.group-single .message-bubble').boundingBox()
+  const standaloneBox = await page.locator('[data-message-id="later-single"] .message-bubble').boundingBox()
   if (!groupedMiddleBox || !groupedLastBox || !standaloneBox) {
     throw new Error('The grouped message spacing test has missing geometry')
   }
@@ -642,6 +650,53 @@ test('keeps grouped replies and remote/downloaded media visually stable', async 
   const quote = page.locator('.quoted-message')
   await expect(quote).toContainText('First grouped message with a deliberately long quoted preview')
   await expect(quote.locator('span')).toHaveCSS('white-space', 'nowrap')
+
+  const expectImageMetadataOverlayGeometry = async (): Promise<void> => {
+    for (let index = 0; index < await frames.count(); index += 1) {
+      const frame = frames.nth(index)
+      const bubble = frame.locator('..')
+      const metadata = frame.locator('.image-message-meta')
+      await expect(metadata).toBeVisible()
+      await expect(metadata).toHaveCSS('pointer-events', 'none')
+      await expect(bubble.locator(':scope > .message-meta')).toHaveCount(0)
+      const [frameBounds, bubbleBounds, metadataBounds] = await Promise.all([
+        frame.boundingBox(), bubble.boundingBox(), metadata.boundingBox()
+      ])
+      if (!frameBounds || !bubbleBounds || !metadataBounds) throw new Error('The image metadata overlay has missing geometry')
+      expect(metadataBounds.x).toBeGreaterThanOrEqual(frameBounds.x)
+      expect(metadataBounds.y).toBeGreaterThanOrEqual(frameBounds.y)
+      expect(metadataBounds.x + metadataBounds.width).toBeLessThanOrEqual(frameBounds.x + frameBounds.width + 1)
+      expect(metadataBounds.y + metadataBounds.height).toBeLessThanOrEqual(frameBounds.y + frameBounds.height + 1)
+      const metadataRightInset = frameBounds.x + frameBounds.width - (metadataBounds.x + metadataBounds.width)
+      const metadataBottomInset = frameBounds.y + frameBounds.height - (metadataBounds.y + metadataBounds.height)
+      expect(metadataRightInset).toBeGreaterThanOrEqual(4)
+      expect(metadataRightInset).toBeLessThanOrEqual(6)
+      expect(metadataBottomInset).toBeGreaterThanOrEqual(4)
+      expect(metadataBottomInset).toBeLessThanOrEqual(6)
+      const bubbleBottomGap = bubbleBounds.y + bubbleBounds.height - (frameBounds.y + frameBounds.height)
+      expect(bubbleBottomGap).toBeGreaterThanOrEqual(3)
+      expect(bubbleBottomGap).toBeLessThanOrEqual(5)
+      expect(bubbleBounds.height - frameBounds.height).toBeGreaterThanOrEqual(6)
+      expect(bubbleBounds.height - frameBounds.height).toBeLessThanOrEqual(10)
+      const downloadControl = frame.locator('.download-circle')
+      if (await downloadControl.count()) {
+        const downloadBounds = await downloadControl.boundingBox()
+        if (!downloadBounds) throw new Error('The image download control has missing geometry')
+        const separated = metadataBounds.x + metadataBounds.width <= downloadBounds.x
+          || downloadBounds.x + downloadBounds.width <= metadataBounds.x
+          || metadataBounds.y + metadataBounds.height <= downloadBounds.y
+          || downloadBounds.y + downloadBounds.height <= metadataBounds.y
+        expect(separated).toBe(true)
+      }
+    }
+  }
+
+  for (const density of ['comfortable', 'dense', 'ultra-dense'] as const) {
+    await page.locator('html').evaluate((element: unknown, nextDensity: string) =>
+      (element as BrowserSettingsElement).ownerDocument.defaultView.warish.settings.update({ density: nextDensity }), density)
+    await expect.poll(() => page.locator('html').getAttribute('data-density-mode')).toBe(density)
+    await expectImageMetadataOverlayGeometry()
+  }
 })
 
 test('stages, edits, and restores an ordered pasted-image album draft', async () => {

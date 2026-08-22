@@ -227,7 +227,7 @@ async function openMedia(userDataPath: string, token: unknown): Promise<void> {
 }
 
 function configureMediaProtocol(userDataPath: string): void {
-  protocol.handle('warish-media', (request) => {
+  protocol.handle('warish-media', async (request) => {
     const url = new URL(request.url)
     if (url.hostname !== 'cache' && url.hostname !== 'drafts' && url.hostname !== 'avatars') {
       return new Response('Not found', { status: 404 })
@@ -235,7 +235,7 @@ function configureMediaProtocol(userDataPath: string): void {
     const token = decodeURIComponent(url.pathname.slice(1))
     try {
       const directory = join(userDataPath, url.hostname === 'cache' ? 'media' : url.hostname)
-      return net.fetch(pathToFileURL(safeMediaPath(directory, token)).toString())
+      return await net.fetch(pathToFileURL(safeMediaPath(directory, token)).toString())
     } catch {
       return new Response('Not found', { status: 404 })
     }

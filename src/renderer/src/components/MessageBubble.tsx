@@ -72,10 +72,14 @@ export const MessageBubble = memo(function MessageBubble({ message, groupPositio
     setDialogReturnFocus(returnFocus)
     setDeleteOpen(true)
   } })
+  const overlayImageMeta = message.kind === 'image' && message.attachment?.kind === 'image'
+    && !message.text && !message.rich && !message.deleted
+  const bareImage = overlayImageMeta && !message.quotedMessageId && !(showSender && message.senderName)
 
   return (
     <article className={`message-row group-${groupPosition} ${message.fromMe ? 'mine' : ''} ${message.reactions.length ? 'has-reactions' : ''}`}>
-      <div className={`message-bubble kind-${message.kind}`} tabIndex={0} aria-label={`${message.fromMe ? 'Sent' : 'Received'} ${message.kind} message`}>
+      <div className={`message-bubble kind-${message.kind} ${overlayImageMeta ? 'image-meta-overlay' : ''} ${bareImage ? 'bare-image' : ''}`}
+        tabIndex={0} aria-label={`${message.fromMe ? 'Sent' : 'Received'} ${message.kind} message`}>
         {showSender && message.senderName && <div className="sender-name">{message.senderName}</div>}
         {message.quotedMessageId && <button className="quoted-message"
           aria-label={`${message.quoted?.fromMe ? 'You' : message.quoted?.senderName ?? 'Reply'}: ${message.quoted?.text ?? messageKindLabel(message.quoted?.kind)}`}
@@ -86,11 +90,12 @@ export const MessageBubble = memo(function MessageBubble({ message, groupPositio
         {message.deleted ? <em className="deleted-message">This message was deleted</em> : <>
           {message.rich && <RichMessageCard message={message} />}
           <Media message={message} url={media?.url} cacheToken={media?.token} downloading={downloading}
+            metadata={overlayImageMeta ? <MessageMeta message={message} overlay /> : undefined}
             onDownload={() => void download()} onCancel={() => void cancelDownload()} onResize={onResize} onError={onError}
             onBroken={() => { setMediaOverride({ sourceKey: mediaSourceKey }); onError(new Error('The cached media file is unavailable. Download it again.')) }} />
           {message.text && !message.rich && <p className="message-text">{linkifyMessageText(message.text)}</p>}
         </>}
-        <div className="message-meta">{message.edited && <span>edited</span>}<time>{format(message.timestamp, 'HH:mm')}</time>{message.fromMe && <DeliveryReceipt status={message.status} />}</div>
+        {!overlayImageMeta && <MessageMeta message={message} />}
         {!readOnly && message.status === 'failed' && onRetry && <button className="message-failed" onClick={() => onRetry(message.id)}><RefreshCw />Retry</button>}
         {message.reactions.length > 0 && <div className="reaction-pill">{message.reactions.map((reaction) => reaction.emoji).join(' ')}</div>}
         <div className="message-actions" data-focus-return-group data-focus-restoring={moreOpen || undefined}>
@@ -99,7 +104,7 @@ export const MessageBubble = memo(function MessageBubble({ message, groupPositio
           {readOnly && message.text && <Tooltip label="Copy text"><button aria-label="Copy message text" onClick={() => void copy()}><Copy /></button></Tooltip>}
           {readOnly && <Tooltip label="Forward"><button aria-label="Forward" onClick={() => onForward(message)}><Forward /></button></Tooltip>}
           {!readOnly && <div className="message-action-overflow"><DropdownMenu className="message-action-trigger"
-            label="More message actions" icon={<EllipsisVertical />} items={moreItems} placement="bottom end"
+            label="More message actions" icon={<EllipsisVertical />} items={moreItems} placement={message.fromMe ? 'bottom end' : 'bottom start'}
             isOpen={moreOpen} onOpenChange={setMoreOpen} /></div>}
         </div>
       </div>
@@ -178,8 +183,15 @@ function RichMessageCard({ message }: { message: MessageDto }): React.JSX.Elemen
   </section>
 }
 
-function Media({ message, url, cacheToken, downloading, onDownload, onCancel, onResize, onError, onBroken }: {
-  message: MessageDto; url?: string; cacheToken?: string; downloading: boolean; onDownload(): void; onCancel(): void; onResize(): void; onError(error: unknown): void; onBroken(): void
+function MessageMeta({ message, overlay = false }: { message: MessageDto; overlay?: boolean }): React.JSX.Element {
+  return <div className={`message-meta ${overlay ? 'image-message-meta' : ''}`.trim()}>
+    {message.edited && <span>edited</span>}<time>{format(message.timestamp, 'HH:mm')}</time>
+    {message.fromMe && <DeliveryReceipt status={message.status} />}
+  </div>
+}
+
+function Media({ message, url, cacheToken, downloading, metadata, onDownload, onCancel, onResize, onError, onBroken }: {
+  message: MessageDto; url?: string; cacheToken?: string; downloading: boolean; metadata?: ReactNode; onDownload(): void; onCancel(): void; onResize(): void; onError(error: unknown): void; onBroken(): void
 }): React.JSX.Element | null {
   const attachment = message.attachment
   const thumbnailSourceKey = `${attachment?.messageId ?? message.id}\u0000${attachment?.thumbnailDataUrl ?? ''}`
@@ -220,6 +232,7 @@ function Media({ message, url, cacheToken, downloading, onDownload, onCancel, on
           : <button className="media-download" aria-label={downloading ? `Cancel ${label} download` : `Download ${label}`} onClick={downloading ? onCancel : onDownload}>
             <span className="download-circle">{downloading ? <X /> : <Download />}</span>
           </button>}
+      {metadata}
     </div>
   }
   return <button className="document-card" onClick={downloading ? onCancel : onDownload}>
